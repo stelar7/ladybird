@@ -587,7 +587,7 @@ Vector<RuleOrListOfDeclarations> Parser::consume_a_block(TokenStream<T>& input)
 
 // https://drafts.csswg.org/css-syntax/#consume-block-contents
 template<typename T>
-Vector<RuleOrListOfDeclarations> Parser::consume_a_blocks_contents(TokenStream<T>& input)
+Vector<RuleOrListOfDeclarations> Parser::consume_a_blocks_contents(TokenStream<T>& input, bool is_style_attribute)
 {
     // To consume a block’s contents from a token stream input:
 
@@ -611,7 +611,8 @@ Vector<RuleOrListOfDeclarations> Parser::consume_a_blocks_contents(TokenStream<T
 
         // <EOF-token>
         // <}-token>
-        if (token.is(Token::Type::EndOfFile) || token.is(Token::Type::CloseCurly)) {
+        // NOTE: Spec issue; The } token is invalid in a style-attribute context.
+        if (token.is(Token::Type::EndOfFile) || (token.is(Token::Type::CloseCurly) && !is_style_attribute)) {
             // AD-HOC: If decls is not empty, append it to rules.
             // Spec issue: https://github.com/w3c/csswg-drafts/issues/11017
             if (!declarations.is_empty())
@@ -654,7 +655,8 @@ Vector<RuleOrListOfDeclarations> Parser::consume_a_blocks_contents(TokenStream<T
                 input.restore_a_mark();
                 consume_a_qualified_rule(input, Token::Type::Semicolon, Nested::Yes).visit(
                     // -> If nothing was returned
-                    [](Empty&) {
+                    [&](Empty&) {
+                        input.discard_a_token();
                         // Do nothing
                     },
                     // -> If an invalid rule error was returned
@@ -1071,7 +1073,7 @@ Optional<Rule> Parser::parse_a_rule(TokenStream<T>& input)
 
 // https://drafts.csswg.org/css-syntax/#parse-block-contents
 template<typename T>
-Vector<RuleOrListOfDeclarations> Parser::parse_a_blocks_contents(TokenStream<T>& input)
+Vector<RuleOrListOfDeclarations> Parser::parse_a_blocks_contents(TokenStream<T>& input, bool is_style_attribute)
 {
     // To parse a block’s contents from input:
 
@@ -1079,7 +1081,7 @@ Vector<RuleOrListOfDeclarations> Parser::parse_a_blocks_contents(TokenStream<T>&
     // NOTE: Done by constructing the Parser.
 
     // 2. Consume a block’s contents from input, and return the result.
-    return consume_a_blocks_contents(input);
+    return consume_a_blocks_contents(input, is_style_attribute);
 }
 
 Optional<StyleProperty> Parser::parse_as_supports_condition()
@@ -1187,7 +1189,7 @@ template Vector<Vector<ComponentValue>> Parser::parse_a_comma_separated_list_of_
 
 ElementInlineCSSStyleDeclaration* Parser::parse_as_style_attribute(DOM::Element& element)
 {
-    auto declarations_and_at_rules = parse_a_blocks_contents(m_token_stream);
+    auto declarations_and_at_rules = parse_a_blocks_contents(m_token_stream, true);
     auto [properties, custom_properties] = extract_properties(declarations_and_at_rules);
     return ElementInlineCSSStyleDeclaration::create(element, move(properties), move(custom_properties));
 }

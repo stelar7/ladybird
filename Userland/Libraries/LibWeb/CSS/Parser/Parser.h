@@ -99,7 +99,7 @@ private:
     // "Parse a block’s contents" is intended for parsing the contents of any block in CSS (including things like the style attribute),
     // and APIs such as the CSSStyleDeclaration cssText attribute.
     template<typename T>
-    Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(TokenStream<T>&);
+    Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(TokenStream<T>&, bool is_style_attribute = false);
 
     // "Parse a rule" is intended for use by the CSSStyleSheet#insertRule method, and similar functions which might exist, which parse text into a single rule.
     template<typename T>
@@ -149,7 +149,7 @@ private:
     template<typename T>
     Vector<RuleOrListOfDeclarations> consume_a_block(TokenStream<T>&);
     template<typename T>
-    Vector<RuleOrListOfDeclarations> consume_a_blocks_contents(TokenStream<T>&);
+    Vector<RuleOrListOfDeclarations> consume_a_blocks_contents(TokenStream<T>&, bool is_style_attribute = false);
     template<typename T>
     Optional<Declaration> consume_a_declaration(TokenStream<T>&, Nested = Nested::No);
     template<typename T>
