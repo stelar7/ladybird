@@ -8,6 +8,7 @@
 
 #include <LibJS/Heap/Heap.h>
 #include <LibWeb/Bindings/PlatformObject.h>
+#include <LibWeb/IndexedDB/IDBRequest.h>
 
 namespace Web::IndexedDB {
 
@@ -18,10 +19,13 @@ class IDBCursor : public Bindings::PlatformObject {
 
 public:
     virtual ~IDBCursor() override;
+
     [[nodiscard]] static JS::NonnullGCPtr<IDBCursor> create(JS::Realm&);
 
 protected:
     explicit IDBCursor(JS::Realm&);
+
     virtual void initialize(JS::Realm&) override;
 };
+
 }

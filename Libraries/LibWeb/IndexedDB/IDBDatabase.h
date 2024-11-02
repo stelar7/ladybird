@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <AK/HashMap.h>
 #include <LibJS/Heap/GCPtr.h>
 #include <LibWeb/DOM/EventTarget.h>
 #include <LibWeb/HTML/DOMStringList.h>
@@ -43,7 +44,16 @@ public:
     [[nodiscard]] u64 version() const { return m_version; }
     [[nodiscard]] bool close_pending() const { return m_close_pending; }
     [[nodiscard]] ConnectionState state() const { return m_state; }
-    [[nodiscard]] JS::NonnullGCPtr<Database> associated_database() { return m_associated_database; }
+    [[nodiscard]] JS::GCPtr<Database> associated_database() { return m_associated_database; }
+
+    void disassociate()
+    {
+        if (m_associated_database) {
+            dbgln("disassociated");
+            m_associated_database->disassociate(*this);
+            m_associated_database = nullptr;
+        }
+    }
 
     // https://w3c.github.io/IndexedDB/#dom-idbdatabase-close
     void close()
@@ -79,7 +89,7 @@ private:
 
     // NOTE: There is an associated database in the spec, but there is no mention where it is assigned, nor where its from
     //       So we stash the one we have when opening a connection.
-    JS::NonnullGCPtr<Database> m_associated_database;
+    JS::GCPtr<Database> m_associated_database;
 };
 
 }

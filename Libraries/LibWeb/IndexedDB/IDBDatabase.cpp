@@ -8,6 +8,7 @@
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/HTML/EventNames.h>
 #include <LibWeb/IndexedDB/IDBDatabase.h>
+#include <LibWeb/IndexedDB/Internal/Database.h>
 
 namespace Web::IndexedDB {
 
@@ -22,7 +23,10 @@ IDBDatabase::IDBDatabase(JS::Realm& realm, Database& db)
     db.associate(*this);
 }
 
-IDBDatabase::~IDBDatabase() = default;
+IDBDatabase::~IDBDatabase()
+{
+    disassociate();
+}
 
 JS::NonnullGCPtr<IDBDatabase> IDBDatabase::create(JS::Realm& realm, Database& db)
 {

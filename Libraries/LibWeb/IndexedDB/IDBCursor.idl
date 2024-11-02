@@ -7,6 +7,7 @@ interface IDBCursor {
     [FIXME] readonly attribute any key;
     [FIXME] readonly attribute any primaryKey;
     [FIXME, SameObject] readonly attribute IDBRequest request;
+
     [FIXME] undefined advance([EnforceRange] unsigned long count);
     [FIXME] undefined continue(optional any key);
     [FIXME] undefined continuePrimaryKey(any key, any primaryKey);

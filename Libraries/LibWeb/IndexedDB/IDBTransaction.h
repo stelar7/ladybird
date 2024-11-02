@@ -30,16 +30,22 @@ class IDBTransaction : public DOM::EventTarget {
 public:
     virtual ~IDBTransaction() override;
 
-    [[nodiscard]] static JS::NonnullGCPtr<IDBTransaction> create(JS::Realm&, JS::NonnullGCPtr<IDBDatabase>);
+    [[nodiscard]] static JS::NonnullGCPtr<IDBTransaction> create(JS::Realm&, JS::NonnullGCPtr<IDBDatabase>, JS::NonnullGCPtr<IDBRequest>);
+
     [[nodiscard]] Bindings::IDBTransactionMode mode() const { return m_mode; }
     [[nodiscard]] TransactionState state() const { return m_state; }
     [[nodiscard]] JS::GCPtr<WebIDL::DOMException> error() const { return m_error; }
     [[nodiscard]] JS::NonnullGCPtr<IDBDatabase> connection() const { return m_connection; }
     [[nodiscard]] Bindings::IDBTransactionDurability durability() const { return m_durability; }
+    [[nodiscard]] JS::GCPtr<IDBRequest> associated_request() const { return m_associated_request; }
+    [[nodiscard]] bool was_aborted() const { return m_was_aborted; }
 
     void set_mode(Bindings::IDBTransactionMode mode) { m_mode = mode; }
     void set_state(TransactionState state) { m_state = state; }
     void set_error(JS::GCPtr<WebIDL::DOMException> error) { m_error = error; }
+    void set_aborted(bool aborted) { m_was_aborted = aborted; }
+
+    WebIDL::ExceptionOr<void> abort();
 
     [[nodiscard]] bool is_upgrade_transaction() const { return m_mode == Bindings::IDBTransactionMode::Versionchange; }
     [[nodiscard]] bool is_readonly() const { return m_mode == Bindings::IDBTransactionMode::Readonly; }
@@ -53,12 +59,10 @@ public:
     WebIDL::CallbackType* onerror();
 
 protected:
-    explicit IDBTransaction(JS::Realm&, JS::NonnullGCPtr<IDBDatabase>);
+    explicit IDBTransaction(JS::Realm&, JS::NonnullGCPtr<IDBDatabase>, JS::NonnullGCPtr<IDBRequest>);
+
     virtual void initialize(JS::Realm&) override;
-<<<<<<< HEAD:Libraries/LibWeb/IndexedDB/IDBTransaction.h
     virtual void visit_edges(Visitor& visitor) override;
-=======
->>>>>>> d0d0351d2f (LibWeb: Add IDBTransaction):Userland/Libraries/LibWeb/IndexedDB/IDBTransaction.h
 
 private:
     JS::NonnullGCPtr<IDBDatabase> m_connection;
@@ -66,5 +70,9 @@ private:
     Bindings::IDBTransactionDurability m_durability { Bindings::IDBTransactionDurability::Default };
     TransactionState m_state;
     JS::GCPtr<WebIDL::DOMException> m_error;
+
+    JS::GCPtr<IDBRequest> m_associated_request;
+    bool m_was_aborted { false };
 };
+
 }

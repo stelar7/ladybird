@@ -102,6 +102,11 @@ public:
         return move(m_result_or_exception.template get<ValueType>());
     }
 
+    ValueType release_value() const
+    {
+        return move(m_result_or_exception.template get<ValueType>());
+    }
+
     Exception exception() const
     {
         return m_result_or_exception.template downcast<SimpleException, JS::NonnullGCPtr<DOMException>, JS::Completion>();

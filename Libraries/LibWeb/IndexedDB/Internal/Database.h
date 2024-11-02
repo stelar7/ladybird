@@ -11,6 +11,7 @@
 #include <LibWeb/DOM/EventTarget.h>
 #include <LibWeb/IndexedDB/IDBDatabase.h>
 #include <LibWeb/IndexedDB/IDBRequest.h>
+#include <LibWeb/IndexedDB/IDBTransaction.h>
 #include <LibWeb/StorageAPI/StorageKey.h>
 
 namespace Web::IndexedDB {
@@ -24,11 +25,23 @@ public:
     void set_version(u64 version) { m_version = version; }
     u64 version() const { return m_version; }
     String name() const { return m_name; }
+    JS::GCPtr<IDBTransaction> upgrade_transaction() { return m_upgrade_transaction; }
 
     void set_upgrade_transaction(JS::GCPtr<IDBTransaction> transaction) { m_upgrade_transaction = transaction; }
 
-    void associate(JS::NonnullGCPtr<IDBDatabase> connection) { m_associated_connections.append(connection); }
-    ReadonlySpan<JS::NonnullGCPtr<IDBDatabase>> associated_connections() { return m_associated_connections; }
+    void disassociate(JS::NonnullGCPtr<IDBDatabase> connection)
+    {
+        dbgln("disassociated");
+        auto did_remove = m_associated_connections.remove_first_matching([&connection](auto& associated_connection) { return associated_connection == connection; });
+        if (!did_remove)
+            dbgln("failed to disassociate");
+    }
+    void associate(JS::NonnullGCPtr<IDBDatabase> connection)
+    {
+        dbgln("associated");
+        m_associated_connections.append(connection);
+    }
+    ReadonlySpan<JS::GCPtr<IDBDatabase>> associated_connections() { return m_associated_connections; }
     Vector<JS::Handle<IDBDatabase>> associated_connections_except(IDBDatabase& connection)
     {
         Vector<JS::Handle<IDBDatabase>> connections;
@@ -58,7 +71,7 @@ protected:
     virtual void visit_edges(Visitor&) override;
 
 private:
-    Vector<JS::NonnullGCPtr<IDBDatabase>> m_associated_connections;
+    Vector<JS::GCPtr<IDBDatabase>> m_associated_connections;
 
     // FIXME: A database has zero or more object stores which hold the data stored in the database.
 

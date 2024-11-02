@@ -8,6 +8,7 @@
 
 #include <LibJS/Heap/Heap.h>
 #include <LibWeb/Bindings/PlatformObject.h>
+#include <LibWeb/IndexedDB/IDBRequest.h>
 
 namespace Web::IndexedDB {
 
@@ -18,10 +19,12 @@ class IDBObjectStore : public Bindings::PlatformObject {
 
 public:
     virtual ~IDBObjectStore() override;
+
     [[nodiscard]] static JS::NonnullGCPtr<IDBObjectStore> create(JS::Realm&);
 
 protected:
     explicit IDBObjectStore(JS::Realm&);
+
     virtual void initialize(JS::Realm&) override;
 };
 

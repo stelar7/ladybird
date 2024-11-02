@@ -93,4 +93,48 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<IDBOpenDBRequest>> IDBFactory::open(String 
     return request;
 }
 
+JS::ThrowCompletionOr<JS::NonnullGCPtr<IDBOpenDBRequest>> IDBFactory::delete_database(String const& name)
+{
+    auto& realm = this->realm();
+
+    // 1. Let environment be this's relevant settings object.
+    auto& environment = HTML::relevant_settings_object(*this);
+
+    // 2. Let storageKey be the result of running obtain a storage key given environment.
+    //    If failure is returned, then throw a "SecurityError" DOMException and abort these steps.
+    auto storage_key = StorageAPI::obtain_a_storage_key(environment);
+    if (!storage_key.has_value())
+        return realm.vm().throw_completion<WebIDL::SecurityError>("Failed to obtain a storage key"_string);
+
+    // 3. Let request be a new open request.
+    auto request = IDBOpenDBRequest::create(realm);
+
+    // 4. Run these steps in parallel:
+    Platform::EventLoopPlugin::the().deferred_invoke(JS::create_heap_function(realm.heap(), [&realm, storage_key, name, request] {
+        // 1. Let result be the result of deleting a database, with storageKey, name, and request.
+        auto result = delete_a_database(realm, storage_key.value(), name, request);
+
+        // 2. Set request’s processed flag to true.
+        request->set_processed(true);
+
+        // 3. Queue a task to run these steps:
+        HTML::queue_a_task(HTML::Task::Source::DatabaseAccess, nullptr, nullptr, JS::create_heap_function(realm.heap(), [&realm, &request, result]() {
+            // 1. If result is an error, set request’s error to result, set request’s done flag to true,
+            //    and fire an event named error at request with its bubbles and cancelable attributes initialized to true.
+            if (result.is_error()) {
+                request->set_error(result.exception().get<JS::NonnullGCPtr<WebIDL::DOMException>>());
+                request->set_done(true);
+                request->dispatch_event(DOM::Event::create(realm, HTML::EventNames::error, { .bubbles = true, .cancelable = true }));
+            } else {
+                // 2. Otherwise, set request’s result to undefined, set request’s done flag to true, and fire a version change event named success at request with result and null.
+                request->set_result(JS::js_undefined());
+                request->set_done(true);
+                fire_a_version_change_event(realm, HTML::EventNames::success, *request, result.release_value(), {});
+            }
+        }));
+    }));
+
+    // 5. Return a new IDBOpenDBRequest object for request.
+    return request;
+}
 }

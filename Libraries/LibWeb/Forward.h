@@ -566,6 +566,7 @@ class Performance;
 }
 
 namespace Web::IndexedDB {
+class ConnectionQueueHandler;
 class Database;
 class IDBCursor;
 class IDBDatabase;

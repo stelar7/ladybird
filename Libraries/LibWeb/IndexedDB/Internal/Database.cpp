@@ -24,8 +24,8 @@ JS::NonnullGCPtr<Database> Database::create(JS::Realm& realm, String const& name
 void Database::visit_edges(Visitor& visitor)
 {
     Base::visit_edges(visitor);
-    visitor.visit(m_associated_connections);
     visitor.visit(m_upgrade_transaction);
+    visitor.visit(m_associated_connections);
 }
 
 ConnectionQueue& ConnectionQueueHandler::for_key_and_name(StorageAPI::StorageKey& key, String& name)

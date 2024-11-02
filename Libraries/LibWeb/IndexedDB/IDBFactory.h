@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <LibJS/Heap/GCPtr.h>
 #include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/IndexedDB/IDBOpenDBRequest.h>
 
@@ -21,6 +22,7 @@ public:
     virtual ~IDBFactory() override;
 
     WebIDL::ExceptionOr<JS::NonnullGCPtr<IDBOpenDBRequest>> open(String const& name, Optional<u64> version);
+    JS::ThrowCompletionOr<JS::NonnullGCPtr<IDBOpenDBRequest>> delete_database(String const& name);
 
 protected:
     explicit IDBFactory(JS::Realm&);

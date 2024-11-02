@@ -8,8 +8,11 @@
 
 #pragma once
 
+#include <LibJS/Heap/GCPtr.h>
 #include <LibWeb/Bindings/IDBRequestPrototype.h>
 #include <LibWeb/DOM/EventTarget.h>
+#include <LibWeb/IndexedDB/IDBObjectStore.h>
+#include <LibWeb/IndexedDB/IDBRequest.h>
 #include <LibWeb/IndexedDB/IDBTransaction.h>
 
 namespace Web::IndexedDB {
@@ -38,7 +41,7 @@ public:
     void set_error(JS::GCPtr<WebIDL::DOMException> error) { m_error = error; }
     void set_processed(bool processed) { m_processed = processed; }
     void set_source(IDBRequestSource source) { m_source = source; }
-    void set_transaction(JS::NonnullGCPtr<IDBTransaction> transaction) { m_transaction = transaction; }
+    void set_transaction(JS::GCPtr<IDBTransaction> transaction) { m_transaction = transaction; }
 
     void set_onsuccess(WebIDL::CallbackType*);
     WebIDL::CallbackType* onsuccess();

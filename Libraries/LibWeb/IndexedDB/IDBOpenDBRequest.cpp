@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2024, Shannon Booth <shannon@serenityos.org>
  * Copyright (c) 2024, Jamie Mansfield <jmansfield@cadixdev.org>
+ * Copyright (c) 2024, stelar7 <dudedbz@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -21,15 +22,15 @@ IDBOpenDBRequest::IDBOpenDBRequest(JS::Realm& realm)
 {
 }
 
+JS::NonnullGCPtr<IDBOpenDBRequest> IDBOpenDBRequest::create(JS::Realm& realm)
+{
+    return realm.heap().allocate<IDBOpenDBRequest>(realm, realm);
+}
+
 void IDBOpenDBRequest::initialize(JS::Realm& realm)
 {
     Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(IDBOpenDBRequest);
-}
-
-JS::NonnullGCPtr<IDBOpenDBRequest> IDBOpenDBRequest::create(JS::Realm& realm)
-{
-    return realm.heap().allocate<IDBOpenDBRequest>(realm, realm);
 }
 
 // https://w3c.github.io/IndexedDB/#dom-idbopendbrequest-onblocked

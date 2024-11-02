@@ -8,6 +8,7 @@
 
 #include <AK/HashMap.h>
 #include <LibJS/Heap/Handle.h>
+#include <LibJS/Heap/GCPtr.h>
 #include <LibWeb/DOM/EventTarget.h>
 #include <LibWeb/IndexedDB/IDBRequest.h>
 #include <LibWeb/StorageAPI/StorageKey.h>
