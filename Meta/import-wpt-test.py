@@ -10,11 +10,14 @@ from urllib.request import urlopen
 from collections import namedtuple
 
 wpt_base_url = 'https://wpt.live/'
-wpt_import_path = 'Tests/LibWeb/Text/input/wpt-import'
-wpt_expected_path = 'Tests/LibWeb/Text/expected/wpt-import'
+wpt_text_import_path = 'Tests/LibWeb/Text/input/wpt-import'
+wpt_text_expected_path = 'Tests/LibWeb/Text/expected/wpt-import'
+wpt_ref_import_path = 'Tests/LibWeb/Ref/wpt-import'
+wpt_ref_expected_path = 'Tests/LibWeb/Ref/reference/wpt-import'
 PathMapping = namedtuple('PathMapping', ['source', 'destination'])
 
 src_values = []
+ref_values = []
 
 
 class ScriptSrcValueFinder(HTMLParser):
@@ -26,7 +29,16 @@ class ScriptSrcValueFinder(HTMLParser):
                 src_values.append(attr_dict["src"])
 
 
-def map_to_path(sources, is_resource=True, resource_path=None):
+class LinkRelMatchFinder(HTMLParser):
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "link":
+            attr_dict = dict(attrs)
+            if "rel" in attr_dict and attr_dict["rel"] == "match":
+                ref_values.append(attr_dict["href"])
+
+
+def map_to_path(sources, is_resource=True, resource_path=None, wpt_import_path=wpt_text_import_path):
     if is_resource:
         # Add it as a sibling path if it's a relative resource
         sibling_location = Path(resource_path).parent.__str__()
@@ -57,20 +69,42 @@ def map_to_path(sources, is_resource=True, resource_path=None):
 
 def modify_sources(files):
     for file in files:
-        # Get the distance to the wpt-imports folder
-        folder_index = str(file).find(wpt_import_path)
-        non_prefixed_path = str(file)[folder_index + len(wpt_import_path):]
-        parent_folder_count = len(Path(non_prefixed_path).parent.parts) - 1
-        parent_folder_path = '../' * parent_folder_count
-
         with open(file, 'r') as f:
             page_source = f.read()
+
+        # Get the distance to the wpt-imports folder
+        folder_index = str(file).find(wpt_text_import_path)
+        non_prefixed_path = str(file)[folder_index + len(wpt_text_import_path):]
+        parent_folder_count = len(Path(non_prefixed_path).parent.parts) - 1
+        parent_folder_path = '../' * parent_folder_count
 
         # Iterate all scripts and overwrite the src attribute
         for i, src_value in enumerate(src_values):
             if src_value.startswith('/'):
                 new_src_value = parent_folder_path + src_value[1::]
                 page_source = page_source.replace(src_value, new_src_value)
+                with open(file, 'w') as f:
+                    f.write(str(page_source))
+
+        # Get the distance to the wpt-imports folder for ref tests
+        folder_index = str(file).find(wpt_ref_import_path)
+        non_prefixed_path = str(file)[folder_index + len(wpt_ref_import_path):]
+        parent_folder_count = len(Path(non_prefixed_path).parent.parts)
+        parent_folder_path = '../' * parent_folder_count
+        parent_ref_folder_path = parent_folder_path + 'reference/wpt-import'
+        parent_path = str(Path(non_prefixed_path).parent)
+
+        # Iterate all links and overwrite the href attribute
+        for i, ref_value in enumerate(ref_values):
+            if ref_value.startswith('/'):
+                new_ref_value = parent_folder_path + ref_value[1::]
+                page_source = page_source.replace(ref_value, new_ref_value)
+                with open(file, 'w') as f:
+                    f.write(str(page_source))
+            else:
+                basename = str(Path(ref_value).name)
+                new_ref_value = parent_ref_folder_path + parent_path + '/' + basename
+                page_source = page_source.replace(ref_value, new_ref_value)
                 with open(file, 'w') as f:
                     f.write(str(page_source))
 
@@ -105,7 +139,7 @@ def download_files(filepaths):
 
 def create_expectation_files(files):
     for file in files:
-        new_path = str(file.destination).replace(wpt_import_path, wpt_expected_path)
+        new_path = str(file.destination).replace(wpt_text_import_path, wpt_text_expected_path)
         new_path = new_path.rsplit(".", 1)[0] + '.txt'
 
         expected_file = Path(new_path)
@@ -125,20 +159,30 @@ def main():
     url_to_import = sys.argv[1]
     resource_path = '/'.join(Path(url_to_import).parts[2::])
 
-    main_file = [resource_path]
-    main_paths = map_to_path(main_file, False)
-    files_to_modify = download_files(main_paths)
-    create_expectation_files(main_paths)
-
     with urlopen(url_to_import) as response:
         page = response.read().decode("utf-8")
 
     parser = ScriptSrcValueFinder()
     parser.feed(page)
 
+    parser = LinkRelMatchFinder()
+    parser.feed(page)
+
+    wpt_import_path = wpt_text_import_path if len(ref_values) == 0 else wpt_ref_import_path
+
+    main_file = [resource_path]
+    main_paths = map_to_path(main_file, False, None, wpt_import_path)
+    files_to_modify = download_files(main_paths)
+
     modify_sources(files_to_modify)
     script_paths = map_to_path(src_values, True, resource_path)
     download_files(script_paths)
+
+    if len(ref_values) == 0:
+        create_expectation_files(main_paths)
+    else:
+        ref_paths = map_to_path(ref_values, True, resource_path, wpt_ref_expected_path)
+        download_files(ref_paths)
 
 
 if __name__ == "__main__":
