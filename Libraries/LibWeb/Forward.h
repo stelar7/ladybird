@@ -568,8 +568,8 @@ class Performance;
 namespace Web::IndexedDB {
 class Database;
 class IDBCursor;
-class IDBDatabase;
 class IDBFactory;
+class IDBDatabase;
 class IDBIndex;
 class IDBKeyRange;
 class IDBObjectStore;
