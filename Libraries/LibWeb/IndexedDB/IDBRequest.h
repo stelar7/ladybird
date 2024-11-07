@@ -33,8 +33,6 @@ public:
     [[nodiscard]] WebIDL::ExceptionOr<JS::GCPtr<WebIDL::DOMException>> error() const;
     [[nodiscard]] WebIDL::ExceptionOr<JS::Value> result() const;
 
-    [[nodiscard]] Bindings::IDBRequestReadyState ready_state() const;
-
     void set_done(bool done) { m_done = done; }
     void set_result(JS::Value result) { m_result = result; }
     void set_error(JS::GCPtr<WebIDL::DOMException> error) { m_error = error; }
