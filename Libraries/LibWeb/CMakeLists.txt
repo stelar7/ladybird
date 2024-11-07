@@ -509,6 +509,7 @@ set(SOURCES
     IndexedDB/Internal/Key.cpp
     IndexedDB/IDBDatabase.cpp
     IndexedDB/IDBFactory.cpp
+    IndexedDB/IDBKeyRange.cpp
     IndexedDB/IDBOpenDBRequest.cpp
     IndexedDB/IDBRequest.cpp
     IndexedDB/IDBVersionChangeEvent.cpp

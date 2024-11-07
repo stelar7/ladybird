@@ -4,20 +4,51 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibJS/Runtime/Array.h>
+#include <LibJS/Runtime/ArrayBuffer.h>
+#include <LibJS/Runtime/Date.h>
+#include <LibJS/Runtime/PrimitiveString.h>
+#include <LibJS/Runtime/Realm.h>
+#include <LibJS/Runtime/Value.h>
 #include <LibWeb/IndexedDB/Internal/Key.h>
 #include <LibWeb/Infra/ByteSequences.h>
 #include <LibWeb/Infra/Strings.h>
 
 namespace Web::IndexedDB {
 
+JS_DEFINE_ALLOCATOR(Key);
+
+JS::NonnullGCPtr<Key> Key::create(JS::Realm& realm, KeyType type, KeyValue value)
+{
+    return realm.heap().allocate<Key>(realm, realm, type, value);
+}
+
+void Key::initialize(JS::Realm& realm)
+{
+    Base::initialize(realm);
+}
+
+void Key::visit_edges(Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+
+    visitor.visit(cached_js_value);
+
+    if (m_type == KeyType::Array) {
+        auto& array = m_value.get<Vector<JS::Handle<Key>>>();
+        for (auto& key : array)
+            visitor.visit(*key);
+    }
+}
+
 // https://w3c.github.io/IndexedDB/#compare-two-keys
-i8 Key::compare_two_keys(Key a, Key b)
+i8 Key::compare_two_keys(JS::NonnullGCPtr<Key> a, JS::NonnullGCPtr<Key> b)
 {
     // 1. Let ta be the type of a.
-    auto ta = a.type();
+    auto ta = a->type();
 
     // 2. Let tb be the type of b.
-    auto tb = b.type();
+    auto tb = b->type();
 
     // 3. If ta does not equal tb, then run these steps:
     if (ta != tb) {
@@ -57,10 +88,10 @@ i8 Key::compare_two_keys(Key a, Key b)
     }
 
     // 4. Let va be the value of a.
-    auto va = a.value();
+    auto va = a->value();
 
     // 5. Let vb be the value of b.
-    auto vb = b.value();
+    auto vb = b->value();
 
     // 6. Switch on ta:
     switch (ta) {
@@ -116,8 +147,8 @@ i8 Key::compare_two_keys(Key a, Key b)
     }
     // array
     case KeyType::Array: {
-        auto a_value = va.get<Vector<Key>>();
-        auto b_value = vb.get<Vector<Key>>();
+        auto a_value = va.get<Vector<JS::Handle<Key>>>();
+        auto b_value = vb.get<Vector<JS::Handle<Key>>>();
 
         // 1. Let length be the lesser of va’s size and vb’s size.
         auto length = min(a_value.size(), b_value.size());
@@ -128,7 +159,7 @@ i8 Key::compare_two_keys(Key a, Key b)
         // 3. While i is less than length, then:
         while (i < length) {
             // 1. Let c be the result of recursively comparing two keys with va[i] and vb[i].
-            auto c = compare_two_keys(a_value[i], b_value[i]);
+            auto c = compare_two_keys(*a_value[i], *b_value[i]);
 
             // 2. If c is not 0, return c.
             if (c != 0)
@@ -148,6 +179,30 @@ i8 Key::compare_two_keys(Key a, Key b)
 
         // 6. Return 0.
         return 0;
+    }
+    }
+
+    VERIFY_NOT_REACHED();
+}
+
+JS::Value Key::as_js_value(JS::Realm& realm)
+{
+    switch (m_type) {
+    case Number:
+        return JS::Value(m_value.get<double>());
+    case Date:
+        return JS::Date::create(realm, m_value.get<double>());
+    case String:
+        return JS::Value(JS::PrimitiveString::create(realm.vm(), m_value.get<AK::String>()));
+    case Binary:
+        return JS::Value(JS::ArrayBuffer::create(realm, m_value.get<ByteBuffer>()));
+    case Array: {
+        auto& values = m_value.get<Vector<JS::Handle<Key>>>();
+        Vector<JS::Value> values_js;
+        values_js.ensure_capacity(values.size());
+        for (size_t i = 0; i < values.size(); ++i)
+            values_js.append(values[i]->as_js_value(realm));
+        return JS::Value(JS::Array::create_from(realm, values_js));
     }
     }
 

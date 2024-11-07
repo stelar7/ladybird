@@ -198,6 +198,7 @@ Headers
 History
 IDBDatabase
 IDBFactory
+IDBKeyRange
 IDBOpenDBRequest
 IDBRequest
 IDBVersionChangeEvent

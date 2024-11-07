@@ -569,6 +569,7 @@ namespace Web::IndexedDB {
 class Database;
 class IDBFactory;
 class IDBDatabase;
+class IDBKeyRange;
 class IDBOpenDBRequest;
 class IDBRequest;
 class IDBVersionChangeEvent;

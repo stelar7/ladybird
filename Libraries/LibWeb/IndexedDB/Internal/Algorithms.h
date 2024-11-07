@@ -15,6 +15,6 @@ namespace Web::IndexedDB {
 
 WebIDL::ExceptionOr<JS::NonnullGCPtr<IDBDatabase>> open_a_database_connection(JS::Realm&, StorageAPI::StorageKey, String, Optional<u64>, JS::NonnullGCPtr<IDBRequest>);
 bool fire_a_version_change_event(JS::Realm&, FlyString const&, JS::NonnullGCPtr<DOM::EventTarget>, u64, Optional<u64>);
-ErrorOr<Key> convert_a_value_to_a_key(JS::Realm&, JS::Value, Vector<JS::Value> = {});
+ErrorOr<JS::NonnullGCPtr<Key>> convert_a_value_to_a_key(JS::Realm&, JS::Value, Vector<JS::Value> = {});
 
 }
