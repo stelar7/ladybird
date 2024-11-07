@@ -507,8 +507,8 @@ set(SOURCES
     IndexedDB/Internal/Algorithms.cpp
     IndexedDB/Internal/Database.cpp
     IndexedDB/IDBCursor.cpp
-    IndexedDB/IDBFactory.cpp
     IndexedDB/IDBDatabase.cpp
+    IndexedDB/IDBFactory.cpp
     IndexedDB/IDBIndex.cpp
     IndexedDB/IDBKeyRange.cpp
     IndexedDB/IDBObjectStore.cpp

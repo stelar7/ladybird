@@ -31,6 +31,7 @@ void IDBTransaction::initialize(JS::Realm& realm)
     WEB_SET_PROTOTYPE_FOR_INTERFACE(IDBTransaction);
 }
 
+<<<<<<< HEAD:Libraries/LibWeb/IndexedDB/IDBTransaction.cpp
 void IDBTransaction::visit_edges(Visitor& visitor)
 {
     Base::visit_edges(visitor);
@@ -38,6 +39,8 @@ void IDBTransaction::visit_edges(Visitor& visitor)
     visitor.visit(m_error);
 }
 
+=======
+>>>>>>> d0d0351d2f (LibWeb: Add IDBTransaction):Userland/Libraries/LibWeb/IndexedDB/IDBTransaction.cpp
 void IDBTransaction::set_onabort(WebIDL::CallbackType* event_handler)
 {
     set_event_handler_attribute(HTML::EventNames::abort, event_handler);

@@ -55,7 +55,10 @@ public:
 protected:
     explicit IDBTransaction(JS::Realm&, JS::NonnullGCPtr<IDBDatabase>);
     virtual void initialize(JS::Realm&) override;
+<<<<<<< HEAD:Libraries/LibWeb/IndexedDB/IDBTransaction.h
     virtual void visit_edges(Visitor& visitor) override;
+=======
+>>>>>>> d0d0351d2f (LibWeb: Add IDBTransaction):Userland/Libraries/LibWeb/IndexedDB/IDBTransaction.h
 
 private:
     JS::NonnullGCPtr<IDBDatabase> m_connection;
