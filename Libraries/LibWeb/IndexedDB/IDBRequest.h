@@ -63,7 +63,6 @@ private:
     IDBRequestSource m_source;
     // A request has a transaction which is initially null.
     JS::GCPtr<IDBTransaction> m_transaction;
-    // FIXME: A request has a transaction which is initially null.
 };
 
 }
