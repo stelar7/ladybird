@@ -45,12 +45,7 @@ public:
     [[nodiscard]] ConnectionState state() const { return m_state; }
     [[nodiscard]] GC::Ref<Database> associated_database() { return m_associated_database; }
 
-    // https://w3c.github.io/IndexedDB/#dom-idbdatabase-close
-    void close()
-    {
-        // 1. Run close a database connection with this connection.
-        close_a_database_connection(*this);
-    }
+    void close();
 
     void set_onabort(WebIDL::CallbackType*);
     WebIDL::CallbackType* onabort();

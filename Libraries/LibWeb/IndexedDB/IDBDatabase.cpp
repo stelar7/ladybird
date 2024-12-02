@@ -82,4 +82,11 @@ WebIDL::CallbackType* IDBDatabase::onversionchange()
     return event_handler_attribute(HTML::EventNames::versionchange);
 }
 
+// https://w3c.github.io/IndexedDB/#dom-idbdatabase-close
+void IDBDatabase::close()
+{
+    // 1. Run close a database connection with this connection.
+    close_a_database_connection(*this);
+}
+
 }
