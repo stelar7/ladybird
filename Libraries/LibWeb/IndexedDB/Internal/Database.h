@@ -11,6 +11,7 @@
 #include <LibWeb/DOM/EventTarget.h>
 #include <LibWeb/IndexedDB/IDBDatabase.h>
 #include <LibWeb/IndexedDB/IDBRequest.h>
+#include <LibWeb/IndexedDB/Internal/ObjectStore.h>
 #include <LibWeb/StorageAPI/StorageKey.h>
 
 namespace Web::IndexedDB {
@@ -40,6 +41,9 @@ public:
         return connections;
     }
 
+    bool has_object_store(String const& name);
+    ObjectStore create_object_store(String const& name);
+
     [[nodiscard]] static Optional<GC::Root<Database>> for_key_and_name(StorageAPI::StorageKey&, String&);
     [[nodiscard]] static ErrorOr<GC::Root<Database>> create_for_key_and_name(JS::Realm&, StorageAPI::StorageKey&, String&);
     [[nodiscard]] static ErrorOr<void> delete_for_key_and_name(StorageAPI::StorageKey&, String&);
@@ -61,7 +65,8 @@ protected:
 private:
     Vector<GC::Ref<IDBDatabase>> m_associated_connections;
 
-    // FIXME: A database has zero or more object stores which hold the data stored in the database.
+    // A database has zero or more object stores which hold the data stored in the database.
+    HashMap<String, ObjectStore> m_object_stores;
 
     // A database has a name which identifies it within a specific storage key.
     String m_name;

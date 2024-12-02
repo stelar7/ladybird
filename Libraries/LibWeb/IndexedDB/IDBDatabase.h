@@ -9,6 +9,7 @@
 #include <LibGC/Ptr.h>
 #include <LibWeb/DOM/EventTarget.h>
 #include <LibWeb/HTML/DOMStringList.h>
+#include <LibWeb/IndexedDB/IDBObjectStore.h>
 #include <LibWeb/IndexedDB/IDBRequest.h>
 #include <LibWeb/IndexedDB/Internal/Algorithms.h>
 #include <LibWeb/IndexedDB/Internal/Database.h>
@@ -46,6 +47,7 @@ public:
     [[nodiscard]] GC::Ref<Database> associated_database() { return m_associated_database; }
 
     void close();
+    WebIDL::ExceptionOr<GC::Ref<IDBObjectStore>> create_object_store(String const& name, IDBObjectStore::IDBObjectStoreParameters const& options = {});
 
     void set_onabort(WebIDL::CallbackType*);
     WebIDL::CallbackType* onabort();

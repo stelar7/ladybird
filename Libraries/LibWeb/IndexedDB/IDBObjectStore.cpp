@@ -15,14 +15,16 @@ GC_DEFINE_ALLOCATOR(IDBObjectStore);
 
 IDBObjectStore::~IDBObjectStore() = default;
 
-IDBObjectStore::IDBObjectStore(JS::Realm& realm)
+IDBObjectStore::IDBObjectStore(JS::Realm& realm, ObjectStore const& store, GC::Ref<IDBTransaction> transaction)
     : PlatformObject(realm)
+    , m_store(store)
+    , m_transaction(transaction)
 {
 }
 
-GC::Ref<IDBObjectStore> IDBObjectStore::create(JS::Realm& realm)
+GC::Ref<IDBObjectStore> IDBObjectStore::create(JS::Realm& realm, ObjectStore store, GC::Ref<IDBTransaction> transaction)
 {
-    return realm.create<IDBObjectStore>(realm);
+    return realm.create<IDBObjectStore>(realm, store, transaction);
 }
 
 void IDBObjectStore::initialize(JS::Realm& realm)

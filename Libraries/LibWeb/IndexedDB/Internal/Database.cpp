@@ -81,4 +81,20 @@ ErrorOr<void> Database::delete_for_key_and_name(StorageAPI::StorageKey& key, Str
     return {};
 }
 
+bool Database::has_object_store(String const& name)
+{
+    return m_object_stores.contains(name);
+}
+
+ObjectStore Database::create_object_store(String const& name)
+{
+    auto store_by_name = MUST(m_object_stores.try_ensure(name, [&] {
+        return ObjectStore(name);
+    }));
+
+    m_object_stores.set(name, store_by_name);
+
+    return store_by_name;
+}
+
 }

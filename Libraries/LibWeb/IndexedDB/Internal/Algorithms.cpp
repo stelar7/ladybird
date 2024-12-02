@@ -495,4 +495,26 @@ void abort_a_transaction(IDBTransaction& transaction, GC::Ptr<WebIDL::DOMExcepti
     }));
 }
 
+// https://w3c.github.io/IndexedDB/#valid-key-path
+bool is_valid_key_path(Variant<Empty, String, Vector<String>> const& path)
+{
+    // A valid key path is one of:
+    // An empty string.
+    if (path.has<Empty>())
+        return true;
+
+    if (path.has<String>()) {
+        // FIXME: An identifier, which is a string matching the IdentifierName production from the ECMAScript Language Specification [ECMA-262].
+        // FIXME: A string consisting of two or more identifiers separated by periods (U+002E FULL STOP).
+        return true;
+    }
+
+    if (path.has<Vector<String>>()) {
+        // FIXME: A non-empty list containing only strings conforming to the above requirements.
+        return true;
+    }
+
+    return false;
+}
+
 }

@@ -20,5 +20,6 @@ void close_a_database_connection(IDBDatabase&, bool forced = false);
 void upgrade_a_database(JS::Realm&, GC::Ref<IDBDatabase>, u64, GC::Ref<IDBRequest>);
 WebIDL::ExceptionOr<u64> delete_a_database(JS::Realm&, StorageAPI::StorageKey, String, GC::Ref<IDBRequest>);
 void abort_a_transaction(IDBTransaction&, GC::Ptr<WebIDL::DOMException>);
+bool is_valid_key_path(Variant<Empty, String, Vector<String>> const&);
 
 }
