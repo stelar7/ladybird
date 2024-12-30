@@ -26,6 +26,7 @@ void Database::visit_edges(Visitor& visitor)
     Base::visit_edges(visitor);
     visitor.visit(m_associated_connections);
     visitor.visit(m_upgrade_transaction);
+    visitor.visit(m_object_stores);
 }
 
 Vector<GC::Root<Database>> Database::for_key(StorageAPI::StorageKey const& key)
@@ -89,6 +90,16 @@ ErrorOr<void> Database::delete_for_key_and_name(StorageAPI::StorageKey& key, Str
     m_databases.set(key, database_mapping);
 
     return {};
+}
+
+bool Database::has_object_store_named(String const& name) const
+{
+    for (auto const& object_store : m_object_stores) {
+        if (object_store->name() == name)
+            return true;
+    }
+
+    return false;
 }
 
 }

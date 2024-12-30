@@ -9,11 +9,18 @@
 #include <LibGC/Ptr.h>
 #include <LibWeb/DOM/EventTarget.h>
 #include <LibWeb/HTML/DOMStringList.h>
+#include <LibWeb/IndexedDB/IDBObjectStore.h>
 #include <LibWeb/IndexedDB/IDBRequest.h>
 #include <LibWeb/IndexedDB/Internal/Database.h>
 #include <LibWeb/StorageAPI/StorageKey.h>
 
 namespace Web::IndexedDB {
+
+// https://w3c.github.io/IndexedDB/#dictdef-idbobjectstoreparameters
+struct IDBObjectStoreParameters {
+    Optional<KeyPath> key_path;
+    bool auto_increment { false };
+};
 
 // FIXME: I'm not sure if this object should do double duty as both the connection and the interface
 //        but the spec treats it as such...?
@@ -45,6 +52,8 @@ public:
     [[nodiscard]] GC::Ref<Database> associated_database() { return m_associated_database; }
 
     void close();
+
+    WebIDL::ExceptionOr<GC::Ref<IDBObjectStore>> create_object_store(String const&, IDBObjectStoreParameters const&);
 
     void set_onabort(WebIDL::CallbackType*);
     WebIDL::CallbackType* onabort();
