@@ -54,9 +54,9 @@ public:
     // A connection has an object store set, which is initialized to the set of object stores in the associated database
     [[nodiscard]] ReadonlySpan<GC::Ref<IDBObjectStore>> object_store_set() { return this->associated_database()->object_stores(); }
 
-    void close();
-
     WebIDL::ExceptionOr<GC::Ref<IDBObjectStore>> create_object_store(String const&, IDBObjectStoreParameters const&);
+    
+    void close();
 
     void set_onabort(WebIDL::CallbackType*);
     WebIDL::CallbackType* onabort();
