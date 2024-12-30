@@ -44,12 +44,15 @@ public:
     void set_close_pending(bool close_pending) { m_close_pending = close_pending; }
     void set_state(ConnectionState state) { m_state = state; }
 
-    [[nodiscard]] GC::Ref<HTML::DOMStringList> object_store_names() { return m_object_store_names; }
     [[nodiscard]] String name() const { return m_name; }
     [[nodiscard]] u64 version() const { return m_version; }
     [[nodiscard]] bool close_pending() const { return m_close_pending; }
     [[nodiscard]] ConnectionState state() const { return m_state; }
     [[nodiscard]] GC::Ref<Database> associated_database() { return m_associated_database; }
+    [[nodiscard]] GC::Ref<HTML::DOMStringList> object_store_names();
+
+    // A connection has an object store set, which is initialized to the set of object stores in the associated database
+    [[nodiscard]] ReadonlySpan<GC::Ref<IDBObjectStore>> object_store_set() { return this->associated_database()->object_stores(); }
 
     void close();
 
@@ -73,7 +76,6 @@ protected:
 private:
     u64 m_version { 0 };
     String m_name;
-    GC::Ref<HTML::DOMStringList> m_object_store_names;
 
     // Each connection has a close pending flag which is initially false.
     bool m_close_pending { false };
