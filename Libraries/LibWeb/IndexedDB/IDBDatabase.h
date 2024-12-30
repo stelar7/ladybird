@@ -57,6 +57,7 @@ public:
     void close();
 
     WebIDL::ExceptionOr<GC::Ref<IDBObjectStore>> create_object_store(String const&, IDBObjectStoreParameters const&);
+    WebIDL::ExceptionOr<void> delete_object_store(String const&);
 
     void set_onabort(WebIDL::CallbackType*);
     WebIDL::CallbackType* onabort();
