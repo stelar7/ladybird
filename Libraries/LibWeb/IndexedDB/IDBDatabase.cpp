@@ -158,4 +158,34 @@ void IDBDatabase::close()
     close_a_database_connection(*this);
 }
 
+// https://w3c.github.io/IndexedDB/#dom-idbdatabase-deleteobjectstore
+WebIDL::ExceptionOr<void> IDBDatabase::delete_object_store(String const& name)
+{
+    // 1. Let database be this's associated database.
+    auto database = associated_database();
+
+    // 2. Let transaction be database’s upgrade transaction if it is not null, or throw an "InvalidStateError" DOMException otherwise.
+    auto transaction = database->upgrade_transaction();
+    if (!transaction)
+        return WebIDL::InvalidStateError::create(realm(), "Upgrade transaction is null"_string);
+
+    // 3. If transaction’s state is not active, then throw a "TransactionInactiveError" DOMException.
+    if (transaction->state() != IDBTransaction::TransactionState::Active)
+        return WebIDL::TransactionInactiveError::create(realm(), "Transaction is not active"_string);
+
+    // 4. Let store be the object store named name in database, or throw a "NotFoundError" DOMException if none.
+    auto store = database->object_store_named(name);
+    if (!store)
+        return WebIDL::NotFoundError::create(realm(), "Object store not found"_string);
+
+    // 5. Remove store from this's object store set.
+    database->remove_object_store(*store);
+
+    // FIXME: 6. If there is an object store handle associated with store and transaction, remove all entries from its index set.
+
+    // 7. Destroy store.
+    // NOTE: This is done by the GC.
+    return {};
+}
+
 }

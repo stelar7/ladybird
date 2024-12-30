@@ -55,6 +55,7 @@ public:
     [[nodiscard]] ReadonlySpan<GC::Ref<IDBObjectStore>> object_store_set() { return this->associated_database()->object_stores(); }
 
     WebIDL::ExceptionOr<GC::Ref<IDBObjectStore>> create_object_store(String const&, IDBObjectStoreParameters const&);
+    WebIDL::ExceptionOr<void> delete_object_store(String const&);
     
     void close();
 

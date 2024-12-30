@@ -41,9 +41,19 @@ public:
         return connections;
     }
 
-    bool has_object_store_named(String const& name) const;
-    void add_object_store(GC::Ref<IDBObjectStore> object_store) { m_object_stores.append(object_store); }
     ReadonlySpan<GC::Ref<IDBObjectStore>> object_stores() { return m_object_stores; }
+    void add_object_store(GC::Ref<IDBObjectStore> object_store) { m_object_stores.append(object_store); }
+    GC::Ptr<IDBObjectStore> object_store_named(String const& name) const;
+
+    void remove_object_store(GC::Ref<IDBObjectStore> object_store)
+    {
+        m_object_stores.remove_first_matching([&](auto& entry) { return entry.ptr() == object_store.ptr(); });
+    }
+
+    bool has_object_store_named(String const& name) const
+    {
+        return object_store_named(name) != nullptr;
+    }
 
     [[nodiscard]] static Optional<GC::Root<Database> const&> for_key_and_name(StorageAPI::StorageKey&, String&);
     [[nodiscard]] static ErrorOr<GC::Root<Database>> create_for_key_and_name(JS::Realm&, StorageAPI::StorageKey&, String&);
