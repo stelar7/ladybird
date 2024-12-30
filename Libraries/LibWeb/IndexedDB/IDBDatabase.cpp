@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/QuickSort.h>
 #include <AK/Vector.h>
 #include <LibWeb/Bindings/IDBDatabasePrototype.h>
 #include <LibWeb/Bindings/Intrinsics.h>
@@ -19,7 +20,6 @@ GC_DEFINE_ALLOCATOR(IDBDatabase);
 IDBDatabase::IDBDatabase(JS::Realm& realm, Database& db)
     : EventTarget(realm)
     , m_name(db.name())
-    , m_object_store_names(HTML::DOMStringList::create(realm, {}))
     , m_associated_database(db)
 {
     db.associate(*this);
@@ -41,7 +41,6 @@ void IDBDatabase::initialize(JS::Realm& realm)
 void IDBDatabase::visit_edges(Visitor& visitor)
 {
     Base::visit_edges(visitor);
-    visitor.visit(m_object_store_names);
     visitor.visit(m_associated_database);
 }
 
@@ -138,6 +137,18 @@ WebIDL::ExceptionOr<GC::Ref<IDBObjectStore>> IDBDatabase::create_object_store(St
 
     // 10. Return a new object store handle associated with store and transaction.
     return object_store;
+}
+
+GC::Ref<HTML::DOMStringList> IDBDatabase::object_store_names()
+{
+    // 1. Let names be a list of the names of the object stores in this's object store set.
+    Vector<String> names;
+    for (auto const& object_store : this->object_store_set())
+        names.append(object_store->name());
+
+    // 2. Return the result (a DOMStringList) of creating a sorted name list with names.
+    quick_sort(names);
+    return HTML::DOMStringList::create(realm(), names);
 }
 
 }
