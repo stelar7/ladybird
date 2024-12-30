@@ -10,6 +10,9 @@
 #include <AK/String.h>
 #include <LibGC/Heap.h>
 #include <LibGC/Ptr.h>
+#include <LibJS/Runtime/Array.h>
+#include <LibJS/Runtime/PrimitiveString.h>
+#include <LibJS/Runtime/Value.h>
 #include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/IndexedDB/IDBTransaction.h>
 #include <LibWeb/IndexedDB/Internal/Algorithms.h>
@@ -26,8 +29,18 @@ public:
     String name() const { return m_name; }
     void set_name(String name) { m_name = move(name); }
 
-    Optional<KeyPath> key_path() const { return m_key_path; }
     bool auto_increment() const { return m_auto_increment; }
+    JS::Value key_path() const
+    {
+        if (!m_key_path.has_value())
+            return JS::js_null();
+
+        return m_key_path.value().visit(
+            [&](String const& value) -> JS::Value { return JS::PrimitiveString::create(realm().vm(), value); },
+            [&](Vector<String> const& value) -> JS::Value { return JS::Array::create_from<String>(realm(), value.span(), [&](auto const& entry) -> JS::Value {
+                                                                return JS::PrimitiveString::create(realm().vm(), entry);
+                                                            }); });
+    }
 
     // If the object store has a key path it is said to use in-line keys. Otherwise it is said to use out-of-line keys.
     bool uses_inline_keys() const { return m_key_path.has_value(); }
