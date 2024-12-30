@@ -151,4 +151,11 @@ GC::Ref<HTML::DOMStringList> IDBDatabase::object_store_names()
     return HTML::DOMStringList::create(realm(), names);
 }
 
+// https://w3c.github.io/IndexedDB/#dom-idbdatabase-close
+void IDBDatabase::close()
+{
+    // 1. Run close a database connection with this connection.
+    close_a_database_connection(*this);
+}
+
 }
