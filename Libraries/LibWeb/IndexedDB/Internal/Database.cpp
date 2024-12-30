@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibGC/Ptr.h>
+#include <LibWeb/IndexedDB/IDBObjectStore.h>
 #include <LibWeb/IndexedDB/Internal/ConnectionQueueHandler.h>
 #include <LibWeb/IndexedDB/Internal/Database.h>
 
@@ -92,14 +94,14 @@ ErrorOr<void> Database::delete_for_key_and_name(StorageAPI::StorageKey& key, Str
     return {};
 }
 
-bool Database::has_object_store_named(String const& name) const
+GC::Ptr<IDBObjectStore> Database::object_store_named(String const& name) const
 {
     for (auto const& object_store : m_object_stores) {
         if (object_store->name() == name)
-            return true;
+            return object_store;
     }
 
-    return false;
+    return nullptr;
 }
 
 }
