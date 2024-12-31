@@ -142,7 +142,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBDatabase>> open_a_database_connection(JS::Realm& 
         }));
 
         // 6. Run upgrade a database using connection, version and request.
-        upgrade_a_database(realm, connection, version, request);
+        auto upgrade_transaction = upgrade_a_database(realm, connection, version, request);
 
         // 7. If connection was closed, return a newly created "AbortError" DOMException and abort these steps.
         if (connection->state() == IDBDatabase::ConnectionState::Closed) {
@@ -151,9 +151,8 @@ WebIDL::ExceptionOr<GC::Ref<IDBDatabase>> open_a_database_connection(JS::Realm& 
 
         // 8. If the upgrade transaction was aborted, run the steps to close a database connection with connection,
         //    return a newly created "AbortError" DOMException and abort these steps.
-        auto transaction = connection->associated_database()->upgrade_transaction();
-        if (transaction->aborted()) {
-            close_a_database_connection(*connection, true);
+        if (upgrade_transaction->aborted()) {
+            close_a_database_connection(*connection);
             return WebIDL::AbortError::create(realm, "Upgrade transaction was aborted"_string);
         }
     }
@@ -326,7 +325,7 @@ void close_a_database_connection(IDBDatabase& connection, bool forced)
 }
 
 // https://w3c.github.io/IndexedDB/#upgrade-a-database
-void upgrade_a_database(JS::Realm& realm, GC::Ref<IDBDatabase> connection, u64 version, GC::Ref<IDBRequest> request)
+GC::Ref<IDBTransaction> upgrade_a_database(JS::Realm& realm, GC::Ref<IDBDatabase> connection, u64 version, GC::Ref<IDBRequest> request)
 {
     // 1. Let db be connection’s database.
     auto db = connection->associated_database();
@@ -390,6 +389,8 @@ void upgrade_a_database(JS::Realm& realm, GC::Ref<IDBDatabase> connection, u64 v
     HTML::main_thread_event_loop().spin_until(GC::create_function(realm.vm().heap(), [&wait_for_transaction]() {
         return !wait_for_transaction;
     }));
+
+    return transaction;
 }
 
 // https://w3c.github.io/IndexedDB/#deleting-a-database
