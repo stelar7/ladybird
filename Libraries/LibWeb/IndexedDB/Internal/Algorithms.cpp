@@ -17,8 +17,8 @@
 #include <LibJS/Runtime/PropertyKey.h>
 #include <LibJS/Runtime/Realm.h>
 #include <LibJS/Runtime/TypedArray.h>
-#include <LibJS/Runtime/VM.h>
 #include <LibJS/Runtime/Value.h>
+#include <LibJS/Runtime/VM.h>
 #include <LibWeb/DOM/EventDispatcher.h>
 #include <LibWeb/FileAPI/Blob.h>
 #include <LibWeb/FileAPI/File.h>
@@ -36,6 +36,7 @@
 #include <LibWeb/StorageAPI/StorageKey.h>
 #include <LibWeb/WebIDL/AbstractOperations.h>
 #include <LibWeb/WebIDL/Buffers.h>
+#include <LibWeb/WebIDL/DOMException.h>
 
 namespace Web::IndexedDB {
 
@@ -1063,6 +1064,49 @@ void possibly_update_the_key_generator(GC::Ref<IDBObjectStore> store, Key key)
     // 6. If value is greater than or equal to generator’s current number, then set generator’s current number to value + 1.
     if (value >= generator.current_number())
         generator.set(value + 1);
+}
+
+// https://w3c.github.io/IndexedDB/#store-a-record-into-an-object-store
+WebIDL::ExceptionOr<Optional<Key>> store_a_record_into_an_object_store(GC::Ref<IDBObjectStore> store, JS::Value value, Optional<Key> key, bool no_overwrite)
+{
+    // 1. If store uses a key generator, then:
+    if (store->key_generator().has_value()) {
+        // 1. If key is undefined, then:
+        if (!key.has_value()) {
+            // 1. Let key be the result of generating a key for store.
+            auto maybe_key = generate_a_key(store);
+
+            // 2. If key is failure, then this operation failed with a "ConstraintError" DOMException. Abort this algorithm without taking any further steps.
+            if (maybe_key.is_error())
+                return maybe_key.release_error();
+
+            key = Key::create_number(maybe_key.value());
+
+            // 3. If store also uses in-line keys, then run inject a key into a value using a key path with value, key and store’s key path.
+            if (store->uses_inline_keys()) {
+                inject_a_key_into_a_value_using_a_key_path(store->realm(), value, key.value(), store->internal_key_path().value());
+            }
+        }
+
+        // 2. Otherwise, run possibly update the key generator for store with key.
+        else {
+            possibly_update_the_key_generator(store, key.value());
+        }
+    }
+
+    // FIXME: 2. If the no-overwrite flag was given to these steps and is true, and a record already exists in store with its key equal to key, 
+    //    then this operation failed with a "ConstraintError" DOMException. Abort this algorithm without taking any further steps.
+    (void)no_overwrite;
+
+    // FIXME: 3. If a record already exists in store with its key equal to key, then remove the record from store using delete records from an object store.
+
+    // FIXME: 4. Store a record in store containing key as its key and ! StructuredSerializeForStorage(value) as its value. 
+    //    The record is stored in the object store’s list of records such that the list is sorted according to the key of the records in ascending order.
+
+    // FIXME: 5. For each index which references store:
+
+    // 6. Return key.
+    return key;
 }
 
 }
