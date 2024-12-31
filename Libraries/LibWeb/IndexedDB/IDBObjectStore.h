@@ -58,6 +58,7 @@ public:
     void add_index(GC::Ref<IDBIndex> index) { m_indexes.append(index); }
 
     WebIDL::ExceptionOr<GC::Ref<IDBIndex>> create_index(String const&, KeyPath, IDBIndexParameters options = {});
+    [[nodiscard]] GC::Ref<HTML::DOMStringList> index_names();
 
     virtual ~IDBObjectStore() override;
     [[nodiscard]] static GC::Ref<IDBObjectStore> create(JS::Realm&, String, bool, Optional<KeyPath> const&, GC::Ref<IDBTransaction>);
