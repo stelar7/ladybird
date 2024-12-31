@@ -61,10 +61,10 @@ public:
     AK::ReadonlySpan<GC::Ref<IDBIndex>> index_set() const { return m_indexes; }
     void add_index(GC::Ref<IDBIndex> index) { m_indexes.append(index); }
 
+    [[nodiscard]] WebIDL::ExceptionOr<GC::Ref<IDBRequest>> count(Optional<JS::Value>);
     WebIDL::ExceptionOr<GC::Ref<IDBIndex>> create_index(String const&, KeyPath, IDBIndexParameters options = {});
     [[nodiscard]] GC::Ref<HTML::DOMStringList> index_names();
     [[nodiscard]] WebIDL::ExceptionOr<GC::Ref<IDBRequest>> add_or_put(GC::Ref<IDBObjectStore>, JS::Value, Optional<JS::Value> const&, bool);
-
     // https://w3c.github.io/IndexedDB/#dom-idbobjectstore-add
     [[nodiscard]] WebIDL::ExceptionOr<GC::Ref<IDBRequest>> add(JS::Value value, Optional<JS::Value> const& key) { return add_or_put(*this, value, key, false); }
 

@@ -6,6 +6,7 @@
 
 #include <AK/Assertions.h>
 #include <AK/Error.h>
+#include <AK/Optional.h>
 #include <AK/QuickSort.h>
 #include <AK/Variant.h>
 #include <LibGC/Ptr.h>
@@ -30,6 +31,7 @@
 #include <LibWeb/HTML/StructuredSerialize.h>
 #include <LibWeb/IndexedDB/IDBCursor.h>
 #include <LibWeb/IndexedDB/IDBDatabase.h>
+#include <LibWeb/IndexedDB/IDBKeyRange.h>
 #include <LibWeb/IndexedDB/IDBRequest.h>
 #include <LibWeb/IndexedDB/IDBTransaction.h>
 #include <LibWeb/IndexedDB/IDBVersionChangeEvent.h>
@@ -378,7 +380,7 @@ void upgrade_a_database(JS::Realm& realm, GC::Ref<IDBDatabase> connection, u64 v
         transaction->set_state(IDBTransaction::TransactionState::Inactive);
 
         // 7. If didThrow is true, run abort a transaction with transaction and a newly created "AbortError" DOMException.
-        if (did_throw) 
+        if (did_throw)
             abort_a_transaction(*transaction, WebIDL::AbortError::create(realm, "Version change event threw an exception"_string));
 
         wait_for_transaction = false;
@@ -1348,6 +1350,43 @@ void commit_a_transaction(JS::Realm& realm, GC::Ref<IDBTransaction> transaction)
             }
         }));
     }));
+}
+
+WebIDL::ExceptionOr<GC::Ref<IDBKeyRange>> convert_a_value_to_a_key_range(JS::Realm& realm, Optional<JS::Value> value, bool null_disallowed)
+{
+    // 1. If value is a key range, return value.
+    if (value.has_value() && value->is_object() && is<IDBKeyRange>(value->as_object())) {
+        return GC::Ref(static_cast<IDBKeyRange&>(value->as_object()));
+    }
+
+    // 2. If value is undefined or is null, then throw a "DataError" DOMException if null disallowed flag is true, or return an unbounded key range otherwise.
+    if (!value.has_value() || (value.has_value() && (value->is_undefined() || value->is_null()))) {
+        if (null_disallowed)
+            return WebIDL::DataError::create(realm, "Value is undefined or null"_string);
+
+        return IDBKeyRange::create(realm, {}, {}, false, false);
+    }
+
+    // 3. Let key be the result of converting a value to a key with value. Rethrow any exceptions.
+    // 4. If key is invalid, throw a "DataError" DOMException.
+    auto maybe_key = convert_a_value_to_a_key(realm, *value);
+    if (maybe_key.is_error())
+        return WebIDL::DataError::create(realm, "Value is invalid"_string);
+
+    auto key = maybe_key.release_value();
+
+    // 5. Return a key range containing only key.
+    return IDBKeyRange::create(realm, key, key, false, false);
+}
+
+// https://w3c.github.io/IndexedDB/#count-the-records-in-a-range
+JS::Value count_the_records_in_a_range([[maybe_unused]] GC::Ref<IDBObjectStore> source, [[maybe_unused]] GC::Ref<IDBKeyRange> range)
+{
+    // FIXME: 1. Let count be the number of records, if any, in source’s list of records with key in range.
+    auto count = 0;
+
+    // 2. Return count.
+    return JS::Value(count);
 }
 
 }

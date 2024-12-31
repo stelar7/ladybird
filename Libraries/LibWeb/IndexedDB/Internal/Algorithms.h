@@ -13,6 +13,8 @@
 #include <LibJS/Runtime/Realm.h>
 #include <LibJS/Runtime/Value.h>
 #include <LibWeb/HTML/DOMStringList.h>
+#include <LibWeb/IndexedDB/IDBKeyRange.h>
+#include <LibWeb/IndexedDB/IDBObjectStore.h>
 #include <LibWeb/IndexedDB/IDBRequest.h>
 #include <LibWeb/IndexedDB/IDBTransaction.h>
 #include <LibWeb/IndexedDB/Internal/Key.h>
@@ -28,6 +30,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBDatabase>> open_a_database_connection(JS::Realm&,
 bool fire_a_version_change_event(JS::Realm&, FlyString const&, GC::Ref<DOM::EventTarget>, u64, Optional<u64>);
 ErrorOr<GC::Ref<Key>> convert_a_value_to_a_key(JS::Realm&, JS::Value, Vector<JS::Value> = {});
 ErrorOr<Key> convert_a_value_to_a_multi_entry_key(JS::Realm&, JS::Value);
+WebIDL::ExceptionOr<GC::Ref<IDBKeyRange>> convert_a_value_to_a_key_range(JS::Realm&, Optional<JS::Value>, bool = false);
 void close_a_database_connection(IDBDatabase&, bool forced = false);
 void upgrade_a_database(JS::Realm&, GC::Ref<IDBDatabase>, u64, GC::Ref<IDBRequest>);
 WebIDL::ExceptionOr<u64> delete_a_database(JS::Realm&, StorageAPI::StorageKey, String, GC::Ref<IDBRequest>);
@@ -48,5 +51,6 @@ GC::Ref<IDBRequest> asynchronously_execute_a_request(JS::Realm&, IDBRequestSourc
 void fire_an_error_event(JS::Realm&, GC::Ref<IDBRequest>);
 void fire_a_success_event(JS::Realm&, GC::Ref<IDBRequest>);
 void commit_a_transaction(JS::Realm&, GC::Ref<IDBTransaction>);
+JS::Value count_the_records_in_a_range(GC::Ref<IDBObjectStore>, GC::Ref<IDBKeyRange>);
 
 }
