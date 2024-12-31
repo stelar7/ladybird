@@ -45,7 +45,7 @@ public:
     [[nodiscard]] bool aborted() const { return m_aborted; }
     [[nodiscard]] GC::Ref<HTML::DOMStringList> object_store_names();
     [[nodiscard]] ReadonlySpan<GC::Ref<IDBObjectStore>> scope() const { return m_scope; }
-    [[nodiscard]] RequestList request_list() const { return m_request_list; }
+    [[nodiscard]] RequestList& request_list() { return m_request_list; }
 
     void set_mode(Bindings::IDBTransactionMode mode) { m_mode = mode; }
     void set_state(TransactionState state) { m_state = state; }
