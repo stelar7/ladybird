@@ -616,7 +616,6 @@ class IDBIndex;
 class IDBKeyRange;
 class IDBObjectStore;
 class IDBOpenDBRequest;
-class IDBRequest;
 class IDBTransaction;
 class IDBVersionChangeEvent;
 class RequestList;
