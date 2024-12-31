@@ -112,4 +112,16 @@ WebIDL::ExceptionOr<GC::Ref<IDBObjectStore>> IDBTransaction::object_store(String
     return GC::Ref(*store);
 }
 
+// https://w3c.github.io/IndexedDB/#dom-idbtransaction-objectstorenames
+GC::Ref<HTML::DOMStringList> IDBTransaction::object_store_names()
+{
+    // 1. Let names be a list of the names of the object stores in this's scope.
+    Vector<String> names;
+    for (auto const& object_store : this->scope())
+        names.append(object_store->name());
+
+    // 2. Return the result (a DOMStringList) of creating a sorted name list with names.
+    return create_a_sorted_name_list(realm(), names);
+}
+
 }
