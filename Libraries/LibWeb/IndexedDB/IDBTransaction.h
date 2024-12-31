@@ -61,6 +61,7 @@ public:
     [[nodiscard]] GC::Ptr<IDBObjectStore> object_store_named(String const& name) const;
 
     WebIDL::ExceptionOr<void> abort();
+    WebIDL::ExceptionOr<void> commit();
     WebIDL::ExceptionOr<GC::Ref<IDBObjectStore>> object_store(String const& name);
 
     void set_onabort(WebIDL::CallbackType*);
