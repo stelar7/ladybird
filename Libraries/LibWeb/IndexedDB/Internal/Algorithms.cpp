@@ -1170,7 +1170,9 @@ void fire_an_error_event(JS::Realm& realm, GC::Ref<IDBRequest> request)
             return;
         }
 
-        // FIXME: 4. If transaction’s request list is empty, then run commit a transaction with transaction.
+        // 4. If transaction’s request list is empty, then run commit a transaction with transaction.
+        if (transaction->request_list().is_empty())
+            commit_a_transaction(realm, *transaction);
     }
 }
 
@@ -1206,7 +1208,9 @@ void fire_a_success_event(JS::Realm& realm, GC::Ref<IDBRequest> request)
             return;
         }
 
-        // FIXME: 3. If transaction’s request list is empty, then run commit a transaction with transaction.
+        // 3. If transaction’s request list is empty, then run commit a transaction with transaction.
+        if (transaction->request_list().is_empty())
+            commit_a_transaction(realm, *transaction);
     }
 }
 
@@ -1293,6 +1297,52 @@ GC::Ref<IDBRequest> asynchronously_execute_a_request(JS::Realm& realm, IDBReques
 
     // 6. Return request.
     return request;
+}
+
+// https://w3c.github.io/IndexedDB/#commit-a-transaction
+void commit_a_transaction(JS::Realm& realm, GC::Ref<IDBTransaction> transaction)
+{
+    // 1. Set transaction’s state to committing.
+    transaction->set_state(IDBTransaction::TransactionState::Committing);
+
+    // 2. Run the following steps in parallel:
+    Platform::EventLoopPlugin::the().deferred_invoke(GC::create_function(realm.heap(), [&realm, transaction]() {
+        HTML::TemporaryExecutionContext context(realm, HTML::TemporaryExecutionContext::CallbacksEnabled::Yes);
+
+        // 1. Wait until every item in transaction’s request list is processed.
+        HTML::main_thread_event_loop().spin_until(GC::create_function(realm.vm().heap(), [transaction]() {
+            return transaction->request_list().all_requests_processed();
+        }));
+
+        // 2. If transaction’s state is no longer committing, then terminate these steps.
+        if (transaction->state() != IDBTransaction::TransactionState::Committing)
+            return;
+
+        // FIXME: 3. Attempt to write any outstanding changes made by transaction to the database, considering transaction’s durability hint.
+        // FIXME: 4. If an error occurs while writing the changes to the database, then run abort a transaction with transaction and an appropriate type for the error, for example "QuotaExceededError" or "UnknownError" DOMException, and terminate these steps.
+
+        // 5. Queue a task to run these steps:
+        HTML::queue_a_task(HTML::Task::Source::DatabaseAccess, nullptr, nullptr, GC::create_function(transaction->realm().vm().heap(), [transaction]() {
+            // 1. If transaction is an upgrade transaction, then set transaction’s connection's associated database's upgrade transaction to null.
+            if (transaction->is_upgrade_transaction())
+                transaction->connection()->associated_database()->set_upgrade_transaction(nullptr);
+
+            // 2. Set transaction’s state to finished.
+            transaction->set_state(IDBTransaction::TransactionState::Finished);
+
+            // 3. Fire an event named complete at transaction.
+            transaction->dispatch_event(DOM::Event::create(transaction->realm(), HTML::EventNames::complete));
+
+            // 4. If transaction is an upgrade transaction, then let request be the request associated with transaction and set request’s transaction to null.
+            if (transaction->is_upgrade_transaction()) {
+                auto request = transaction->associated_request();
+                request->set_transaction(nullptr);
+
+                // Ad-hoc: Clear the two-way binding.
+                transaction->set_associated_request(nullptr);
+            }
+        }));
+    }));
 }
 
 }
