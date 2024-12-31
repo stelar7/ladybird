@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include "AK/Vector.h"
+#include "LibWeb/HTML/DOMStringList.h"
 #include <AK/Variant.h>
 #include <LibJS/Runtime/Realm.h>
 #include <LibWeb/IndexedDB/IDBRequest.h>
@@ -25,5 +27,6 @@ WebIDL::ExceptionOr<u64> delete_a_database(JS::Realm&, StorageAPI::StorageKey, S
 void abort_a_transaction(IDBTransaction&, GC::Ptr<WebIDL::DOMException>);
 JS::Value convert_a_key_to_a_value(JS::Realm&, GC::Ref<Key>);
 bool is_valid_key_path(KeyPath);
+GC::Ref<HTML::DOMStringList> create_a_sorted_name_list(JS::Realm&, Vector<String>);
 
 }
