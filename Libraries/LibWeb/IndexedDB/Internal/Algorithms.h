@@ -47,5 +47,6 @@ void possibly_update_the_key_generator(GC::Ref<IDBObjectStore>, Key);
 GC::Ref<IDBRequest> asynchronously_execute_a_request(JS::Realm&, IDBRequestSource, GC::Ref<GC::Function<WebIDL::ExceptionOr<JS::Value>()>>, GC::Ptr<IDBRequest> = nullptr);
 void fire_an_error_event(JS::Realm&, GC::Ref<IDBRequest>);
 void fire_a_success_event(JS::Realm&, GC::Ref<IDBRequest>);
+void commit_a_transaction(JS::Realm&, GC::Ref<IDBTransaction>);
 
 }
