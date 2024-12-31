@@ -71,6 +71,16 @@ public:
         return Key::compare_two_keys(*this, other) == 0;
     }
 
+    bool operator<(Key const& other) const
+    {
+        return Key::compare_two_keys(*this, other) < 0;
+    }
+
+    bool operator>(Key const& other) const
+    {
+        return Key::compare_two_keys(*this, other) > 0;
+    }
+
 private:
     Key(KeyType type, KeyValue value)
         : m_type(type)
