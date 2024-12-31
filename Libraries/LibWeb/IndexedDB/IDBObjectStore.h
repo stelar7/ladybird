@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <AK/Forward.h>
 #include <AK/Optional.h>
 #include <AK/String.h>
 #include <LibGC/Heap.h>
@@ -14,11 +15,17 @@
 #include <LibJS/Runtime/PrimitiveString.h>
 #include <LibJS/Runtime/Value.h>
 #include <LibWeb/Bindings/PlatformObject.h>
+#include <LibWeb/IndexedDB/IDBIndex.h>
 #include <LibWeb/IndexedDB/IDBTransaction.h>
 #include <LibWeb/IndexedDB/Internal/Algorithms.h>
 #include <LibWeb/IndexedDB/Internal/KeyGenerator.h>
 
 namespace Web::IndexedDB {
+
+struct IDBIndexParameters {
+    bool unique { false };
+    bool multi_entry { false };
+};
 
 // https://w3c.github.io/IndexedDB/#object-store-interface
 class IDBObjectStore : public Bindings::PlatformObject {
@@ -46,6 +53,12 @@ public:
     bool uses_inline_keys() const { return m_key_path.has_value(); }
     bool uses_out_of_line_keys() const { return !m_key_path.has_value(); }
 
+    GC::Ref<IDBTransaction> transaction() { return m_transaction; }
+    AK::ReadonlySpan<GC::Ref<IDBIndex>> index_set() const { return m_indexes; }
+    void add_index(GC::Ref<IDBIndex> index) { m_indexes.append(index); }
+
+    WebIDL::ExceptionOr<GC::Ref<IDBIndex>> create_index(String const&, KeyPath, IDBIndexParameters options = {});
+
     virtual ~IDBObjectStore() override;
     [[nodiscard]] static GC::Ref<IDBObjectStore> create(JS::Realm&, String, bool, Optional<KeyPath> const&, GC::Ref<IDBTransaction>);
 
@@ -68,6 +81,9 @@ private:
 
     // An object store handle has an associated transaction.
     GC::Ref<IDBTransaction> m_transaction;
+
+    // An object store handle has an index set
+    Vector<GC::Ref<IDBIndex>> m_indexes;
 };
 
 }

@@ -16,6 +16,8 @@
 
 namespace Web::IndexedDB {
 
+using KeyPath = Variant<String, Vector<String>>;
+
 // https://w3c.github.io/IndexedDB/#dictdef-idbobjectstoreparameters
 struct IDBObjectStoreParameters {
     Optional<KeyPath> key_path;
