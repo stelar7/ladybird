@@ -1243,6 +1243,9 @@ GC::Ref<IDBRequest> asynchronously_execute_a_request(JS::Realm& realm, IDBReques
     // 4. Add request to the end of transaction’s request list.
     transaction->request_list().append(request);
 
+    // Ad-hoc: Set the two-way binding. (Missing spec step?)
+    request->set_transaction(transaction);
+
     // 5. Run these steps in parallel:
     Platform::EventLoopPlugin::the().deferred_invoke(GC::create_function(realm.heap(), [&realm, transaction, operation, request]() {
         HTML::TemporaryExecutionContext context(realm, HTML::TemporaryExecutionContext::CallbacksEnabled::Yes);
@@ -1267,9 +1270,9 @@ GC::Ref<IDBRequest> asynchronously_execute_a_request(JS::Realm& realm, IDBReques
         request->set_processed(true);
 
         // 6. Queue a task to run these steps:
-        HTML::queue_a_task(HTML::Task::Source::DatabaseAccess, nullptr, nullptr, GC::create_function(realm.vm().heap(), [&realm, request, result]() mutable {
+        HTML::queue_a_task(HTML::Task::Source::DatabaseAccess, nullptr, nullptr, GC::create_function(realm.vm().heap(), [&realm, request, result, transaction]() mutable {
             // 1. Remove request from transaction’s request list.
-            request->transaction()->request_list().remove_first_matching([&request](auto& entry) { return entry.ptr() == request.ptr(); });
+            transaction->request_list().remove_first_matching([&request](auto& entry) { return entry.ptr() == request.ptr(); });
 
             // 2. Set request’s done flag to true.
             request->set_done(true);
