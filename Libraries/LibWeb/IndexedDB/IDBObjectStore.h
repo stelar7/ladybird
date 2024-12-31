@@ -65,6 +65,7 @@ public:
 protected:
     explicit IDBObjectStore(JS::Realm&, String, bool, Optional<KeyPath> const&, GC::Ref<IDBTransaction>);
     virtual void initialize(JS::Realm&) override;
+    virtual void visit_edges(Visitor& visitor) override;
 
 private:
     // An object store has a name, which is a name. At any one time, the name is unique within the database to which it belongs.

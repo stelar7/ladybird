@@ -38,6 +38,7 @@ void IDBTransaction::visit_edges(Visitor& visitor)
     visitor.visit(m_connection);
     visitor.visit(m_error);
     visitor.visit(m_associated_request);
+    visitor.visit(m_scope);
 }
 
 void IDBTransaction::set_onabort(WebIDL::CallbackType* event_handler)
@@ -70,6 +71,7 @@ WebIDL::CallbackType* IDBTransaction::onerror()
     return event_handler_attribute(HTML::EventNames::error);
 }
 
+// https://w3c.github.io/IndexedDB/#dom-idbtransaction-abort
 WebIDL::ExceptionOr<void> IDBTransaction::abort()
 {
     // 1. If this's state is committing or finished, then throw an "InvalidStateError" DOMException.
@@ -80,6 +82,34 @@ WebIDL::ExceptionOr<void> IDBTransaction::abort()
     m_state = TransactionState::Inactive;
     abort_a_transaction(*this, nullptr);
     return {};
+}
+
+GC::Ptr<IDBObjectStore> IDBTransaction::object_store_named(String const& name) const
+{
+    for (auto const& store : m_scope) {
+        if (store->name() == name)
+            return store;
+    }
+
+    return nullptr;
+}
+
+// https://w3c.github.io/IndexedDB/#dom-idbtransaction-objectstore
+WebIDL::ExceptionOr<GC::Ref<IDBObjectStore>> IDBTransaction::object_store(String const& name)
+{
+    auto& realm = this->realm();
+
+    // 1. If this's state is finished, then throw an "InvalidStateError" DOMException.
+    if (m_state == TransactionState::Finished)
+        return WebIDL::InvalidStateError::create(realm, "Transaction is finished"_string);
+
+    // 2. Let store be the object store named name in this's scope, or throw a "NotFoundError" DOMException if none.
+    auto store = object_store_named(name);
+    if (!store)
+        return WebIDL::NotFoundError::create(realm, "Object store not found"_string);
+
+    // 3. Return an object store handle associated with store and this.
+    return GC::Ref(*store);
 }
 
 }
