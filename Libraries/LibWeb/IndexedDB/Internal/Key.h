@@ -29,6 +29,7 @@ class Key : public JS::Cell {
     // * a list of other keys if type is array.
     using KeyValue = Variant<double, AK::String, ByteBuffer, Vector<GC::Root<Key>>>;
 
+public:
     // A key has an associated type which is one of: number, date, string, binary, or array.
     enum KeyType {
         Number,
@@ -65,11 +66,6 @@ public:
     [[nodiscard]] static bool equals(GC::Ref<Key> a, GC::Ref<Key> b) { return compare_two_keys(a, b) == 0; }
     [[nodiscard]] static bool less_than(GC::Ref<Key> a, GC::Ref<Key> b) { return compare_two_keys(a, b) < 0; }
     [[nodiscard]] static bool greater_than(GC::Ref<Key> a, GC::Ref<Key> b) { return compare_two_keys(a, b) > 0; }
-
-    bool operator==(Key const& other) const
-    {
-        return Key::compare_two_keys(*this, other) == 0;
-    }
 
 private:
     Key(KeyType type, KeyValue value)
