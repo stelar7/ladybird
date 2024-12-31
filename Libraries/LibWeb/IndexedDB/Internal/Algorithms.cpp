@@ -4,15 +4,24 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Assertions.h>
+#include <AK/Error.h>
 #include <AK/QuickSort.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/ArrayBuffer.h>
 #include <LibJS/Runtime/DataView.h>
 #include <LibJS/Runtime/Date.h>
+#include <LibJS/Runtime/Object.h>
+#include <LibJS/Runtime/PrimitiveString.h>
+#include <LibJS/Runtime/PropertyKey.h>
+#include <LibJS/Runtime/Realm.h>
 #include <LibJS/Runtime/TypedArray.h>
 #include <LibJS/Runtime/VM.h>
+#include <LibJS/Runtime/Value.h>
 #include <LibWeb/DOM/EventDispatcher.h>
+#include <LibWeb/FileAPI/Blob.h>
+#include <LibWeb/FileAPI/File.h>
 #include <LibWeb/HTML/EventNames.h>
 #include <LibWeb/HTML/StructuredSerialize.h>
 #include <LibWeb/IndexedDB/IDBDatabase.h>
@@ -22,6 +31,7 @@
 #include <LibWeb/IndexedDB/Internal/Algorithms.h>
 #include <LibWeb/IndexedDB/Internal/ConnectionQueueHandler.h>
 #include <LibWeb/IndexedDB/Internal/Database.h>
+#include <LibWeb/IndexedDB/Internal/Key.h>
 #include <LibWeb/Infra/Strings.h>
 #include <LibWeb/StorageAPI/StorageKey.h>
 #include <LibWeb/WebIDL/AbstractOperations.h>
@@ -644,16 +654,202 @@ WebIDL::ExceptionOr<JS::Value> clone_in_realm(JS::Realm& target_realm, JS::Value
     transaction->set_state(IDBTransaction::TransactionState::Inactive);
 
     // 3. Let serialized be ? StructuredSerializeForStorage(value).
-    auto serialized = TRY(HTML::structured_serialize_for_storage(value));
+    auto serialized = TRY(HTML::structured_serialize_for_storage(target_realm.vm(), value));
 
     // 4. Let clone be ? StructuredDeserialize(serialized, targetRealm).
-    auto clone = TRY(HTML::structured_deserialize(serialized, target_realm));
+    auto clone = TRY(HTML::structured_deserialize(target_realm.vm(), serialized, target_realm));
 
     // 5. Set transaction’s state to active.
     transaction->set_state(IDBTransaction::TransactionState::Active);
 
     // 6. Return clone.
     return clone;
+}
+
+// https://w3c.github.io/IndexedDB/#extract-a-key-from-a-value-using-a-key-path
+WebIDL::ExceptionOr<ErrorOr<Key>> extract_a_key_from_a_value_using_a_key_path(JS::Realm& realm, JS::Value value, KeyPath key_path, bool multi_entry)
+{
+    // 1. Let r be the result of evaluating a key path on a value with value and keyPath. Rethrow any exceptions.
+    // 2. If r is failure, return failure.
+    auto r = TRY(TRY(evaluate_key_path_on_a_value(realm, value, key_path)));
+
+    // 3. Let key be the result of converting a value to a key with r if the multiEntry flag is false,
+    //    and the result of converting a value to a multiEntry key with r otherwise. Rethrow any exceptions.
+    // 4. If key is invalid, return invalid.
+    Optional<Key> key;
+    if (multi_entry) {
+        key = TRY(convert_a_value_to_a_multi_entry_key(realm, r));
+    } else {
+        key = TRY(convert_a_value_to_a_key(realm, r));
+    }
+
+    // 5. Return key.
+    return key.value();
+}
+
+// https://w3c.github.io/IndexedDB/#evaluate-a-key-path-on-a-value
+WebIDL::ExceptionOr<ErrorOr<JS::Value>> evaluate_key_path_on_a_value(JS::Realm& realm, JS::Value value, KeyPath key_path)
+{
+    // 1. If keyPath is a list of strings, then:
+    if (key_path.has<Vector<String>>()) {
+        auto& key_path_list = key_path.get<Vector<String>>();
+
+        // 1. Let result be a new Array object created as if by the expression [].
+        auto result = MUST(JS::Array::create(realm, 0));
+
+        // 2. Let i be 0.
+        u64 i = 0;
+
+        // 3. For each item of keyPath:
+        for (auto const& item : key_path_list) {
+            // 1. Let key be the result of recursively evaluating a key path on a value with item and value.
+            // 2. Assert: key is not an abrupt completion.
+            // 3. If key is failure, abort the overall algorithm and return failure.
+            auto key = TRY(TRY(evaluate_key_path_on_a_value(realm, value, item)));
+
+            // 4. Let p be ! ToString(i).
+            auto p = JS::PropertyKey { i };
+
+            // 5. Let status be CreateDataProperty(result, p, key).
+            auto status = result->create_data_property(p, key);
+
+            // 6. Assert: status is true.
+            MUST(status);
+
+            // 7. Increase i by 1.
+            i++;
+        }
+
+        // 4. Return result.
+        return result;
+    }
+
+    auto key_path_string = key_path.get<String>();
+
+    // 2. If keyPath is the empty string, return value and skip the remaining steps.
+    if (key_path_string.is_empty())
+        return value;
+
+    // 3. Let identifiers be the result of strictly splitting keyPath on U+002E FULL STOP characters (.).
+    auto identifiers = MUST(key_path_string.split('.'));
+
+    // 4. For each identifier of identifiers, jump to the appropriate step below:
+
+    for (auto const& identifier : identifiers) {
+        // If Type(value) is String, and identifier is "length"
+        if (value.is_string() && identifier == "length") {
+            // Let value be a Number equal to the number of elements in value.
+            value = JS::Value(value.as_string().utf16_string_view().length_in_code_units());
+        }
+
+        // If value is an Array and identifier is "length"
+        else if (value.is_object() && is<JS::Array>(value.as_object()) && identifier == "length") {
+            // Let value be ! ToLength(! Get(value, "length")).
+            value = JS::Value(MUST(length_of_array_like(realm.vm(), value.as_object())));
+        }
+
+        // If value is a Blob and identifier is "size"
+        else if (value.is_object() && is<FileAPI::Blob>(value.as_object()) && identifier == "size") {
+            // Let value be value’s size.
+            value = JS::Value(static_cast<FileAPI::Blob&>(value.as_object()).size());
+        }
+
+        // If value is a Blob and identifier is "type"
+        else if (value.is_object() && is<FileAPI::Blob>(value.as_object()) && identifier == "type") {
+            // Let value be a String equal to value’s type.
+            value = JS::PrimitiveString::create(realm.vm(), static_cast<FileAPI::Blob&>(value.as_object()).type());
+        }
+
+        // If value is a File and identifier is "name"
+        else if (value.is_object() && is<FileAPI::File>(value.as_object()) && identifier == "name") {
+            // Let value be a String equal to value’s name.
+            value = JS::PrimitiveString::create(realm.vm(), static_cast<FileAPI::File&>(value.as_object()).name());
+        }
+
+        // If value is a File and identifier is "lastModified"
+        else if (value.is_object() && is<FileAPI::File>(value.as_object()) && identifier == "lastModified") {
+            // Let value be a Number equal to value’s lastModified.
+            value = JS::Value(static_cast<double>(static_cast<FileAPI::File&>(value.as_object()).last_modified()));
+        }
+
+        // Otherwise
+        else {
+            // 1. If Type(value) is not Object, return failure.
+            if (!value.is_object())
+                return Error::from_string_literal("Value is not an object");
+
+            // 2. Let hop be ! HasOwnProperty(value, identifier).
+            auto hop = MUST(value.as_object().has_own_property(identifier.to_byte_string()));
+
+            // 3. If hop is false, return failure.
+            if (!hop)
+                return Error::from_string_literal("Property does not exist");
+
+            // 4. Let value be ! Get(value, identifier).
+            value = MUST(value.as_object().get(identifier.to_byte_string()));
+
+            // 5. If value is undefined, return failure.
+            if (value.is_undefined())
+                return Error::from_string_literal("Value is undefined");
+        }
+    }
+
+    // 5. Assert: value is not an abrupt completion.
+    // NOTE: This is not possible in our implementation.
+
+    // 6. Return value.
+    return value;
+}
+
+// https://w3c.github.io/IndexedDB/#convert-a-value-to-a-multientry-key
+ErrorOr<Key> convert_a_value_to_a_multi_entry_key(JS::Realm& realm, JS::Value value)
+{
+    // 1. If input is an Array exotic object, then:
+    if (value.is_object() && is<JS::Array>(value.as_object())) {
+        // 1. Let len be ? ToLength( ? Get(input, "length")).
+        auto maybe_length = length_of_array_like(realm.vm(), value.as_object());
+        if (maybe_length.is_error())
+            return Error::from_string_literal("Failed to get length of array-like object");
+
+        auto length = maybe_length.release_value();
+
+        // 2. Let seen be a new set containing only input.
+        Vector<JS::Value> seen { value };
+
+        // 3. Let keys be a new empty list.
+        Vector<Key> keys;
+
+        // 4. Let index be 0.
+        u64 index = 0;
+
+        // 5. While index is less than len:
+        while (index < length) {
+            // 1. Let entry be Get(input, index).
+            auto maybe_entry = value.as_object().get(index);
+
+            // 2. If entry is not an abrupt completion, then:
+            if (!maybe_entry.is_error()) {
+                // 1. Let key be the result of converting a value to a key with arguments entry and seen.
+                auto maybe_key = convert_a_value_to_a_key(realm, maybe_entry.release_value(), seen);
+
+                // 2. If key is not invalid or an abrupt completion, and there is no item in keys equal to key, then append key to keys.
+                if (!maybe_key.is_error()) {
+                    auto key = maybe_key.release_value();
+                    if (!keys.contains_slow(key))
+                        keys.append(key);
+                }
+            }
+
+            // 3. Increase index by 1.
+            index++;
+        }
+
+        // 6. Return a new array key with value set to keys.
+        return Key::create_array(keys);
+    }
+
+    // 2. Otherwise, return the result of converting a value to a key with argument input. Rethrow any exceptions.
+    return convert_a_value_to_a_key(realm, value);
 }
 
 }
