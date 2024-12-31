@@ -12,6 +12,21 @@
 
 namespace Web::IndexedDB {
 
+class RequestList : public AK::Vector<GC::Root<IDBRequest>> {
+public:
+    bool all_previous_requests_processed(GC::Ref<IDBRequest> const& request) const
+    {
+        for (auto const& entry : *this) {
+            if (entry == request)
+                return true;
+            if (!entry->processed())
+                return false;
+        }
+
+        return true;
+    }
+};
+
 using ConnectionMap = HashMap<StorageAPI::StorageKey, HashMap<String, RequestList>>;
 
 // https://w3c.github.io/IndexedDB/#connection-queues
