@@ -887,6 +887,26 @@ bool check_that_a_key_could_be_injected_into_a_value(JS::Realm& realm, JS::Value
     return value.is_object() || MUST(value.is_array(realm.vm()));
 }
 
+// https://w3c.github.io/IndexedDB/#generate-a-key
+WebIDL::ExceptionOr<u64> generate_a_key(GC::Ref<IDBObjectStore> store)
+{
+    // 1. Let generator be store’s key generator.
+    auto generator = store->key_generator().value();
+
+    // 2. Let key be generator’s current number.
+    auto key = generator.current_number();
+
+    // 3. If key is greater than 2^53 (9007199254740992), then return failure.
+    if (key > 9007199254740992)
+        return WebIDL::ConstraintError::create(store->realm(), "Key is greater than 2^53"_string);
+
+    // 4. Increase generator’s current number by 1.
+    generator.increment(1);
+
+    // 5. Return key.
+    return key;
+}
+
 // https://w3c.github.io/IndexedDB/#convert-a-key-to-a-value
 JS::Value convert_a_key_to_a_value(JS::Realm& realm, Key key)
 {
