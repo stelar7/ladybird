@@ -14,6 +14,7 @@
 #include <LibJS/Runtime/VM.h>
 #include <LibWeb/DOM/EventDispatcher.h>
 #include <LibWeb/HTML/EventNames.h>
+#include <LibWeb/HTML/StructuredSerialize.h>
 #include <LibWeb/IndexedDB/IDBDatabase.h>
 #include <LibWeb/IndexedDB/IDBRequest.h>
 #include <LibWeb/IndexedDB/IDBTransaction.h>
@@ -631,6 +632,28 @@ GC::Ref<HTML::DOMStringList> create_a_sorted_name_list(JS::Realm& realm, Vector<
 
     // 2. Return a new DOMStringList associated with sorted.
     return HTML::DOMStringList::create(realm, names);
+}
+
+// https://w3c.github.io/IndexedDB/#clone
+WebIDL::ExceptionOr<JS::Value> clone_in_realm(JS::Realm& target_realm, JS::Value value, GC::Ref<IDBTransaction> transaction)
+{
+    // 1. Assert: transaction’s state is active.
+    VERIFY(transaction->state() == IDBTransaction::TransactionState::Active);
+
+    // 2. Set transaction’s state to inactive.
+    transaction->set_state(IDBTransaction::TransactionState::Inactive);
+
+    // 3. Let serialized be ? StructuredSerializeForStorage(value).
+    auto serialized = TRY(HTML::structured_serialize_for_storage(value));
+
+    // 4. Let clone be ? StructuredDeserialize(serialized, targetRealm).
+    auto clone = TRY(HTML::structured_deserialize(serialized, target_realm));
+
+    // 5. Set transaction’s state to active.
+    transaction->set_state(IDBTransaction::TransactionState::Active);
+
+    // 6. Return clone.
+    return clone;
 }
 
 }
