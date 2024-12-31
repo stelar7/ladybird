@@ -7,6 +7,8 @@
 #include <AK/Assertions.h>
 #include <AK/Error.h>
 #include <AK/QuickSort.h>
+#include <AK/Variant.h>
+#include <LibGC/Ptr.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/ArrayBuffer.h>
@@ -23,7 +25,9 @@
 #include <LibWeb/FileAPI/Blob.h>
 #include <LibWeb/FileAPI/File.h>
 #include <LibWeb/HTML/EventNames.h>
+#include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
 #include <LibWeb/HTML/StructuredSerialize.h>
+#include <LibWeb/IndexedDB/IDBCursor.h>
 #include <LibWeb/IndexedDB/IDBDatabase.h>
 #include <LibWeb/IndexedDB/IDBRequest.h>
 #include <LibWeb/IndexedDB/IDBTransaction.h>
@@ -33,6 +37,7 @@
 #include <LibWeb/IndexedDB/Internal/Database.h>
 #include <LibWeb/IndexedDB/Internal/Key.h>
 #include <LibWeb/Infra/Strings.h>
+#include <LibWeb/Platform/EventLoopPlugin.h>
 #include <LibWeb/StorageAPI/StorageKey.h>
 #include <LibWeb/WebIDL/AbstractOperations.h>
 #include <LibWeb/WebIDL/Buffers.h>
@@ -1094,13 +1099,13 @@ WebIDL::ExceptionOr<Optional<Key>> store_a_record_into_an_object_store(GC::Ref<I
         }
     }
 
-    // FIXME: 2. If the no-overwrite flag was given to these steps and is true, and a record already exists in store with its key equal to key, 
+    // FIXME: 2. If the no-overwrite flag was given to these steps and is true, and a record already exists in store with its key equal to key,
     //    then this operation failed with a "ConstraintError" DOMException. Abort this algorithm without taking any further steps.
     (void)no_overwrite;
 
     // FIXME: 3. If a record already exists in store with its key equal to key, then remove the record from store using delete records from an object store.
 
-    // FIXME: 4. Store a record in store containing key as its key and ! StructuredSerializeForStorage(value) as its value. 
+    // FIXME: 4. Store a record in store containing key as its key and ! StructuredSerializeForStorage(value) as its value.
     //    The record is stored in the object store’s list of records such that the list is sorted according to the key of the records in ascending order.
 
     // FIXME: 5. For each index which references store:
@@ -1186,6 +1191,86 @@ void fire_a_success_event(JS::Realm& realm, GC::Ref<IDBRequest> request)
 
         // FIXME: 3. If transaction’s request list is empty, then run commit a transaction with transaction.
     }
+}
+
+// https://w3c.github.io/IndexedDB/#asynchronously-execute-a-request
+GC::Ref<IDBRequest> asynchronously_execute_a_request(JS::Realm& realm, IDBRequestSource source, GC::Ref<GC::Function<WebIDL::ExceptionOr<JS::Value>()>> operation, GC::Ptr<IDBRequest> request_input)
+{
+    // 1. Let transaction be the transaction associated with source.
+    auto transaction = source.visit(
+        [](Empty) -> GC::Ptr<IDBTransaction> {
+            VERIFY_NOT_REACHED();
+        },
+        [](GC::Ref<IDBObjectStore> object_store) -> GC::Ptr<IDBTransaction> {
+            return object_store->transaction();
+        },
+        [](GC::Ref<IDBIndex> index) -> GC::Ptr<IDBTransaction> {
+            return index->transaction();
+        },
+        [](GC::Ref<IDBCursor> cursor) -> GC::Ptr<IDBTransaction> {
+            return cursor->transaction();
+        });
+
+    // 2. Assert: transaction’s state is active.
+    VERIFY(transaction->state() == IDBTransaction::TransactionState::Active);
+
+    // 3. If request was not given, let request be a new request with source as source.
+    GC::Ref<IDBRequest> request = request_input ? GC::Ref(*request_input) : IDBRequest::create(realm, source);
+
+    // FIXME: 4. Add request to the end of transaction’s request list.
+
+    // 5. Run these steps in parallel:
+    Platform::EventLoopPlugin::the().deferred_invoke(GC::create_function(realm.heap(), [&realm, transaction, operation, request]() {
+        HTML::TemporaryExecutionContext context(realm, HTML::TemporaryExecutionContext::CallbacksEnabled::Yes);
+
+        // FIXME: 1. Wait until request is the first item in transaction’s request list that is not processed.
+
+        // 2. Let result be the result of performing operation.
+        auto result = operation->function()();
+
+        // 3. If result is an error and transaction’s state is committing, then run abort a transaction with transaction and result, and terminate these steps.
+        if (result.is_error() && transaction->state() == IDBTransaction::TransactionState::Committing) {
+            abort_a_transaction(*transaction, result.exception().get<GC::Ref<WebIDL::DOMException>>());
+            return;
+        }
+
+        // FIXME: 4. If result is an error, then revert all changes made by operation.
+
+        // 5. Set request’s processed flag to true.
+        request->set_processed(true);
+
+        // 6. Queue a task to run these steps:
+        HTML::queue_a_task(HTML::Task::Source::DatabaseAccess, nullptr, nullptr, GC::create_function(realm.vm().heap(), [&realm, request, result]() mutable {
+            // FIXME: 1. Remove request from transaction’s request list.
+
+            // 2. Set request’s done flag to true.
+            request->set_done(true);
+
+            // 3. If result is an error, then:
+            if (result.is_error()) {
+                // 1. Set request’s result to undefined.
+                request->set_result(JS::js_undefined());
+
+                // 2. Set request’s error to result.
+                request->set_error(result.exception().get<GC::Ref<WebIDL::DOMException>>());
+
+                // 3. Fire an error event at request.
+                fire_an_error_event(realm, request);
+            } else {
+                // 1. Set request’s result to result.
+                request->set_result(result.release_value());
+
+                // 2. Set request’s error to undefined.
+                request->set_error(nullptr);
+
+                // 3. Fire a success event at request.
+                fire_a_success_event(realm, request);
+            }
+        }));
+    }));
+
+    // 6. Return request.
+    return request;
 }
 
 }

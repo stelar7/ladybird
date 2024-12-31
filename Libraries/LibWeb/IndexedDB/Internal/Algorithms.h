@@ -22,6 +22,7 @@
 namespace Web::IndexedDB {
 
 using KeyPath = Variant<String, Vector<String>>;
+using IDBRequestSource = Variant<Empty, GC::Ref<IDBObjectStore>, GC::Ref<IDBIndex>, GC::Ref<IDBCursor>>;
 
 WebIDL::ExceptionOr<GC::Ref<IDBDatabase>> open_a_database_connection(JS::Realm&, StorageAPI::StorageKey, String, Optional<u64>, GC::Ref<IDBRequest>);
 bool fire_a_version_change_event(JS::Realm&, FlyString const&, GC::Ref<DOM::EventTarget>, u64, Optional<u64>);
@@ -43,6 +44,7 @@ WebIDL::ExceptionOr<u64> generate_a_key(GC::Ref<IDBObjectStore>);
 void inject_a_key_into_a_value_using_a_key_path(JS::Realm&, JS::Value, Key, KeyPath);
 JS::Value convert_a_key_to_a_value(JS::Realm&, Key);
 void possibly_update_the_key_generator(GC::Ref<IDBObjectStore>, Key);
+GC::Ref<IDBRequest> asynchronously_execute_a_request(JS::Realm&, IDBRequestSource, GC::Ref<GC::Function<WebIDL::ExceptionOr<JS::Value>()>>, GC::Ptr<IDBRequest> = nullptr);
 void fire_an_error_event(JS::Realm&, GC::Ref<IDBRequest>);
 void fire_a_success_event(JS::Realm&, GC::Ref<IDBRequest>);
 

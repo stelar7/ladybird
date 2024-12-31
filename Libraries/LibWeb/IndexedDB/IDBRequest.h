@@ -30,7 +30,7 @@ public:
     [[nodiscard]] GC::Ptr<IDBTransaction> transaction() const { return m_transaction; }
 
     [[nodiscard]] Bindings::IDBRequestReadyState ready_state() const;
-    [[nodiscard]] WebIDL::ExceptionOr<GC::Ptr<WebIDL::DOMException>> error() const;
+    [[nodiscard]] GC::Ptr<WebIDL::DOMException> error() const;
     [[nodiscard]] WebIDL::ExceptionOr<JS::Value> result() const;
 
     void set_done(bool done) { m_done = done; }
@@ -45,8 +45,10 @@ public:
     void set_onerror(WebIDL::CallbackType*);
     WebIDL::CallbackType* onerror();
 
+    [[nodiscard]] static GC::Ref<IDBRequest> create(JS::Realm&, IDBRequestSource);
+
 protected:
-    explicit IDBRequest(JS::Realm&);
+    explicit IDBRequest(JS::Realm&, IDBRequestSource);
 
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Visitor& visitor) override;

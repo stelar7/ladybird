@@ -17,11 +17,17 @@ class IDBCursor : public Bindings::PlatformObject {
     GC_DECLARE_ALLOCATOR(IDBCursor);
 
 public:
+    GC::Ref<IDBTransaction> transaction() { return m_transaction; }
+
     virtual ~IDBCursor() override;
-    [[nodiscard]] static GC::Ref<IDBCursor> create(JS::Realm&);
+    [[nodiscard]] static GC::Ref<IDBCursor> create(JS::Realm&, GC::Ref<IDBTransaction>);
 
 protected:
-    explicit IDBCursor(JS::Realm&);
+    explicit IDBCursor(JS::Realm&, GC::Ref<IDBTransaction>);
     virtual void initialize(JS::Realm&) override;
+
+private:
+    // A cursor has a transaction, the transaction that was active when the cursor was created.
+    GC::Ref<IDBTransaction> m_transaction;
 };
 }
