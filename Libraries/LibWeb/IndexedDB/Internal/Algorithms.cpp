@@ -501,12 +501,11 @@ void abort_a_transaction(IDBTransaction& transaction, GC::Ptr<WebIDL::DOMExcepti
 
             // 3. Set request’s error to a newly created "AbortError" DOMException.
             request->set_error(WebIDL::AbortError::create(request->realm(), "Transaction was aborted"_string));
-            
+
             // 4. Fire an event named error at request with its bubbles and cancelable attributes initialized to true.
             request->dispatch_event(DOM::Event::create(request->realm(), HTML::EventNames::error, { .bubbles = true, .cancelable = true }));
-        })); 
+        }));
     }
-
 
     // 6. Queue a task to run these steps:
     HTML::queue_a_task(HTML::Task::Source::DatabaseAccess, nullptr, nullptr, GC::create_function(transaction.realm().vm().heap(), [&transaction]() {
@@ -1235,13 +1234,17 @@ GC::Ref<IDBRequest> asynchronously_execute_a_request(JS::Realm& realm, IDBReques
     // 3. If request was not given, let request be a new request with source as source.
     GC::Ref<IDBRequest> request = request_input ? GC::Ref(*request_input) : IDBRequest::create(realm, source);
 
-    // FIXME: 4. Add request to the end of transaction’s request list.
+    // 4. Add request to the end of transaction’s request list.
+    transaction->request_list().append(request);
 
     // 5. Run these steps in parallel:
     Platform::EventLoopPlugin::the().deferred_invoke(GC::create_function(realm.heap(), [&realm, transaction, operation, request]() {
         HTML::TemporaryExecutionContext context(realm, HTML::TemporaryExecutionContext::CallbacksEnabled::Yes);
 
-        // FIXME: 1. Wait until request is the first item in transaction’s request list that is not processed.
+        // 1. Wait until request is the first item in transaction’s request list that is not processed.
+        HTML::main_thread_event_loop().spin_until(GC::create_function(realm.vm().heap(), [transaction, request]() {
+            return transaction->request_list().all_previous_requests_processed(request);
+        }));
 
         // 2. Let result be the result of performing operation.
         auto result = operation->function()();
@@ -1259,7 +1262,8 @@ GC::Ref<IDBRequest> asynchronously_execute_a_request(JS::Realm& realm, IDBReques
 
         // 6. Queue a task to run these steps:
         HTML::queue_a_task(HTML::Task::Source::DatabaseAccess, nullptr, nullptr, GC::create_function(realm.vm().heap(), [&realm, request, result]() mutable {
-            // FIXME: 1. Remove request from transaction’s request list.
+            // 1. Remove request from transaction’s request list.
+            request->transaction()->request_list().remove_first_matching([&request](auto& entry) { return entry.ptr() == request.ptr(); });
 
             // 2. Set request’s done flag to true.
             request->set_done(true);

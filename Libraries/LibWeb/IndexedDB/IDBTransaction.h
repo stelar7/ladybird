@@ -8,12 +8,14 @@
 
 #include <AK/Vector.h>
 #include <LibGC/Ptr.h>
+#include <LibGC/Root.h>
 #include <LibWeb/Bindings/IDBDatabasePrototype.h>
 #include <LibWeb/Bindings/IDBTransactionPrototype.h>
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/DOM/EventTarget.h>
 #include <LibWeb/IndexedDB/IDBDatabase.h>
 #include <LibWeb/IndexedDB/IDBObjectStore.h>
+#include <LibWeb/IndexedDB/IDBRequest.h>
 #include <LibWeb/IndexedDB/Internal/RequestList.h>
 
 namespace Web::IndexedDB {
