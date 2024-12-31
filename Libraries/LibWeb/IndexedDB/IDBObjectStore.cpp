@@ -27,6 +27,7 @@ IDBObjectStore::IDBObjectStore(JS::Realm& realm, String name, bool auto_incremen
     , m_auto_increment(auto_increment)
     , m_transaction(transaction)
 {
+    transaction->add_to_scope(*this);
 }
 
 GC::Ref<IDBObjectStore> IDBObjectStore::create(JS::Realm& realm, String name, bool auto_increment, Optional<KeyPath> const& key_path, GC::Ref<IDBTransaction> transaction)
@@ -38,6 +39,13 @@ void IDBObjectStore::initialize(JS::Realm& realm)
 {
     Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(IDBObjectStore);
+}
+
+void IDBObjectStore::visit_edges(Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_transaction);
+    visitor.visit(m_indexes);
 }
 
 WebIDL::ExceptionOr<GC::Ref<IDBIndex>> IDBObjectStore::create_index(String const& name, KeyPath key_path, IDBIndexParameters options)

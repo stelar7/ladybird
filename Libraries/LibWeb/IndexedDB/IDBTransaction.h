@@ -6,12 +6,14 @@
 
 #pragma once
 
+#include <AK/Vector.h>
 #include <LibGC/Ptr.h>
 #include <LibWeb/Bindings/IDBDatabasePrototype.h>
 #include <LibWeb/Bindings/IDBTransactionPrototype.h>
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/DOM/EventTarget.h>
 #include <LibWeb/IndexedDB/IDBDatabase.h>
+#include <LibWeb/IndexedDB/IDBObjectStore.h>
 
 namespace Web::IndexedDB {
 
@@ -49,7 +51,11 @@ public:
     [[nodiscard]] bool is_readonly() const { return m_mode == Bindings::IDBTransactionMode::Readonly; }
     [[nodiscard]] bool is_readwrite() const { return m_mode == Bindings::IDBTransactionMode::Readwrite; }
 
+    void add_to_scope(GC::Ref<IDBObjectStore> object_store) { m_scope.append(object_store); }
+    [[nodiscard]] GC::Ptr<IDBObjectStore> object_store_named(String const& name) const;
+
     WebIDL::ExceptionOr<void> abort();
+    WebIDL::ExceptionOr<GC::Ref<IDBObjectStore>> object_store(String const& name);
 
     void set_onabort(WebIDL::CallbackType*);
     WebIDL::CallbackType* onabort();
@@ -72,5 +78,8 @@ private:
 
     GC::Ptr<IDBRequest> m_associated_request;
     bool m_aborted { false };
+
+    // A transaction has a scope which is a set of object stores that the transaction may interact with.
+    Vector<GC::Ref<IDBObjectStore>> m_scope;
 };
 }

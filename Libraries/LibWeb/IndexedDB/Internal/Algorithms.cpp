@@ -312,7 +312,9 @@ void upgrade_a_database(JS::Realm& realm, GC::Ref<IDBDatabase> connection, u64 v
     // 2. Let transaction be a new upgrade transaction with connection used as connection.
     auto transaction = IDBTransaction::create(realm, connection);
 
-    // FIXME: 3. Set transaction’s scope to connection’s object store set.
+    // 3. Set transaction’s scope to connection’s object store set.
+    for (auto const& object_store : connection->object_store_set())
+        transaction->add_to_scope(object_store);
 
     // 4. Set db’s upgrade transaction to transaction.
     db->set_upgrade_transaction(transaction);
