@@ -39,6 +39,7 @@ void IDBTransaction::visit_edges(Visitor& visitor)
     visitor.visit(m_error);
     visitor.visit(m_associated_request);
     visitor.visit(m_scope);
+    visitor.visit(m_request_list);
 }
 
 void IDBTransaction::set_onabort(WebIDL::CallbackType* event_handler)
