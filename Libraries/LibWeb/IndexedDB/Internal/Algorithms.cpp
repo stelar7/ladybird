@@ -1041,4 +1041,28 @@ JS::Value convert_a_key_to_a_value(JS::Realm& realm, Key key)
     VERIFY_NOT_REACHED();
 }
 
+// https://w3c.github.io/IndexedDB/#possibly-update-the-key-generator
+void possibly_update_the_key_generator(GC::Ref<IDBObjectStore> store, Key key)
+{
+    // 1. If the type of key is not number, abort these steps.
+    if (key.type() != Key::KeyType::Number)
+        return;
+
+    // 2. Let value be the value of key.
+    auto value = key.value_as_double();
+
+    // 3. Set value to the minimum of value and 2^53 (9007199254740992).
+    value = min(value, 9007199254740992.0);
+
+    // 4. Set value to the largest integer not greater than value.
+    value = floor(value);
+
+    // 5. Let generator be store’s key generator.
+    auto generator = store->key_generator().value();
+
+    // 6. If value is greater than or equal to generator’s current number, then set generator’s current number to value + 1.
+    if (value >= generator.current_number())
+        generator.set(value + 1);
+}
+
 }
