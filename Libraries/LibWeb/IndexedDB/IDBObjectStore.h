@@ -16,6 +16,7 @@
 #include <LibJS/Runtime/Value.h>
 #include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/IndexedDB/IDBIndex.h>
+#include <LibWeb/IndexedDB/IDBRequest.h>
 #include <LibWeb/IndexedDB/IDBTransaction.h>
 #include <LibWeb/IndexedDB/Internal/Algorithms.h>
 #include <LibWeb/IndexedDB/Internal/KeyGenerator.h>
@@ -37,6 +38,7 @@ public:
     void set_name(String name) { m_name = move(name); }
 
     bool auto_increment() const { return m_auto_increment; }
+    Optional<KeyPath> internal_key_path() const { return m_key_path; }
     JS::Value key_path() const
     {
         if (!m_key_path.has_value())
@@ -53,12 +55,18 @@ public:
     bool uses_inline_keys() const { return m_key_path.has_value(); }
     bool uses_out_of_line_keys() const { return !m_key_path.has_value(); }
 
+    Optional<KeyGenerator> key_generator() const { return m_key_generator; }
+
     GC::Ref<IDBTransaction> transaction() { return m_transaction; }
     AK::ReadonlySpan<GC::Ref<IDBIndex>> index_set() const { return m_indexes; }
     void add_index(GC::Ref<IDBIndex> index) { m_indexes.append(index); }
 
     WebIDL::ExceptionOr<GC::Ref<IDBIndex>> create_index(String const&, KeyPath, IDBIndexParameters options = {});
     [[nodiscard]] GC::Ref<HTML::DOMStringList> index_names();
+    [[nodiscard]] WebIDL::ExceptionOr<GC::Ref<IDBRequest>> add_or_put(GC::Ref<IDBObjectStore>, JS::Value, Optional<JS::Value> const&, bool);
+
+    // https://w3c.github.io/IndexedDB/#dom-idbobjectstore-add
+    [[nodiscard]] WebIDL::ExceptionOr<GC::Ref<IDBRequest>> add(JS::Value value, Optional<JS::Value> const& key) { return add_or_put(*this, value, key, false); }
 
     virtual ~IDBObjectStore() override;
     [[nodiscard]] static GC::Ref<IDBObjectStore> create(JS::Realm&, String, bool, Optional<KeyPath> const&, GC::Ref<IDBTransaction>);
