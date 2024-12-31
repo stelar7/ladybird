@@ -44,5 +44,6 @@ void inject_a_key_into_a_value_using_a_key_path(JS::Realm&, JS::Value, Key, KeyP
 JS::Value convert_a_key_to_a_value(JS::Realm&, Key);
 void possibly_update_the_key_generator(GC::Ref<IDBObjectStore>, Key);
 void fire_an_error_event(JS::Realm&, GC::Ref<IDBRequest>);
+void fire_a_success_event(JS::Realm&, GC::Ref<IDBRequest>);
 
 }
