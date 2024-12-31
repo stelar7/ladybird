@@ -72,13 +72,25 @@ protected:
     virtual void visit_edges(Visitor& visitor) override;
 
 private:
+    // Returns the transaction’s connection.
     GC::Ref<IDBDatabase> m_connection;
+
+    // A transaction has a mode that determines which types of interactions can be performed upon that transaction.
     Bindings::IDBTransactionMode m_mode;
+
+    // A transaction has a durability hint. This is a hint to the user agent of whether to prioritize performance or durability when committing the transaction. 
     Bindings::IDBTransactionDurability m_durability { Bindings::IDBTransactionDurability::Default };
+
+    // A transaction has a state
     TransactionState m_state;
+
+    // A transaction has a error which is set if the transaction is aborted.
     GC::Ptr<WebIDL::DOMException> m_error;
 
+    // A transaction has an associated upgrade request
     GC::Ptr<IDBRequest> m_associated_request;
+
+    // Ad-hoc, we need to track abort state separately, since we cannot rely on only the error.
     bool m_aborted { false };
 
     // A transaction has a scope which is a set of object stores that the transaction may interact with.
