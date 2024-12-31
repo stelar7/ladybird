@@ -15,14 +15,15 @@ GC_DEFINE_ALLOCATOR(IDBCursor);
 
 IDBCursor::~IDBCursor() = default;
 
-IDBCursor::IDBCursor(JS::Realm& realm)
+IDBCursor::IDBCursor(JS::Realm& realm, GC::Ref<IDBTransaction> transaction)
     : PlatformObject(realm)
+    , m_transaction(transaction)
 {
 }
 
-GC::Ref<IDBCursor> IDBCursor::create(JS::Realm& realm)
+GC::Ref<IDBCursor> IDBCursor::create(JS::Realm& realm, GC::Ref<IDBTransaction> transaction)
 {
-    return realm.create<IDBCursor>(realm);
+    return realm.create<IDBCursor>(realm, transaction);
 }
 
 void IDBCursor::initialize(JS::Realm& realm)
