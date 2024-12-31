@@ -14,6 +14,7 @@
 #include <LibWeb/DOM/EventTarget.h>
 #include <LibWeb/IndexedDB/IDBDatabase.h>
 #include <LibWeb/IndexedDB/IDBObjectStore.h>
+#include <LibWeb/IndexedDB/Internal/RequestList.h>
 
 namespace Web::IndexedDB {
 
@@ -42,6 +43,7 @@ public:
     [[nodiscard]] bool aborted() const { return m_aborted; }
     [[nodiscard]] GC::Ref<HTML::DOMStringList> object_store_names();
     [[nodiscard]] ReadonlySpan<GC::Ref<IDBObjectStore>> scope() const { return m_scope; }
+    [[nodiscard]] RequestList request_list() const { return m_request_list; }
 
     void set_mode(Bindings::IDBTransactionMode mode) { m_mode = mode; }
     void set_state(TransactionState state) { m_state = state; }
@@ -78,7 +80,7 @@ private:
     // A transaction has a mode that determines which types of interactions can be performed upon that transaction.
     Bindings::IDBTransactionMode m_mode;
 
-    // A transaction has a durability hint. This is a hint to the user agent of whether to prioritize performance or durability when committing the transaction. 
+    // A transaction has a durability hint. This is a hint to the user agent of whether to prioritize performance or durability when committing the transaction.
     Bindings::IDBTransactionDurability m_durability { Bindings::IDBTransactionDurability::Default };
 
     // A transaction has a state
@@ -95,5 +97,8 @@ private:
 
     // A transaction has a scope which is a set of object stores that the transaction may interact with.
     Vector<GC::Ref<IDBObjectStore>> m_scope;
+
+    // A transaction has a request list of pending requests which have been made against the transaction.
+    RequestList m_request_list;
 };
 }
