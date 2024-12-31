@@ -15,6 +15,7 @@ class KeyGenerator {
 public:
     [[nodiscard]] u64 current_number() const { return m_current_number; }
     void increment(u64 amount) { m_current_number += amount; }
+    void set(u64 value) { m_current_number = value; }
 
 private:
     // A key generator has a current number.
