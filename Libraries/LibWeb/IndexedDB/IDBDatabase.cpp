@@ -147,8 +147,7 @@ GC::Ref<HTML::DOMStringList> IDBDatabase::object_store_names()
         names.append(object_store->name());
 
     // 2. Return the result (a DOMStringList) of creating a sorted name list with names.
-    quick_sort(names);
-    return HTML::DOMStringList::create(realm(), names);
+    return create_a_sorted_name_list(realm(), names);
 }
 
 // https://w3c.github.io/IndexedDB/#dom-idbdatabase-close
