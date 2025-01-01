@@ -15,15 +15,16 @@ GC_DEFINE_ALLOCATOR(IDBTransaction);
 
 IDBTransaction::~IDBTransaction() = default;
 
-IDBTransaction::IDBTransaction(JS::Realm& realm, GC::Ref<IDBDatabase> database)
+IDBTransaction::IDBTransaction(JS::Realm& realm, GC::Ref<IDBDatabase> connection)
     : EventTarget(realm)
-    , m_connection(database)
+    , m_connection(connection)
 {
+    connection->add_created_transaction(*this);
 }
 
-GC::Ref<IDBTransaction> IDBTransaction::create(JS::Realm& realm, GC::Ref<IDBDatabase> database)
+GC::Ref<IDBTransaction> IDBTransaction::create(JS::Realm& realm, GC::Ref<IDBDatabase> connection)
 {
-    return realm.create<IDBTransaction>(realm, database);
+    return realm.create<IDBTransaction>(realm, connection);
 }
 
 void IDBTransaction::initialize(JS::Realm& realm)

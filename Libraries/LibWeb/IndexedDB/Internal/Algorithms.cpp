@@ -315,8 +315,24 @@ void close_a_database_connection(IDBDatabase& connection, bool forced)
     // 1. Set connection’s close pending flag to true.
     connection.set_close_pending(true);
 
-    // FIXME: 2. If the forced flag is true, then for each transaction created using connection run abort a transaction with transaction and newly created "AbortError" DOMException.
-    // FIXME: 3. Wait for all transactions created using connection to complete. Once they are complete, connection is closed.
+    // 2. If the forced flag is true, then for each transaction created using connection run abort a transaction with transaction and newly created "AbortError" DOMException.
+    if (forced) {
+        for (auto const& transaction : connection.created_transactions()) {
+            abort_a_transaction(*transaction, WebIDL::AbortError::create(connection.realm(), "Connection was closed"_string));
+        }
+    }
+
+    // 3. Wait for all transactions created using connection to complete. Once they are complete, connection is closed.
+    HTML::main_thread_event_loop().spin_until(GC::create_function(connection.realm().vm().heap(), [&connection]() {
+        for (auto const& transaction : connection.created_transactions()) {
+            if (!transaction->is_complete()) {
+                return false;
+            }
+        }
+
+        return true;
+    }));
+
     connection.set_state(IDBDatabase::ConnectionState::Closed);
 
     // 4. If the forced flag is true, then fire an event named close at connection.
