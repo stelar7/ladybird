@@ -11,6 +11,8 @@
 #include <LibWeb/HTML/DOMStringList.h>
 #include <LibWeb/IndexedDB/IDBObjectStore.h>
 #include <LibWeb/IndexedDB/IDBRequest.h>
+#include <LibWeb/IndexedDB/IDBTransaction.h>
+#include <LibWeb/IndexedDB/Internal/Algorithms.h>
 #include <LibWeb/IndexedDB/Internal/Database.h>
 #include <LibWeb/StorageAPI/StorageKey.h>
 
@@ -72,6 +74,8 @@ public:
     void set_onversionchange(WebIDL::CallbackType*);
     WebIDL::CallbackType* onversionchange();
 
+    [[nodiscard]] String uuid() const { return m_uuid; }
+
 protected:
     explicit IDBDatabase(JS::Realm&, Database&);
 
@@ -94,6 +98,8 @@ private:
     // NOTE: We need to keep track of what transactions are created using this connection
     Vector<GC::Ref<IDBTransaction>> m_created_transactions;
 
+    // Note: Used for debug purposes
+    String m_uuid;
 };
 
 }
