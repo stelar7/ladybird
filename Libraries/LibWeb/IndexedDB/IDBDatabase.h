@@ -52,6 +52,8 @@ public:
     [[nodiscard]] ConnectionState state() const { return m_state; }
     [[nodiscard]] GC::Ref<Database> associated_database() { return m_associated_database; }
     [[nodiscard]] GC::Ref<HTML::DOMStringList> object_store_names();
+    [[nodiscard]] ReadonlySpan<GC::Ref<IDBTransaction>> created_transactions() { return m_created_transactions; }
+    void add_created_transaction(GC::Ref<IDBTransaction> transaction) { m_created_transactions.append(transaction); }
 
     // A connection has an object store set, which is initialized to the set of object stores in the associated database
     [[nodiscard]] ReadonlySpan<GC::Ref<IDBObjectStore>> object_store_set() { return this->associated_database()->object_stores(); }
@@ -88,6 +90,10 @@ private:
     // NOTE: There is an associated database in the spec, but there is no mention where it is assigned, nor where its from
     //       So we stash the one we have when opening a connection.
     GC::Ref<Database> m_associated_database;
+
+    // NOTE: We need to keep track of what transactions are created using this connection
+    Vector<GC::Ref<IDBTransaction>> m_created_transactions;
+
 };
 
 }
