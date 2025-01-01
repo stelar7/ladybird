@@ -5,6 +5,7 @@
  */
 
 #include <LibWeb/Bindings/Intrinsics.h>
+#include <LibWeb/Crypto/Crypto.h>
 #include <LibWeb/HTML/EventNames.h>
 #include <LibWeb/IndexedDB/IDBTransaction.h>
 #include <LibWeb/IndexedDB/Internal/Algorithms.h>
@@ -20,6 +21,7 @@ IDBTransaction::IDBTransaction(JS::Realm& realm, GC::Ref<IDBDatabase> connection
     , m_connection(connection)
 {
     connection->add_created_transaction(*this);
+    m_uuid = MUST(Crypto::generate_random_uuid());
 }
 
 GC::Ref<IDBTransaction> IDBTransaction::create(JS::Realm& realm, GC::Ref<IDBDatabase> connection)
@@ -126,7 +128,6 @@ GC::Ref<HTML::DOMStringList> IDBTransaction::object_store_names()
     return create_a_sorted_name_list(realm(), names);
 }
 
-
 // https://w3c.github.io/IndexedDB/#dom-idbtransaction-commit
 WebIDL::ExceptionOr<void> IDBTransaction::commit()
 {
@@ -138,6 +139,5 @@ WebIDL::ExceptionOr<void> IDBTransaction::commit()
     commit_a_transaction(realm(), *this);
     return {};
 }
-
 
 }
