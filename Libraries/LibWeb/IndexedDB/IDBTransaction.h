@@ -61,6 +61,7 @@ public:
 
     void add_to_scope(GC::Ref<IDBObjectStore> object_store) { m_scope.append(object_store); }
     [[nodiscard]] GC::Ptr<IDBObjectStore> object_store_named(String const& name) const;
+    [[nodiscard]] String uuid() const { return m_uuid; }
 
     WebIDL::ExceptionOr<void> abort();
     WebIDL::ExceptionOr<void> commit();
@@ -105,5 +106,8 @@ private:
 
     // A transaction has a request list of pending requests which have been made against the transaction.
     RequestList m_request_list;
+
+    // Note: Used for debug purposes
+    String m_uuid;
 };
 }
