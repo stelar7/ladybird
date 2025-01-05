@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibWeb/Bindings/IDBDatabasePrototype.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Crypto/Crypto.h>
 #include <LibWeb/HTML/EventNames.h>
@@ -16,17 +17,20 @@ GC_DEFINE_ALLOCATOR(IDBTransaction);
 
 IDBTransaction::~IDBTransaction() = default;
 
-IDBTransaction::IDBTransaction(JS::Realm& realm, GC::Ref<IDBDatabase> connection)
+IDBTransaction::IDBTransaction(JS::Realm& realm, GC::Ref<IDBDatabase> connection, Bindings::IDBTransactionMode mode, Bindings::IDBTransactionDurability durability, Vector<GC::Root<IDBObjectStore>> scopes)
     : EventTarget(realm)
     , m_connection(connection)
+    , m_mode(mode)
+    , m_durability(durability)
+    , m_scope(move(scopes))
 {
     connection->add_created_transaction(*this);
     m_uuid = MUST(Crypto::generate_random_uuid());
 }
 
-GC::Ref<IDBTransaction> IDBTransaction::create(JS::Realm& realm, GC::Ref<IDBDatabase> connection)
+GC::Ref<IDBTransaction> IDBTransaction::create(JS::Realm& realm, GC::Ref<IDBDatabase> connection, Bindings::IDBTransactionMode mode, Bindings::IDBTransactionDurability durability = Bindings::IDBTransactionDurability::Default, Vector<GC::Root<IDBObjectStore>> scopes = {})
 {
-    return realm.create<IDBTransaction>(realm, connection);
+    return realm.create<IDBTransaction>(realm, connection, mode, durability, move(scopes));
 }
 
 void IDBTransaction::initialize(JS::Realm& realm)
@@ -43,6 +47,7 @@ void IDBTransaction::visit_edges(Visitor& visitor)
     visitor.visit(m_associated_request);
     visitor.visit(m_scope);
     visitor.visit(m_request_list);
+    visitor.visit(m_cleanup_event_loop);
 }
 
 void IDBTransaction::set_onabort(WebIDL::CallbackType* event_handler)
@@ -92,7 +97,7 @@ GC::Ptr<IDBObjectStore> IDBTransaction::object_store_named(String const& name) c
 {
     for (auto const& store : m_scope) {
         if (store->name() == name)
-            return store;
+            return GC::Ref(*store);
     }
 
     return nullptr;
