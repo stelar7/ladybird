@@ -147,7 +147,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::add_or_put(GC::Ref<IDBO
     if (store.uses_out_of_line_keys() && !store.key_generator().has_value() && !key.has_value())
         return WebIDL::DataError::create(realm, "Store uses out-of-line keys and has no key generator and key was not given"_string);
 
-    Optional<Key> key_value;
+    GC::Ptr<Key> key_value;
     // 8. If key was given, then:
     if (key.has_value()) {
         // 1. Let r be the result of converting a value to a key with key. Rethrow any exceptions.
@@ -201,10 +201,10 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::add_or_put(GC::Ref<IDBO
             return WebIDL::ExceptionOr<JS::Value>(maybe_key.release_error());
 
         auto optional_key = maybe_key.release_value();
-        if (!optional_key.has_value())
+        if (optional_key == nullptr)
             return WebIDL::ExceptionOr<JS::Value>(JS::js_undefined());
 
-        return WebIDL::ExceptionOr<JS::Value>(convert_a_key_to_a_value(realm, optional_key.value()));
+        return WebIDL::ExceptionOr<JS::Value>(convert_a_key_to_a_value(realm, GC::Ref(*optional_key)));
     });
 
     // 13. Return the result (an IDBRequest) of running asynchronously execute a request with handle and operation.
@@ -252,7 +252,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::put(JS::Value value, Op
     return add_or_put(*this, value, key, false);
 }
 
-bool IDBObjectStore::has_record_with_key(Key key)
+bool IDBObjectStore::has_record_with_key(GC::Ref<Key> key)
 {
     auto index = m_records.find_if([&key](auto const& record) {
         return record.key == key;
