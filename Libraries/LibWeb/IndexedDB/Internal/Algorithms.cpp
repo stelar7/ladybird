@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include "LibWeb/Bindings/IDBDatabasePrototype.h"
 #include <AK/Assertions.h>
 #include <AK/Error.h>
 #include <AK/Format.h>
@@ -374,8 +375,7 @@ GC::Ref<IDBTransaction> upgrade_a_database(JS::Realm& realm, GC::Ref<IDBDatabase
     auto db = connection->associated_database();
 
     // 2. Let transaction be a new upgrade transaction with connection used as connection.
-    auto transaction = IDBTransaction::create(realm, connection);
-    transaction->set_mode(Bindings::IDBTransactionMode::Versionchange);
+    auto transaction = IDBTransaction::create(realm, connection, Bindings::IDBTransactionMode::Versionchange, Bindings::IDBTransactionDurability::Default, {});
     dbgln_if(IDB_DEBUG, "Created new upgrade transaction with UUID: {}", transaction->uuid());
 
     // 3. Set transaction’s scope to connection’s object store set.
