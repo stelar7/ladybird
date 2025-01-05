@@ -32,7 +32,7 @@ struct IDBIndexParameters {
 
 // https://w3c.github.io/IndexedDB/#object-store-record
 struct Record {
-    Key key;
+    GC::Ref<Key> key;
     HTML::SerializationRecord value;
 };
 
@@ -79,10 +79,10 @@ public:
     virtual ~IDBObjectStore() override;
     [[nodiscard]] static GC::Ref<IDBObjectStore> create(JS::Realm&, String, bool, Optional<KeyPath> const&, GC::Ref<IDBTransaction>);
 
-    [[nodiscard]] bool has_record_with_key(Key key);
+    [[nodiscard]] bool has_record_with_key(GC::Ref<Key> key);
     void remove_records_in_range(GC::Ref<IDBKeyRange>);
     void store_a_record(Record const&);
-    u64 count_records_in_range(GC::Ref<IDBKeyRange>);
+    [[nodiscard]] u64 count_records_in_range(GC::Ref<IDBKeyRange>);
 
 protected:
     explicit IDBObjectStore(JS::Realm&, String, bool, Optional<KeyPath> const&, GC::Ref<IDBTransaction>);

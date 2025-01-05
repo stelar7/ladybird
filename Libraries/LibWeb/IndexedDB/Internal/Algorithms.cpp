@@ -757,7 +757,7 @@ WebIDL::ExceptionOr<JS::Value> clone_in_realm(JS::Realm& target_realm, JS::Value
 }
 
 // https://w3c.github.io/IndexedDB/#extract-a-key-from-a-value-using-a-key-path
-WebIDL::ExceptionOr<ErrorOr<Key>> extract_a_key_from_a_value_using_a_key_path(JS::Realm& realm, JS::Value value, KeyPath key_path, bool multi_entry)
+WebIDL::ExceptionOr<ErrorOr<GC::Ref<Key>>> extract_a_key_from_a_value_using_a_key_path(JS::Realm& realm, JS::Value value, KeyPath key_path, bool multi_entry)
 {
     // 1. Let r be the result of evaluating a key path on a value with value and keyPath. Rethrow any exceptions.
     // 2. If r is failure, return failure.
@@ -766,7 +766,7 @@ WebIDL::ExceptionOr<ErrorOr<Key>> extract_a_key_from_a_value_using_a_key_path(JS
     // 3. Let key be the result of converting a value to a key with r if the multiEntry flag is false,
     //    and the result of converting a value to a multiEntry key with r otherwise. Rethrow any exceptions.
     // 4. If key is invalid, return invalid.
-    Optional<Key> key;
+    GC::Ptr<Key> key;
     if (multi_entry) {
         key = TRY(convert_a_value_to_a_multi_entry_key(realm, r));
     } else {
@@ -774,7 +774,7 @@ WebIDL::ExceptionOr<ErrorOr<Key>> extract_a_key_from_a_value_using_a_key_path(JS
     }
 
     // 5. Return key.
-    return key.value();
+    return GC::Ref(*key);
 }
 
 // https://w3c.github.io/IndexedDB/#evaluate-a-key-path-on-a-value
@@ -892,7 +892,7 @@ WebIDL::ExceptionOr<ErrorOr<JS::Value>> evaluate_key_path_on_a_value(JS::Realm& 
 }
 
 // https://w3c.github.io/IndexedDB/#convert-a-value-to-a-multientry-key
-ErrorOr<Key> convert_a_value_to_a_multi_entry_key(JS::Realm& realm, JS::Value value)
+ErrorOr<GC::Ref<Key>> convert_a_value_to_a_multi_entry_key(JS::Realm& realm, JS::Value value)
 {
     // 1. If input is an Array exotic object, then:
     if (value.is_object() && is<JS::Array>(value.as_object())) {
@@ -907,7 +907,7 @@ ErrorOr<Key> convert_a_value_to_a_multi_entry_key(JS::Realm& realm, JS::Value va
         Vector<JS::Value> seen { value };
 
         // 3. Let keys be a new empty list.
-        Vector<Key> keys;
+        Vector<GC::Root<Key>> keys;
 
         // 4. Let index be 0.
         u64 index = 0;
@@ -935,7 +935,7 @@ ErrorOr<Key> convert_a_value_to_a_multi_entry_key(JS::Realm& realm, JS::Value va
         }
 
         // 6. Return a new array key with value set to keys.
-        return Key::create_array(keys);
+        return Key::create_array(realm, keys);
     }
 
     // 2. Otherwise, return the result of converting a value to a key with argument input. Rethrow any exceptions.
@@ -998,7 +998,7 @@ WebIDL::ExceptionOr<u64> generate_a_key(GC::Ref<IDBObjectStore> store)
 }
 
 // https://w3c.github.io/IndexedDB/#inject-a-key-into-a-value-using-a-key-path
-void inject_a_key_into_a_value_using_a_key_path(JS::Realm& realm, JS::Value value, Key key, KeyPath key_path)
+void inject_a_key_into_a_value_using_a_key_path(JS::Realm& realm, JS::Value value, GC::Ref<Key> key, KeyPath key_path)
 {
     // 1. Let identifiers be the result of strictly splitting keyPath on U+002E FULL STOP characters (.).
     auto identifiers = MUST(key_path.get<String>().split('.'));
@@ -1047,29 +1047,29 @@ void inject_a_key_into_a_value_using_a_key_path(JS::Realm& realm, JS::Value valu
 }
 
 // https://w3c.github.io/IndexedDB/#convert-a-key-to-a-value
-JS::Value convert_a_key_to_a_value(JS::Realm& realm, Key key)
+JS::Value convert_a_key_to_a_value(JS::Realm& realm, GC::Ref<Key> key)
 {
     // 1. Let type be key’s type.
-    auto type = key.type();
+    auto type = key->type();
 
     // 2. Let value be key’s value.
-    auto value = key.value();
+    auto value = key->value();
 
     // 3. Switch on type:
     switch (type) {
     case Key::KeyType::Number: {
         // Return an ECMAScript Number value equal to value
-        return JS::Value(key.value_as_double());
+        return JS::Value(key->value_as_double());
     }
 
     case Key::KeyType::String: {
         // Return an ECMAScript String value equal to value
-        return JS::PrimitiveString::create(realm.vm(), key.value_as_string());
+        return JS::PrimitiveString::create(realm.vm(), key->value_as_string());
     }
 
     case Key::KeyType::Date: {
         // 1. Let date be the result of executing the ECMAScript Date constructor with the single argument value.
-        auto date = JS::Date::create(realm, key.value_as_double());
+        auto date = JS::Date::create(realm, key->value_as_double());
 
         // 2. Assert: date is not an abrupt completion.
         // NOTE: This is not possible in our implementation.
@@ -1079,7 +1079,7 @@ JS::Value convert_a_key_to_a_value(JS::Realm& realm, Key key)
     }
 
     case Key::KeyType::Binary: {
-        auto buffer = key.value_as_byte_buffer();
+        auto buffer = key->value_as_byte_buffer();
 
         // 1. Let len be value’s length.
         auto len = buffer.size();
@@ -1096,7 +1096,7 @@ JS::Value convert_a_key_to_a_value(JS::Realm& realm, Key key)
     }
 
     case Key::KeyType::Array: {
-        auto data = key.value_as_vector();
+        auto data = key->value_as_vector();
 
         // 1. Let array be the result of executing the ECMAScript Array constructor with no arguments.
         // 2. Assert: array is not an abrupt completion.
@@ -1111,7 +1111,7 @@ JS::Value convert_a_key_to_a_value(JS::Realm& realm, Key key)
         // 5. While index is less than len:
         while (index < len) {
             // 1. Let entry be the result of converting a key to a value with value[index].
-            auto entry = convert_a_key_to_a_value(realm, data[index]);
+            auto entry = convert_a_key_to_a_value(realm, *data[index]);
 
             // 2. Let status be CreateDataProperty(array, index, entry).
             auto status = MUST(array->create_data_property(index, entry));
@@ -1132,14 +1132,14 @@ JS::Value convert_a_key_to_a_value(JS::Realm& realm, Key key)
 }
 
 // https://w3c.github.io/IndexedDB/#possibly-update-the-key-generator
-void possibly_update_the_key_generator(GC::Ref<IDBObjectStore> store, Key key)
+void possibly_update_the_key_generator(GC::Ref<IDBObjectStore> store, GC::Ref<Key> key)
 {
     // 1. If the type of key is not number, abort these steps.
-    if (key.type() != Key::KeyType::Number)
+    if (key->type() != Key::KeyType::Number)
         return;
 
     // 2. Let value be the value of key.
-    auto value = key.value_as_double();
+    auto value = key->value_as_double();
 
     // 3. Set value to the minimum of value and 2^53 (9007199254740992).
     value = min(value, 9007199254740992.0);
@@ -1156,12 +1156,12 @@ void possibly_update_the_key_generator(GC::Ref<IDBObjectStore> store, Key key)
 }
 
 // https://w3c.github.io/IndexedDB/#store-a-record-into-an-object-store
-WebIDL::ExceptionOr<Optional<Key>> store_a_record_into_an_object_store(JS::Realm& realm, GC::Ref<IDBObjectStore> store, JS::Value value, Optional<Key> key, bool no_overwrite)
+WebIDL::ExceptionOr<GC::Ptr<Key>> store_a_record_into_an_object_store(JS::Realm& realm, GC::Ref<IDBObjectStore> store, JS::Value value, GC::Ptr<Key> key, bool no_overwrite)
 {
     // 1. If store uses a key generator, then:
     if (store->key_generator().has_value()) {
         // 1. If key is undefined, then:
-        if (!key.has_value()) {
+        if (key == nullptr) {
             // 1. Let key be the result of generating a key for store.
             auto maybe_key = generate_a_key(store);
 
@@ -1169,34 +1169,34 @@ WebIDL::ExceptionOr<Optional<Key>> store_a_record_into_an_object_store(JS::Realm
             if (maybe_key.is_error())
                 return maybe_key.release_error();
 
-            key = Key::create_number(maybe_key.value());
+            key = Key::create_number(realm, maybe_key.value());
 
             // 3. If store also uses in-line keys, then run inject a key into a value using a key path with value, key and store’s key path.
             if (store->uses_inline_keys()) {
-                inject_a_key_into_a_value_using_a_key_path(store->realm(), value, key.value(), store->internal_key_path().value());
+                inject_a_key_into_a_value_using_a_key_path(realm, value, GC::Ref(*key), store->internal_key_path().value());
             }
         }
 
         // 2. Otherwise, run possibly update the key generator for store with key.
         else {
-            possibly_update_the_key_generator(store, key.value());
+            possibly_update_the_key_generator(store, *key);
         }
     }
 
     // 2. If the no-overwrite flag was given to these steps and is true, and a record already exists in store with its key equal to key,
     //    then this operation failed with a "ConstraintError" DOMException. Abort this algorithm without taking any further steps.
-    auto has_record = store->has_record_with_key(key.value());
+    auto has_record = store->has_record_with_key(*key);
     if (no_overwrite && has_record)
-        return WebIDL::ConstraintError::create(store->realm(), "Record already exists"_string);
+        return WebIDL::ConstraintError::create(realm, "Record already exists"_string);
 
     // 3. If a record already exists in store with its key equal to key, then remove the record from store using delete records from an object store.
     if (has_record)
-        delete_records_from_an_object_store(store, IDBKeyRange::from_key(realm, key.value()));
+        delete_records_from_an_object_store(store, IDBKeyRange::from_key(realm, *key));
 
     // 4. Store a record in store containing key as its key and ! StructuredSerializeForStorage(value) as its value.
     //    The record is stored in the object store’s list of records such that the list is sorted according to the key of the records in ascending order.
     Record record = {
-        .key = key.value(),
+        .key = *key,
         .value = MUST(HTML::structured_serialize_for_storage(realm.vm(), value)),
     };
     store->store_a_record(record);

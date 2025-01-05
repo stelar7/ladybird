@@ -8,6 +8,7 @@
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/HTML/EventNames.h>
 #include <LibWeb/IndexedDB/IDBIndex.h>
+#include <LibWeb/IndexedDB/Internal/Key.h>
 
 namespace Web::IndexedDB {
 
