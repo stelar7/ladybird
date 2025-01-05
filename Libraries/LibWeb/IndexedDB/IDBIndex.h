@@ -30,6 +30,7 @@ public:
     bool unique() const { return m_unique; }
     bool multi_entry() const { return m_multi_entry; }
     GC::Ref<IDBObjectStore> object_store() { return m_object_store; }
+    KeyPath internal_key_path() const { return m_key_path; }
     JS::Value key_path() const
     {
         return m_key_path.visit(
@@ -38,6 +39,9 @@ public:
                                                                 return JS::PrimitiveString::create(realm().vm(), entry);
                                                             }); });
     }
+
+    void store_a_record(Record const&);
+    [[nodiscard]] bool has_record_with_key(GC::Ref<Key> key);
 
 protected:
     explicit IDBIndex(JS::Realm&, GC::Ref<IDBObjectStore>, String, KeyPath, bool, bool);
@@ -58,6 +62,9 @@ private:
 
     // The keys are derived from the referenced object store’s values using a key path.
     KeyPath m_key_path;
+
+    // The index has a list of records which hold the data stored in the index.
+    Vector<Record> m_records;
 };
 
 }
