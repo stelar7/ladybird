@@ -24,6 +24,7 @@ class IDBKeyRange : public Bindings::PlatformObject {
 public:
     virtual ~IDBKeyRange() override;
     [[nodiscard]] static GC::Ref<IDBKeyRange> create(JS::Realm&, GC::Ptr<Key> lower_bound, GC::Ptr<Key> upper_bound, bool lower_open, bool upper_open);
+    [[nodiscard]] static GC::Ref<IDBKeyRange> from_key(JS::Realm&, Key);
 
     [[nodiscard]] JS::Value lower() const;
     [[nodiscard]] JS::Value upper() const;
