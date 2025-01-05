@@ -584,6 +584,7 @@ class IDBRequest;
 class IDBTransaction;
 class IDBVersionChangeEvent;
 class RequestList;
+struct Record;
 }
 
 namespace Web::Internals {
