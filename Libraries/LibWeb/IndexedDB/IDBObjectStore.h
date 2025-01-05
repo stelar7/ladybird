@@ -82,6 +82,7 @@ public:
     [[nodiscard]] bool has_record_with_key(Key key);
     void remove_records_in_range(GC::Ref<IDBKeyRange>);
     void store_a_record(Record const&);
+    u64 count_records_in_range(GC::Ref<IDBKeyRange>);
 
 protected:
     explicit IDBObjectStore(JS::Realm&, String, bool, Optional<KeyPath> const&, GC::Ref<IDBTransaction>);

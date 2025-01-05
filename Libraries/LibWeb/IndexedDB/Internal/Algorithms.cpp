@@ -1477,10 +1477,10 @@ WebIDL::ExceptionOr<GC::Ref<IDBKeyRange>> convert_a_value_to_a_key_range(JS::Rea
 }
 
 // https://w3c.github.io/IndexedDB/#count-the-records-in-a-range
-JS::Value count_the_records_in_a_range([[maybe_unused]] GC::Ref<IDBObjectStore> source, [[maybe_unused]] GC::Ref<IDBKeyRange> range)
+JS::Value count_the_records_in_a_range(GC::Ref<IDBObjectStore> source, GC::Ref<IDBKeyRange> range)
 {
-    // FIXME: 1. Let count be the number of records, if any, in source’s list of records with key in range.
-    auto count = 0;
+    // 1. Let count be the number of records, if any, in source’s list of records with key in range.
+    auto count = source->count_records_in_range(range);
 
     // 2. Return count.
     return JS::Value(count);
