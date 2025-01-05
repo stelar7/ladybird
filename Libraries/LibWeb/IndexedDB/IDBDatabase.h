@@ -7,6 +7,7 @@
 #pragma once
 
 #include <LibGC/Ptr.h>
+#include <LibWeb/Bindings/IDBTransactionPrototype.h>
 #include <LibWeb/DOM/EventTarget.h>
 #include <LibWeb/HTML/DOMStringList.h>
 #include <LibWeb/IndexedDB/IDBObjectStore.h>
@@ -24,6 +25,11 @@ using KeyPath = Variant<String, Vector<String>>;
 struct IDBObjectStoreParameters {
     Optional<KeyPath> key_path;
     bool auto_increment { false };
+};
+
+// https://w3c.github.io/IndexedDB/#dictdef-idbtransactionoptions
+struct IDBTransactionOptions {
+    Bindings::IDBTransactionDurability durability = Bindings::IDBTransactionDurability::Default;
 };
 
 // FIXME: I'm not sure if this object should do double duty as both the connection and the interface
@@ -60,6 +66,7 @@ public:
     // A connection has an object store set, which is initialized to the set of object stores in the associated database
     [[nodiscard]] ReadonlySpan<GC::Ref<IDBObjectStore>> object_store_set() { return this->associated_database()->object_stores(); }
 
+    WebIDL::ExceptionOr<GC::Ref<IDBTransaction>> transaction(Variant<String, Vector<String>>, Bindings::IDBTransactionMode = Bindings::IDBTransactionMode::Readonly, IDBTransactionOptions = { .durability = Bindings::IDBTransactionDurability::Default });
     void close();
 
     WebIDL::ExceptionOr<GC::Ref<IDBObjectStore>> create_object_store(String const&, IDBObjectStoreParameters const&);
