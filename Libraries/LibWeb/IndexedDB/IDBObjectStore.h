@@ -65,8 +65,7 @@ public:
     WebIDL::ExceptionOr<GC::Ref<IDBIndex>> create_index(String const&, KeyPath, IDBIndexParameters options = {});
     [[nodiscard]] GC::Ref<HTML::DOMStringList> index_names();
     [[nodiscard]] WebIDL::ExceptionOr<GC::Ref<IDBRequest>> add_or_put(GC::Ref<IDBObjectStore>, JS::Value, Optional<JS::Value> const&, bool);
-    // https://w3c.github.io/IndexedDB/#dom-idbobjectstore-add
-    [[nodiscard]] WebIDL::ExceptionOr<GC::Ref<IDBRequest>> add(JS::Value value, Optional<JS::Value> const& key) { return add_or_put(*this, value, key, false); }
+    [[nodiscard]] WebIDL::ExceptionOr<GC::Ref<IDBRequest>> add(JS::Value value, Optional<JS::Value> const& key);
 
     virtual ~IDBObjectStore() override;
     [[nodiscard]] static GC::Ref<IDBObjectStore> create(JS::Realm&, String, bool, Optional<KeyPath> const&, GC::Ref<IDBTransaction>);

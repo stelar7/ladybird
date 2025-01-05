@@ -237,4 +237,11 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::count(Optional<JS::Valu
     return asynchronously_execute_a_request(realm(), GC::Ref(*this), operation);
 }
 
+// https://w3c.github.io/IndexedDB/#dom-idbobjectstore-add
+WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::add(JS::Value value, Optional<JS::Value> const& key)
+{
+    // The add(value, key) method steps are to return the result of running add or put with this, value, key and the no-overwrite flag true.
+    return add_or_put(*this, value, key, true);
+}
+
 }
