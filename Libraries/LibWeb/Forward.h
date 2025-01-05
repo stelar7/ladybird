@@ -587,6 +587,7 @@ class IDBRequest;
 class IDBTransaction;
 class IDBVersionChangeEvent;
 class RequestList;
+struct IDBTransactionOptions;
 struct Record;
 }
 
