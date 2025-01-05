@@ -5,6 +5,7 @@
  */
 
 #include <AK/Optional.h>
+#include <AK/QuickSort.h>
 #include <AK/Vector.h>
 #include <LibGC/Function.h>
 #include <LibGC/Ptr.h>
@@ -195,7 +196,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::add_or_put(GC::Ref<IDBO
 
     // 12. Let operation be an algorithm to run store a record into an object store with store, clone, key, and no-overwrite flag.
     auto operation = GC::Function<WebIDL::ExceptionOr<JS::Value>()>::create(realm.heap(), [&realm, &store, clone, key_value, no_overwrite] {
-        auto maybe_key = store_a_record_into_an_object_store(store, clone, key_value, no_overwrite);
+        auto maybe_key = store_a_record_into_an_object_store(realm, store, clone, key_value, no_overwrite);
         if (maybe_key.is_error())
             return WebIDL::ExceptionOr<JS::Value>(maybe_key.release_error());
 
@@ -249,6 +250,30 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::put(JS::Value value, Op
 {
     // The put(value, key) method steps are to return the result of running add or put with this, value, key and the no-overwrite flag false.
     return add_or_put(*this, value, key, false);
+}
+
+bool IDBObjectStore::has_record_with_key(Key key)
+{
+    auto index = m_records.find_if([&key](auto const& record) {
+        return record.key == key;
+    });
+
+    return index != m_records.end();
+}
+
+void IDBObjectStore::remove_records_in_range(GC::Ref<IDBKeyRange> range)
+{
+    m_records.remove_all_matching([&](auto const& record) {
+        return range->is_in_range(record.key);
+    });
+}
+
+void IDBObjectStore::store_a_record(Record const& record)
+{
+    m_records.append(record);
+    AK::quick_sort(m_records, [](auto const& a, auto const& b) {
+        return a.key < b.key;
+    });
 }
 
 }
