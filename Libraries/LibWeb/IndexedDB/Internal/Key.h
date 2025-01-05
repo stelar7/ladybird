@@ -12,6 +12,7 @@
 #include <AK/Vector.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Heap/Cell.h>
+#include <LibGC/Root.h>
 #include <LibJS/Runtime/Realm.h>
 #include <LibWeb/Bindings/PlatformObject.h>
 
@@ -68,8 +69,9 @@ public:
     [[nodiscard]] static bool greater_than(GC::Ref<Key> a, GC::Ref<Key> b) { return compare_two_keys(a, b) > 0; }
 
 private:
-    Key(KeyType type, KeyValue value)
-        : m_type(type)
+    Key(JS::Realm& realm, KeyType type, KeyValue value)
+        : Web::Bindings::PlatformObject(realm)
+        , m_type(type)
         , m_value(value)
     {
     }
