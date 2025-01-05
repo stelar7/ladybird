@@ -1156,7 +1156,7 @@ void possibly_update_the_key_generator(GC::Ref<IDBObjectStore> store, Key key)
 }
 
 // https://w3c.github.io/IndexedDB/#store-a-record-into-an-object-store
-WebIDL::ExceptionOr<Optional<Key>> store_a_record_into_an_object_store(GC::Ref<IDBObjectStore> store, JS::Value value, Optional<Key> key, bool no_overwrite)
+WebIDL::ExceptionOr<Optional<Key>> store_a_record_into_an_object_store(JS::Realm& realm, GC::Ref<IDBObjectStore> store, JS::Value value, Optional<Key> key, bool no_overwrite)
 {
     // 1. If store uses a key generator, then:
     if (store->key_generator().has_value()) {
@@ -1183,19 +1183,39 @@ WebIDL::ExceptionOr<Optional<Key>> store_a_record_into_an_object_store(GC::Ref<I
         }
     }
 
-    // FIXME: 2. If the no-overwrite flag was given to these steps and is true, and a record already exists in store with its key equal to key,
+    // 2. If the no-overwrite flag was given to these steps and is true, and a record already exists in store with its key equal to key,
     //    then this operation failed with a "ConstraintError" DOMException. Abort this algorithm without taking any further steps.
-    (void)no_overwrite;
+    auto has_record = store->has_record_with_key(key.value());
+    if (no_overwrite && has_record)
+        return WebIDL::ConstraintError::create(store->realm(), "Record already exists"_string);
 
-    // FIXME: 3. If a record already exists in store with its key equal to key, then remove the record from store using delete records from an object store.
+    // 3. If a record already exists in store with its key equal to key, then remove the record from store using delete records from an object store.
+    if (has_record)
+        delete_records_from_an_object_store(store, IDBKeyRange::from_key(realm, key.value()));
 
-    // FIXME: 4. Store a record in store containing key as its key and ! StructuredSerializeForStorage(value) as its value.
+    // 4. Store a record in store containing key as its key and ! StructuredSerializeForStorage(value) as its value.
     //    The record is stored in the object store’s list of records such that the list is sorted according to the key of the records in ascending order.
+    Record record = {
+        .key = key.value(),
+        .value = MUST(HTML::structured_serialize_for_storage(realm.vm(), value)),
+    };
+    store->store_a_record(record);
 
     // FIXME: 5. For each index which references store:
 
     // 6. Return key.
     return key;
+}
+
+// https://w3c.github.io/IndexedDB/#delete-records-from-an-object-store
+void delete_records_from_an_object_store(GC::Ref<IDBObjectStore> store, GC::Ref<IDBKeyRange> range)
+{
+    // 1. Remove all records, if any, from store’s list of records with key in range.
+    store->remove_records_in_range(range);
+
+    // FIXME: 2. For each index which references store, remove every record from index’s list of records whose value is in range, if any such records exist.
+
+    // 3. Return undefined.
 }
 
 // https://w3c.github.io/IndexedDB/#fire-an-error-event
