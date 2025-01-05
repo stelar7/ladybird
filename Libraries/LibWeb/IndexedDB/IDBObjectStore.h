@@ -15,10 +15,12 @@
 #include <LibJS/Runtime/PrimitiveString.h>
 #include <LibJS/Runtime/Value.h>
 #include <LibWeb/Bindings/PlatformObject.h>
+#include <LibWeb/HTML/StructuredSerializeTypes.h>
 #include <LibWeb/IndexedDB/IDBIndex.h>
 #include <LibWeb/IndexedDB/IDBRequest.h>
 #include <LibWeb/IndexedDB/IDBTransaction.h>
 #include <LibWeb/IndexedDB/Internal/Algorithms.h>
+#include <LibWeb/IndexedDB/Internal/Key.h>
 #include <LibWeb/IndexedDB/Internal/KeyGenerator.h>
 
 namespace Web::IndexedDB {
@@ -26,6 +28,12 @@ namespace Web::IndexedDB {
 struct IDBIndexParameters {
     bool unique { false };
     bool multi_entry { false };
+};
+
+// https://w3c.github.io/IndexedDB/#object-store-record
+struct Record {
+    Key key;
+    HTML::SerializationRecord value;
 };
 
 // https://w3c.github.io/IndexedDB/#object-store-interface
@@ -71,6 +79,10 @@ public:
     virtual ~IDBObjectStore() override;
     [[nodiscard]] static GC::Ref<IDBObjectStore> create(JS::Realm&, String, bool, Optional<KeyPath> const&, GC::Ref<IDBTransaction>);
 
+    [[nodiscard]] bool has_record_with_key(Key key);
+    void remove_records_in_range(GC::Ref<IDBKeyRange>);
+    void store_a_record(Record const&);
+
 protected:
     explicit IDBObjectStore(JS::Realm&, String, bool, Optional<KeyPath> const&, GC::Ref<IDBTransaction>);
     virtual void initialize(JS::Realm&) override;
@@ -94,6 +106,9 @@ private:
 
     // An object store handle has an index set
     Vector<GC::Ref<IDBIndex>> m_indexes;
+
+    // An object store has a list of records
+    Vector<Record> m_records;
 };
 
 }
