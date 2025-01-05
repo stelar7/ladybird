@@ -1201,7 +1201,64 @@ WebIDL::ExceptionOr<GC::Ptr<Key>> store_a_record_into_an_object_store(JS::Realm&
     };
     store->store_a_record(record);
 
-    // FIXME: 5. For each index which references store:
+    // 5. For each index which references store:
+    for (auto const& index : store->index_set()) {
+        // 1. Let index key be the result of extracting a key from a value using a key path with value, index’s key path, and index’s multiEntry flag.
+        auto index_key = TRY(extract_a_key_from_a_value_using_a_key_path(realm, value, index->internal_key_path(), index->multi_entry()));
+
+        // 2. If index key is an exception, or invalid, or failure, take no further actions for index, and continue these steps for the next index.
+        if (index_key.is_error())
+            continue;
+
+        auto index_key_value = index_key.value();
+        auto index_multi_entry = index->multi_entry();
+        auto index_key_is_array = index_key_value->type() == Key::KeyType::Array;
+        auto index_is_unique = index->unique();
+
+        // 3. If index’s multiEntry flag is false, or if index key is not an array key,
+        //    and if index already contains a record with key equal to index key,
+        //    and index’s unique flag is true,
+        //    then this operation failed with a "ConstraintError" DOMException.
+        //    Abort this algorithm without taking any further steps.
+        if ((!index_multi_entry || !index_key_is_array) && index_is_unique && index->has_record_with_key(index_key_value))
+            return WebIDL::ConstraintError::create(store->realm(), "Record already exists in index"_string);
+
+        // 4. If index’s multiEntry flag is true and index key is an array key,
+        //    and if index already contains a record with key equal to any of the subkeys of index key,
+        //    and index’s unique flag is true,
+        //    then this operation failed with a "ConstraintError" DOMException.
+        //    Abort this algorithm without taking any further steps.
+        if (index_multi_entry && index_key_is_array && index_is_unique) {
+            for (auto const& subkey : index_key_value->subkeys()) {
+                if (index->has_record_with_key(*subkey))
+                    return WebIDL::ConstraintError::create(store->realm(), "Record already exists in index"_string);
+            }
+        }
+
+        // 5. If index’s multiEntry flag is false, or if index key is not an array key 
+        //    then store a record in index containing index key as its key and key as its value. 
+        //    The record is stored in index’s list of records such that the list is sorted primarily on the records keys, 
+        //    and secondarily on the records values, in ascending order.
+        if (!index_multi_entry || !index_key_is_array) {
+            Record index_record = {
+                .key = index_key_value,
+                .value = MUST(HTML::structured_serialize_for_storage(realm.vm(), key)),
+            };
+            index->store_a_record(index_record);
+        }
+
+        // 6. If index’s multiEntry flag is true and index key is an array key, 
+        //    then for each subkey of the subkeys of index key store a record in index containing subkey as its key and key as its value. 
+        if (index_multi_entry && index_key_is_array) {
+            for (auto const& subkey : index_key_value->subkeys()) {
+                Record index_record = {
+                    .key = *subkey,
+                    .value = MUST(HTML::structured_serialize_for_storage(realm.vm(), key)),
+                };
+                index->store_a_record(index_record);
+            }
+        }
+    }
 
     // 6. Return key.
     return key;
