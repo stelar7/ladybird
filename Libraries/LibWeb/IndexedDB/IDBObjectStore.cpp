@@ -35,6 +35,9 @@ IDBObjectStore::IDBObjectStore(JS::Realm& realm, String name, bool auto_incremen
     , m_transaction(transaction)
 {
     transaction->add_to_scope(*this);
+
+    if (m_auto_increment)
+        m_key_generator = KeyGenerator {};
 }
 
 GC::Ref<IDBObjectStore> IDBObjectStore::create(JS::Realm& realm, String name, bool auto_increment, Optional<KeyPath> const& key_path, GC::Ref<IDBTransaction> transaction)
