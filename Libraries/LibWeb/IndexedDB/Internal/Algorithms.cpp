@@ -403,8 +403,7 @@ GC::Ref<IDBTransaction> upgrade_a_database(JS::Realm& realm, GC::Ref<IDBDatabase
     request->set_processed(true);
 
     // 10. Queue a task to run these steps:
-    IGNORE_USE_IN_ESCAPING_LAMBDA bool wait_for_transaction = true;
-    HTML::queue_a_task(HTML::Task::Source::DatabaseAccess, nullptr, nullptr, GC::create_function(realm.vm().heap(), [&realm, request, connection, transaction, old_version, version, &wait_for_transaction]() {
+    HTML::queue_a_task(HTML::Task::Source::DatabaseAccess, nullptr, nullptr, GC::create_function(realm.vm().heap(), [&realm, request, connection, transaction, old_version, version]() {
         // 1. Set request’s result to connection.
         request->set_result(connection);
 
@@ -429,19 +428,20 @@ GC::Ref<IDBTransaction> upgrade_a_database(JS::Realm& realm, GC::Ref<IDBDatabase
         if (did_throw)
             abort_a_transaction(*transaction, WebIDL::AbortError::create(realm, "Version change event threw an exception"_string));
 
-        wait_for_transaction = false;
+        // NOTE: "The implementation must attempt to commit a transaction when it is inactive
+        // FIXME: https://github.com/w3c/IndexedDB/issues/436
+        if (transaction->request_list().is_empty() && transaction->state() == IDBTransaction::TransactionState::Inactive) {
+            transaction->set_state(IDBTransaction::Active);
+            MUST(transaction->commit());
+        }
     }));
 
     // 11. Wait for transaction to finish.
     // NOTE: https://github.com/w3c/IndexedDB/issues/436
-    HTML::main_thread_event_loop().spin_until(GC::create_function(realm.vm().heap(), [&wait_for_transaction]() {
+    HTML::main_thread_event_loop().spin_until(GC::create_function(realm.vm().heap(), [transaction]() {
         dbgln_if(IDB_DEBUG, "upgrade_a_database: waiting for step 11");
-        return !wait_for_transaction;
+        return transaction->is_finished();
     }));
-
-    // FIXME: Ad-hoc fix for upgrade transactions not finishing
-    transaction->set_state(IDBTransaction::Active);
-    MUST(transaction->commit());
 
     return transaction;
 }
