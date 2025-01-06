@@ -13,6 +13,7 @@
 #include <LibJS/Runtime/Realm.h>
 #include <LibJS/Runtime/Value.h>
 #include <LibWeb/HTML/DOMStringList.h>
+#include <LibWeb/IndexedDB/IDBCursor.h>
 #include <LibWeb/IndexedDB/IDBKeyRange.h>
 #include <LibWeb/IndexedDB/IDBObjectStore.h>
 #include <LibWeb/IndexedDB/IDBRequest.h>
@@ -54,5 +55,6 @@ void fire_an_error_event(JS::Realm&, GC::Ref<IDBRequest>);
 void fire_a_success_event(JS::Realm&, GC::Ref<IDBRequest>);
 void commit_a_transaction(JS::Realm&, GC::Ref<IDBTransaction>);
 JS::Value count_the_records_in_a_range(GC::Ref<IDBObjectStore>, GC::Ref<IDBKeyRange>);
+GC::Ptr<IDBCursor> iterate_a_cursor(JS::Realm&, GC::Ref<IDBCursor>, GC::Ptr<Key> = nullptr, GC::Ptr<Key> = nullptr, u64 = 1);
 
 }
