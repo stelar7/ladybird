@@ -142,17 +142,19 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::add_or_put(GC::Ref<IDBO
     if (transaction->is_readonly())
         return WebIDL::ReadOnlyError::create(realm, "Transaction is read-only"_string);
 
+    auto key_was_given = key.has_value() && key != JS::js_undefined();
+
     // 6. If store uses in-line keys and key was given, throw a "DataError" DOMException.
-    if (store.uses_inline_keys() && key.has_value())
+    if (store.uses_inline_keys() && key_was_given)
         return WebIDL::DataError::create(realm, "Store uses in-line keys and key was given"_string);
 
     // 7. If store uses out-of-line keys and has no key generator and key was not given, throw a "DataError" DOMException.
-    if (store.uses_out_of_line_keys() && !store.key_generator().has_value() && !key.has_value())
+    if (store.uses_out_of_line_keys() && !store.key_generator().has_value() && !key_was_given)
         return WebIDL::DataError::create(realm, "Store uses out-of-line keys and has no key generator and key was not given"_string);
 
     GC::Ptr<Key> key_value;
     // 8. If key was given, then:
-    if (key.has_value()) {
+    if (key_was_given) {
         // 1. Let r be the result of converting a value to a key with key. Rethrow any exceptions.
         auto maybe_key = convert_a_value_to_a_key(realm, key.value());
         // 2. If r is invalid, throw a "DataError" DOMException.
