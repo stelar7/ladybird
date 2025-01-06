@@ -14,6 +14,7 @@
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/PrimitiveString.h>
 #include <LibJS/Runtime/Value.h>
+#include <LibWeb/Bindings/IDBCursorPrototype.h>
 #include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/HTML/StructuredSerializeTypes.h>
 #include <LibWeb/IndexedDB/IDBIndex.h>
@@ -65,6 +66,8 @@ public:
 
     Optional<KeyGenerator> key_generator() const { return m_key_generator; }
 
+    [[nodiscard]] Vector<Record> records() const { return m_records; }
+
     void set_transaction(GC::Ref<IDBTransaction> transaction) { m_transaction = transaction; }
     GC::Ref<IDBTransaction> transaction() { return m_transaction; }
     AK::ReadonlySpan<GC::Ref<IDBIndex>> index_set() const { return m_indexes; }
@@ -76,6 +79,7 @@ public:
     [[nodiscard]] WebIDL::ExceptionOr<GC::Ref<IDBRequest>> add_or_put(GC::Ref<IDBObjectStore>, JS::Value, Optional<JS::Value> const&, bool);
     [[nodiscard]] WebIDL::ExceptionOr<GC::Ref<IDBRequest>> add(JS::Value value, Optional<JS::Value> const& key);
     [[nodiscard]] WebIDL::ExceptionOr<GC::Ref<IDBRequest>> put(JS::Value value, Optional<JS::Value> const& key);
+    [[nodiscard]] WebIDL::ExceptionOr<GC::Ref<IDBRequest>> open_cursor(JS::Value, Bindings::IDBCursorDirection = Bindings::IDBCursorDirection::Next);
 
     virtual ~IDBObjectStore() override;
     [[nodiscard]] static GC::Ref<IDBObjectStore> create(JS::Realm&, String, bool, Optional<KeyPath> const&, GC::Ref<IDBTransaction>);
