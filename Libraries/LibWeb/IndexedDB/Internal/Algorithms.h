@@ -56,5 +56,6 @@ void fire_a_success_event(JS::Realm&, GC::Ref<IDBRequest>);
 void commit_a_transaction(JS::Realm&, GC::Ref<IDBTransaction>);
 JS::Value count_the_records_in_a_range(GC::Ref<IDBObjectStore>, GC::Ref<IDBKeyRange>);
 GC::Ptr<IDBCursor> iterate_a_cursor(JS::Realm&, GC::Ref<IDBCursor>, GC::Ptr<Key> = nullptr, GC::Ptr<Key> = nullptr, u64 = 1);
+WebIDL::ExceptionOr<JS::Value> retrieve_a_value_from_an_object_store(JS::Realm&, GC::Ref<IDBObjectStore>, GC::Ref<IDBKeyRange>);
 
 }
