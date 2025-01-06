@@ -55,7 +55,7 @@ public:
     {
         return object_store_named(name) != nullptr;
     }
-    
+
     [[nodiscard]] static Vector<GC::Root<Database>> for_key(StorageAPI::StorageKey const&);
     [[nodiscard]] static Optional<GC::Root<Database> const&> for_key_and_name(StorageAPI::StorageKey&, String&);
     [[nodiscard]] static ErrorOr<GC::Root<Database>> create_for_key_and_name(JS::Realm&, StorageAPI::StorageKey&, String&);
