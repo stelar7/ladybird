@@ -118,7 +118,9 @@ WebIDL::ExceptionOr<GC::Ref<IDBObjectStore>> IDBTransaction::object_store(String
         return WebIDL::NotFoundError::create(realm, "Object store not found"_string);
 
     // 3. Return an object store handle associated with store and this.
-    return GC::Ref(*store);
+    auto store_handle = GC::Ref(*store);
+    store_handle->set_transaction(*this);
+    return store_handle;
 }
 
 // https://w3c.github.io/IndexedDB/#dom-idbtransaction-objectstorenames
