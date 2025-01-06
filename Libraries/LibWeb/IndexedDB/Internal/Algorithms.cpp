@@ -51,10 +51,10 @@
 #include <LibWeb/WebIDL/Buffers.h>
 #include <LibWeb/WebIDL/DOMException.h>
 
-namespace Web::IndexedDB {
-
 #undef IDB_DEBUG
 #define IDB_DEBUG true
+
+namespace Web::IndexedDB {
 
 // https://w3c.github.io/IndexedDB/#open-a-database-connection
 WebIDL::ExceptionOr<GC::Ref<IDBDatabase>> open_a_database_connection(JS::Realm& realm, StorageAPI::StorageKey storage_key, String name, Optional<u64> maybe_version, GC::Ref<IDBRequest> request)
@@ -582,7 +582,7 @@ void abort_a_transaction(GC::Ref<IDBTransaction> transaction, GC::Ptr<WebIDL::DO
     }
 
     // 6. Queue a task to run these steps:
-    HTML::queue_a_task(HTML::Task::Source::DatabaseAccess, nullptr, nullptr, GC::create_function(transaction->realm().vm().heap(), [&transaction]() {
+    HTML::queue_a_task(HTML::Task::Source::DatabaseAccess, nullptr, nullptr, GC::create_function(transaction->realm().vm().heap(), [transaction]() {
         // 1. If transaction is an upgrade transaction, then set transaction’s connection's associated database's upgrade transaction to null.
         if (transaction->is_upgrade_transaction())
             transaction->connection()->associated_database()->set_upgrade_transaction(nullptr);
@@ -1395,7 +1395,8 @@ GC::Ref<IDBRequest> asynchronously_execute_a_request(JS::Realm& realm, IDBReques
     // 4. Add request to the end of transaction’s request list.
     transaction->request_list().append(request);
 
-    // Ad-hoc: Set the two-way binding. (Missing spec step?)
+    // Set the two-way binding. (Missing spec step)
+    // FIXME: https://github.com/w3c/IndexedDB/issues/433
     request->set_transaction(transaction);
 
     // 5. Run these steps in parallel:
