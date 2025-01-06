@@ -37,6 +37,8 @@ public:
     [[nodiscard]] bool key_only() const { return m_key_only; }
     [[nodiscard]] bool got_value() const { return m_got_value; }
 
+    WebIDL::ExceptionOr<void> continue_(JS::Value);
+
     void set_request(GC::Ptr<IDBRequest> request) { m_request = request; }
     void set_position(GC::Ptr<Key> position) { m_position = position; }
     void set_got_value(bool got_value) { m_got_value = got_value; }
