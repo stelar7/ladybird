@@ -1618,8 +1618,6 @@ GC::Ptr<IDBCursor> iterate_a_cursor(JS::Realm& realm, GC::Ref<IDBCursor> cursor,
                         continue;
                 }
 
-                dbgln("passed 2nd check");
-
                 // * If position is defined, and source is an object store, the record’s key is greater than position.
                 if (position_is_defined && source_is_an_object_store) {
                     if (!record_key_is_greater_than_position)
