@@ -16,6 +16,12 @@ namespace Web::IndexedDB {
 
 using KeyPath = Variant<String, Vector<String>>;
 
+// https://w3c.github.io/IndexedDB/#index-list-of-records
+struct IndexRecord {
+    GC::Ref<Key> key;
+    GC::Ref<Key> value;
+};
+
 // https://w3c.github.io/IndexedDB/#index-interface
 class IDBIndex : public Bindings::PlatformObject {
     WEB_PLATFORM_OBJECT(IDBIndex, Bindings::PlatformObject);
@@ -26,6 +32,7 @@ public:
     [[nodiscard]] static GC::Ref<IDBIndex> create(JS::Realm&, GC::Ref<IDBObjectStore>, String, KeyPath, bool, bool);
 
     GC::Ref<IDBTransaction> transaction();
+    [[nodiscard]] Vector<IndexRecord> records() const { return m_records; }
 
     String name() const { return m_name; }
     void set_name(String name) { m_name = move(name); }
@@ -42,7 +49,7 @@ public:
                                                             }); });
     }
 
-    void store_a_record(Record const&);
+    void store_a_record(IndexRecord const&);
     [[nodiscard]] bool has_record_with_key(GC::Ref<Key> key);
 
 protected:
@@ -66,7 +73,7 @@ private:
     KeyPath m_key_path;
 
     // The index has a list of records which hold the data stored in the index.
-    Vector<Record> m_records;
+    Vector<IndexRecord> m_records;
 };
 
 }

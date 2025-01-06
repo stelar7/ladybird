@@ -44,23 +44,18 @@ GC::Ref<IDBTransaction> IDBIndex::transaction()
     return m_object_store->transaction();
 }
 
-void IDBIndex::store_a_record(Record const& record)
+void IDBIndex::store_a_record(IndexRecord const& record)
 {
     m_records.append(record);
 
     // The records are stored in index’s list of records such that the list is sorted primarily on the records keys, and secondarily on the records values, in ascending order.
-    AK::quick_sort(m_records, [](Record const& a, Record const& b) {
+    AK::quick_sort(m_records, [](IndexRecord const& a, IndexRecord const& b) {
         auto key_compare = Key::compare_two_keys(a.key, b.key);
 
         if (key_compare != 0)
             return key_compare < 0;
-        
-        for (size_t i = 0; i < a.value.size(); ++i) {
-            if (a.value[i] != b.value[i])
-                return a.value[i] < b.value[i];
-        }
 
-        return false;
+        return Key::compare_two_keys(a.value, b.value) < 0;
     });
 }
 
