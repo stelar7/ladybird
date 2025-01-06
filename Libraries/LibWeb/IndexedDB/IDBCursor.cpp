@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Debug.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Runtime/Value.h>
 #include <LibWeb/Bindings/IDBCursorPrototype.h>
@@ -12,6 +13,9 @@
 #include <LibWeb/IndexedDB/IDBCursor.h>
 #include <LibWeb/IndexedDB/Internal/Algorithms.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
+
+#undef IDB_DEBUG
+#define IDB_DEBUG true
 
 namespace Web::IndexedDB {
 
@@ -115,6 +119,7 @@ WebIDL::ExceptionOr<void> IDBCursor::continue_(JS::Value key)
 
     // 11. Run asynchronously execute a request with this's source, operation, and request.
     asynchronously_execute_a_request(realm, m_source, operation, request);
+    dbgln_if(IDB_DEBUG, "Executing request for cursor continue with uuid {}", request->uuid());
 
     return {};
 }
