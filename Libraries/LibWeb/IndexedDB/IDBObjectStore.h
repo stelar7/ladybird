@@ -65,6 +65,7 @@ public:
 
     Optional<KeyGenerator> key_generator() const { return m_key_generator; }
 
+    void set_transaction(GC::Ref<IDBTransaction> transaction) { m_transaction = transaction; }
     GC::Ref<IDBTransaction> transaction() { return m_transaction; }
     AK::ReadonlySpan<GC::Ref<IDBIndex>> index_set() const { return m_indexes; }
     void add_index(GC::Ref<IDBIndex> index) { m_indexes.append(index); }
