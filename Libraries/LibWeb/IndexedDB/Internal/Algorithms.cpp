@@ -398,8 +398,7 @@ GC::Ref<IDBTransaction> upgrade_a_database(JS::Realm& realm, GC::Ref<IDBDatabase
     request->set_processed(true);
 
     // 10. Queue a task to run these steps:
-    IGNORE_USE_IN_ESCAPING_LAMBDA bool wait_for_transaction = true;
-    HTML::queue_a_task(HTML::Task::Source::DatabaseAccess, nullptr, nullptr, GC::create_function(realm.vm().heap(), [&realm, request, connection, transaction, old_version, version, &wait_for_transaction]() {
+    HTML::queue_a_task(HTML::Task::Source::DatabaseAccess, nullptr, nullptr, GC::create_function(realm.vm().heap(), [&realm, request, connection, transaction, old_version, version]() {
         // 1. Set request’s result to connection.
         request->set_result(connection);
 
@@ -424,19 +423,20 @@ GC::Ref<IDBTransaction> upgrade_a_database(JS::Realm& realm, GC::Ref<IDBDatabase
         if (did_throw)
             abort_a_transaction(*transaction, WebIDL::AbortError::create(realm, "Version change event threw an exception"_string));
 
-        wait_for_transaction = false;
+        // NOTE: "The implementation must attempt to commit a transaction when it is inactive
+        // FIXME: https://github.com/w3c/IndexedDB/issues/436
+        if (transaction->request_list().is_empty() && transaction->state() == IDBTransaction::TransactionState::Inactive) {
+            transaction->set_state(IDBTransaction::Active);
+            MUST(transaction->commit());
+        }
     }));
 
     // 11. Wait for transaction to finish.
     // NOTE: https://github.com/w3c/IndexedDB/issues/436
-    HTML::main_thread_event_loop().spin_until(GC::create_function(realm.vm().heap(), [&wait_for_transaction]() {
+    HTML::main_thread_event_loop().spin_until(GC::create_function(realm.vm().heap(), [transaction]() {
         dbgln_if(IDB_DEBUG, "upgrade_a_database: waiting for step 11");
-        return !wait_for_transaction;
+        return transaction->is_finished();
     }));
-
-    // FIXME: Ad-hoc fix for upgrade transactions not finishing
-    transaction->set_state(IDBTransaction::Active);
-    MUST(transaction->commit());
 
     return transaction;
 }
@@ -605,91 +605,6 @@ void abort_a_transaction(GC::Ref<IDBTransaction> transaction, GC::Ptr<WebIDL::DO
             request->set_done(false);
         }
     }));
-}
-
-// https://w3c.github.io/IndexedDB/#convert-a-key-to-a-value
-JS::Value convert_a_key_to_a_value(JS::Realm& realm, GC::Ref<Key> key)
-{
-    // 1. Let type be key’s type.
-    auto type = key->type();
-
-    // 2. Let value be key’s value.
-    auto value = key->value();
-
-    // 3. Switch on type:
-    switch (type) {
-    case Key::KeyType::Number: {
-        // Return an ECMAScript Number value equal to value
-        return JS::Value(key->value_as_double());
-    }
-
-    case Key::KeyType::String: {
-        // Return an ECMAScript String value equal to value
-        return JS::PrimitiveString::create(realm.vm(), key->value_as_string());
-    }
-
-    case Key::KeyType::Date: {
-        // 1. Let date be the result of executing the ECMAScript Date constructor with the single argument value.
-        auto date = JS::Date::create(realm, key->value_as_double());
-
-        // 2. Assert: date is not an abrupt completion.
-        // NOTE: This is not possible in our implementation.
-
-        // 3. Return date.
-        return date;
-    }
-
-    case Key::KeyType::Binary: {
-        auto buffer = key->value_as_byte_buffer();
-
-        // 1. Let len be value’s length.
-        auto len = buffer.size();
-
-        // 2. Let buffer be the result of executing the ECMAScript ArrayBuffer constructor with len.
-        // 3. Assert: buffer is not an abrupt completion.
-        auto array_buffer = MUST(JS::ArrayBuffer::create(realm, len));
-
-        // 4. Set the entries in buffer’s [[ArrayBufferData]] internal slot to the entries in value.
-        buffer.span().copy_to(array_buffer->buffer());
-
-        // 5. Return buffer.
-        return array_buffer;
-    }
-
-    case Key::KeyType::Array: {
-        auto data = key->value_as_vector();
-
-        // 1. Let array be the result of executing the ECMAScript Array constructor with no arguments.
-        // 2. Assert: array is not an abrupt completion.
-        auto array = MUST(JS::Array::create(realm, 0));
-
-        // 3. Let len be value’s size.
-        auto len = data.size();
-
-        // 4. Let index be 0.
-        u64 index = 0;
-
-        // 5. While index is less than len:
-        while (index < len) {
-            // 1. Let entry be the result of converting a key to a value with value[index].
-            auto entry = convert_a_key_to_a_value(realm, *data[index]);
-
-            // 2. Let status be CreateDataProperty(array, index, entry).
-            auto status = MUST(array->create_data_property(index, entry));
-
-            // 3. Assert: status is true.
-            VERIFY(status);
-
-            // 4. Increase index by 1.
-            index++;
-        }
-
-        // 6. Return array.
-        return array;
-    }
-    }
-
-    VERIFY_NOT_REACHED();
 }
 
 // https://w3c.github.io/IndexedDB/#valid-key-path
@@ -1193,7 +1108,7 @@ WebIDL::ExceptionOr<GC::Ptr<Key>> store_a_record_into_an_object_store(JS::Realm&
 
     // 3. If a record already exists in store with its key equal to key, then remove the record from store using delete records from an object store.
     if (has_record)
-        delete_records_from_an_object_store(store, IDBKeyRange::from_key(realm, *key));
+        delete_records_from_an_object_store(store, IDBKeyRange::create(realm, key, key, false, false));
 
     // 4. Store a record in store containing key as its key and ! StructuredSerializeForStorage(value) as its value.
     //    The record is stored in the object store’s list of records such that the list is sorted according to the key of the records in ascending order.

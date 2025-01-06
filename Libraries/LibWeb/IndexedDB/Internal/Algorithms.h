@@ -35,7 +35,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBKeyRange>> convert_a_value_to_a_key_range(JS::Rea
 void close_a_database_connection(IDBDatabase&, bool forced = false);
 GC::Ref<IDBTransaction> upgrade_a_database(JS::Realm&, GC::Ref<IDBDatabase>, u64, GC::Ref<IDBRequest>);
 WebIDL::ExceptionOr<u64> delete_a_database(JS::Realm&, StorageAPI::StorageKey, String, GC::Ref<IDBRequest>);
-void abort_a_transaction(IDBTransaction&, GC::Ptr<WebIDL::DOMException>);
+void abort_a_transaction(GC::Ref<IDBTransaction>, GC::Ptr<WebIDL::DOMException>);
 JS::Value convert_a_key_to_a_value(JS::Realm&, GC::Ref<Key>);
 bool is_valid_key_path(KeyPath);
 GC::Ref<HTML::DOMStringList> create_a_sorted_name_list(JS::Realm&, Vector<String>);
@@ -47,7 +47,6 @@ WebIDL::ExceptionOr<GC::Ptr<Key>> store_a_record_into_an_object_store(JS::Realm&
 void delete_records_from_an_object_store(GC::Ref<IDBObjectStore>, GC::Ref<IDBKeyRange>);
 WebIDL::ExceptionOr<u64> generate_a_key(GC::Ref<IDBObjectStore>);
 void inject_a_key_into_a_value_using_a_key_path(JS::Realm&, JS::Value, GC::Ref<Key>, KeyPath);
-JS::Value convert_a_key_to_a_value(JS::Realm&, GC::Ref<Key>);
 void possibly_update_the_key_generator(GC::Ref<IDBObjectStore>, GC::Ref<Key>);
 GC::Ref<IDBRequest> asynchronously_execute_a_request(JS::Realm&, IDBRequestSource, GC::Ref<GC::Function<WebIDL::ExceptionOr<JS::Value>()>>, GC::Ptr<IDBRequest> = nullptr);
 void fire_an_error_event(JS::Realm&, GC::Ref<IDBRequest>);
