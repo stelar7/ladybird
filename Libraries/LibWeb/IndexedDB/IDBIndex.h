@@ -14,6 +14,8 @@
 
 namespace Web::IndexedDB {
 
+using KeyPath = Variant<String, Vector<String>>;
+
 // https://w3c.github.io/IndexedDB/#index-interface
 class IDBIndex : public Bindings::PlatformObject {
     WEB_PLATFORM_OBJECT(IDBIndex, Bindings::PlatformObject);
