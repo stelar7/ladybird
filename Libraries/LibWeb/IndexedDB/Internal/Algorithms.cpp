@@ -436,6 +436,10 @@ GC::Ref<IDBTransaction> upgrade_a_database(JS::Realm& realm, GC::Ref<IDBDatabase
         return !wait_for_transaction;
     }));
 
+    // FIXME: Ad-hoc fix for upgrade transactions not finishing
+    transaction->set_state(IDBTransaction::Active);
+    MUST(transaction->commit());
+
     return transaction;
 }
 
@@ -1240,22 +1244,25 @@ WebIDL::ExceptionOr<GC::Ptr<Key>> store_a_record_into_an_object_store(JS::Realm&
         //    The record is stored in index’s list of records such that the list is sorted primarily on the records keys, 
         //    and secondarily on the records values, in ascending order.
         if (!index_multi_entry || !index_key_is_array) {
-            Record index_record = {
-                .key = index_key_value,
-                .value = MUST(HTML::structured_serialize_for_storage(realm.vm(), key)),
-            };
-            index->store_a_record(index_record);
+            // FIXME: 
+            // Record index_record = {
+            //     .key = index_key_value,
+            //     .value = MUST(HTML::structured_serialize_for_storage(realm.vm(), key)),
+            // };
+            // index->store_a_record(index_record);
         }
 
         // 6. If index’s multiEntry flag is true and index key is an array key, 
         //    then for each subkey of the subkeys of index key store a record in index containing subkey as its key and key as its value. 
         if (index_multi_entry && index_key_is_array) {
             for (auto const& subkey : index_key_value->subkeys()) {
-                Record index_record = {
-                    .key = *subkey,
-                    .value = MUST(HTML::structured_serialize_for_storage(realm.vm(), key)),
-                };
-                index->store_a_record(index_record);
+                (void) subkey;
+                // FIXME: 
+                // Record index_record = {
+                //     .key = *subkey,
+                //     .value = MUST(HTML::structured_serialize_for_storage(realm.vm(), key)),
+                // };
+                // index->store_a_record(index_record);
             }
         }
     }
