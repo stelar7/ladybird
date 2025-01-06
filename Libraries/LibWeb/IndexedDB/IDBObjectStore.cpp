@@ -73,7 +73,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBIndex>> IDBObjectStore::create_index(String const
 
     // 5. If transaction’s state is not active, then throw a "TransactionInactiveError" DOMException.
     if (transaction->state() != IDBTransaction::TransactionState::Active)
-        return WebIDL::TransactionInactiveError::create(realm, "Transaction is not active"_string);
+        return WebIDL::TransactionInactiveError::create(realm, "Transaction is not active while creating index"_string);
 
     // 6. If an index named name already exists in store, throw a "ConstraintError" DOMException.
     for (auto const& index : store.index_set()) {
@@ -133,7 +133,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::add_or_put(GC::Ref<IDBO
 
     // 4. If transaction’s state is not active, then throw a "TransactionInactiveError" DOMException.
     if (transaction->state() != IDBTransaction::TransactionState::Active)
-        return WebIDL::TransactionInactiveError::create(realm, "Transaction is not active"_string);
+        return WebIDL::TransactionInactiveError::create(realm, "Transaction is not active while running add/put"_string);
 
     // 5. If transaction is a read-only transaction, throw a "ReadOnlyError" DOMException.
     if (transaction->is_readonly())
@@ -224,7 +224,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::count(Optional<JS::Valu
 
     // 4. If transaction’s state is not active, then throw a "TransactionInactiveError" DOMException.
     if (transaction->state() != IDBTransaction::TransactionState::Active)
-        return WebIDL::TransactionInactiveError::create(realm(), "Transaction is not active"_string);
+        return WebIDL::TransactionInactiveError::create(realm(), "Transaction is not active while doing count"_string);
 
     // 5. Let range be the result of converting a value to a key range with query. Rethrow any exceptions.
     auto range = TRY(convert_a_value_to_a_key_range(realm(), move(query)));
