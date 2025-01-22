@@ -11,6 +11,7 @@
 #include <AK/Variant.h>
 #include <AK/Vector.h>
 #include <LibGC/Ptr.h>
+#include <LibGC/Root.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibJS/Runtime/Realm.h>
 #include <LibWeb/Bindings/PlatformObject.h>

@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <LibJS/Runtime/PromiseCapability.h>
 #include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/IndexedDB/IDBOpenDBRequest.h>
 
@@ -22,6 +23,7 @@ public:
 
     WebIDL::ExceptionOr<GC::Ref<IDBOpenDBRequest>> open(String const& name, Optional<u64> version);
     WebIDL::ExceptionOr<GC::Ref<IDBOpenDBRequest>> delete_database(String const& name);
+    GC::Ref<WebIDL::Promise> databases();
 
     WebIDL::ExceptionOr<i8> cmp(JS::Value first, JS::Value second);
 
