@@ -6,6 +6,7 @@
 
 #include <LibWeb/Bindings/HTMLFrameElementPrototype.h>
 #include <LibWeb/Bindings/Intrinsics.h>
+#include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Event.h>
@@ -51,7 +52,7 @@ void HTMLFrameElement::inserted()
     MUST(create_new_child_navigable(GC::create_function(realm().heap(), [this] {
         // 4. Process the frame attributes for insertedNode, with initialInsertion set to true.
         process_the_frame_attributes(true);
-        set_content_navigable_initialized();
+        set_content_navigable_has_session_history_entry_and_ready_for_navigation();
     })));
 }
 

@@ -62,6 +62,14 @@ const selectTab = (tabButton, tabID, selectedTab, selectedTabButton) => {
     tab.style.display = "block";
     tabButton.classList.add("active");
 
+    // Apply any filtering if we have it
+    let filterInput = tab.querySelector(".property-filter");
+    let propertyTable = tab.querySelector(".property-table");
+    if (filterInput && propertyTable) {
+        filterInput.value = inspector.propertyFilterText || "";
+        filterInput.dispatchEvent(new InputEvent("input"));
+    }
+
     return tab;
 };
 
@@ -336,10 +344,44 @@ inspector.setStyleSheetSource = (identifier, sourceBase64) => {
     styleSheetSource.innerHTML = decodeBase64(sourceBase64);
 };
 
+const applyPropertyFilter = (row, searchText) => {
+    let matches = false;
+    if (searchText) {
+        for (let cell of row.cells) {
+            if (cell.textContent.toLowerCase().includes(searchText)) {
+                matches = true;
+                break;
+            }
+        }
+    } else {
+        // Empty searchText matches everything, so skip the checks.
+        matches = true;
+    }
+
+    if (matches) {
+        row.classList.remove("hidden-row");
+    } else {
+        row.classList.add("hidden-row");
+    }
+};
+
+const setupPropertyFilter = inputId => {
+    const filterInput = document.getElementById(`${inputId}-filter`);
+
+    filterInput.addEventListener("input", event => {
+        inspector.propertyFilterText = event.target.value.toLowerCase();
+        const tbody = document.getElementById(`${inputId}-table`);
+        const rows = tbody.getElementsByTagName("tr");
+
+        for (let row of rows) {
+            applyPropertyFilter(row, inspector.propertyFilterText);
+        }
+    });
+};
+
 inspector.createPropertyTables = (computedStyle, resolvedStyle, customProperties) => {
     const createPropertyTable = (tableID, properties) => {
         let oldTable = document.getElementById(tableID);
-
         let newTable = document.createElement("tbody");
         newTable.setAttribute("id", tableID);
 
@@ -366,6 +408,10 @@ inspector.createPropertyTables = (computedStyle, resolvedStyle, customProperties
 
                 let valueColumn = row.insertCell();
                 valueColumn.innerText = properties[name];
+
+                if (inspector.propertyFilterText) {
+                    applyPropertyFilter(row, inspector.propertyFilterText);
+                }
             });
 
         oldTable.parentNode.replaceChild(newTable, oldTable);
@@ -812,6 +858,9 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         }
     });
+
+    // Setup filters for property tables
+    ["computed-style", "resolved-style", "custom-properties"].forEach(setupPropertyFilter);
 
     inspector.inspectorLoaded();
 });

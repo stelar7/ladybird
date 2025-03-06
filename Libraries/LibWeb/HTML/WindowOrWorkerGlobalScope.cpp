@@ -44,6 +44,7 @@
 #include <LibWeb/WebIDL/DOMException.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
 #include <LibWeb/WebIDL/Types.h>
+#include <LibWeb/WebSockets/WebSocket.h>
 
 namespace Web::HTML {
 
@@ -329,7 +330,7 @@ i32 WindowOrWorkerGlobalScopeMixin::run_timer_initialization_steps(TimerHandler 
                     //           options's credentials mode, referrer policy is initiating script's fetch options's referrer policy, and fetch priority is "auto".
 
                     // 2. Set base URL to initiating script's base URL.
-                    base_url = initiating_script->base_url();
+                    base_url = initiating_script->base_url().value();
 
                     // Spec Note: The effect of these steps ensures that the string compilation done by setTimeout() and setInterval() behaves equivalently to that
                     //            done by eval(). That is, module script fetches via import() will behave the same in both contexts.
@@ -636,6 +637,28 @@ void WindowOrWorkerGlobalScopeMixin::forcibly_close_all_event_sources()
 {
     for (auto event_source : m_registered_event_sources)
         event_source->forcibly_close();
+}
+
+void WindowOrWorkerGlobalScopeMixin::register_web_socket(Badge<WebSockets::WebSocket>, GC::Ref<WebSockets::WebSocket> web_socket)
+{
+    m_registered_web_sockets.append(web_socket);
+}
+
+void WindowOrWorkerGlobalScopeMixin::unregister_web_socket(Badge<WebSockets::WebSocket>, GC::Ref<WebSockets::WebSocket> web_socket)
+{
+    m_registered_web_sockets.remove(web_socket);
+}
+
+WindowOrWorkerGlobalScopeMixin::AffectedAnyWebSockets WindowOrWorkerGlobalScopeMixin::make_disappear_all_web_sockets()
+{
+    auto affected_any_web_sockets = AffectedAnyWebSockets::No;
+
+    for (auto& web_socket : m_registered_web_sockets) {
+        web_socket.make_disappear();
+        affected_any_web_sockets = AffectedAnyWebSockets::Yes;
+    }
+
+    return affected_any_web_sockets;
 }
 
 // https://html.spec.whatwg.org/multipage/timers-and-user-prompts.html#run-steps-after-a-timeout

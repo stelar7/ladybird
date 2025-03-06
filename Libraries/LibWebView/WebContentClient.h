@@ -29,6 +29,8 @@ class WebContentClient final
     C_OBJECT_ABSTRACT(WebContentClient);
 
 public:
+    using InitTransport = Messages::WebContentServer::InitTransport;
+
     static Optional<ViewImplementation&> view_for_pid_and_page_id(pid_t pid, u64 page_id);
 
     template<CallableAs<IterationDecision, WebContentClient&> Callback>
@@ -52,7 +54,7 @@ private:
     virtual void did_paint(u64 page_id, Gfx::IntRect const&, i32) override;
     virtual void did_finish_loading(u64 page_id, URL::URL const&) override;
     virtual void did_request_refresh(u64 page_id) override;
-    virtual void did_request_cursor_change(u64 page_id, i32) override;
+    virtual void did_request_cursor_change(u64 page_id, Gfx::Cursor const&) override;
     virtual void did_change_title(u64 page_id, ByteString const&) override;
     virtual void did_change_url(u64 page_id, URL::URL const&) override;
     virtual void did_request_tooltip_override(u64 page_id, Gfx::IntPoint, ByteString const&) override;
@@ -69,16 +71,18 @@ private:
     virtual void did_request_image_context_menu(u64 page_id, Gfx::IntPoint, URL::URL const&, ByteString const&, unsigned, Optional<Gfx::ShareableBitmap> const&) override;
     virtual void did_request_media_context_menu(u64 page_id, Gfx::IntPoint, ByteString const&, unsigned, Web::Page::MediaContextMenu const&) override;
     virtual void did_get_source(u64 page_id, URL::URL const&, URL::URL const&, String const&) override;
-    virtual void did_inspect_dom_tree(u64 page_id, ByteString const&) override;
-    virtual void did_inspect_dom_node(u64 page_id, bool has_style, ByteString const& computed_style, ByteString const& resolved_style, ByteString const& custom_properties, ByteString const& node_box_sizing, ByteString const& aria_properties_state, ByteString const& fonts) override;
-    virtual void did_inspect_accessibility_tree(u64 page_id, ByteString const&) override;
+    virtual void did_inspect_dom_tree(u64 page_id, String const&) override;
+    virtual void did_inspect_dom_node(u64 page_id, bool has_style, String const& computed_style, String const& resolved_style, String const& custom_properties, String const& node_box_sizing, String const& aria_properties_state, String const& fonts) override;
+    virtual void did_inspect_accessibility_tree(u64 page_id, String const&) override;
     virtual void did_get_hovered_node_id(u64 page_id, Web::UniqueNodeID const& node_id) override;
     virtual void did_finish_editing_dom_node(u64 page_id, Optional<Web::UniqueNodeID> const& node_id) override;
     virtual void did_get_dom_node_html(u64 page_id, String const& html) override;
     virtual void did_take_screenshot(u64 page_id, Gfx::ShareableBitmap const& screenshot) override;
     virtual void did_get_internal_page_info(u64 page_id, PageInfoType, String const&) override;
+    virtual void did_execute_js_console_input(u64 page_id, JsonValue const&) override;
     virtual void did_output_js_console_message(u64 page_id, i32 message_index) override;
-    virtual void did_get_js_console_messages(u64 page_id, i32 start_index, Vector<ByteString> const& message_types, Vector<ByteString> const& messages) override;
+    virtual void did_get_styled_js_console_messages(u64 page_id, i32 start_index, Vector<String> const& message_types, Vector<String> const& messages) override;
+    virtual void did_get_unstyled_js_console_messages(u64 page_id, i32 start_index, Vector<ConsoleOutput> const&) override;
     virtual void did_change_favicon(u64 page_id, Gfx::ShareableBitmap const&) override;
     virtual void did_request_alert(u64 page_id, String const&) override;
     virtual void did_request_confirm(u64 page_id, String const&) override;

@@ -13,8 +13,8 @@
 #include <LibCore/Socket.h>
 #include <LibIPC/Decoder.h>
 #include <LibIPC/File.h>
+#include <LibURL/Parser.h>
 #include <LibURL/URL.h>
-#include <fcntl.h>
 
 namespace IPC {
 
@@ -82,13 +82,15 @@ template<>
 ErrorOr<URL::URL> decode(Decoder& decoder)
 {
     auto url_string = TRY(decoder.decode<ByteString>());
-    URL::URL url { url_string };
+    auto url = URL::Parser::basic_parse(url_string);
+    if (!url.has_value())
+        return Error::from_string_view("Failed to parse URL in IPC Decode"sv);
 
     bool has_blob_url = TRY(decoder.decode<bool>());
     if (!has_blob_url)
-        return url;
+        return url.release_value();
 
-    url.set_blob_url_entry(URL::BlobURLEntry {
+    url->set_blob_url_entry(URL::BlobURLEntry {
         .object = URL::BlobURLEntry::Object {
             .type = TRY(decoder.decode<String>()),
             .data = TRY(decoder.decode<ByteBuffer>()),
@@ -96,7 +98,7 @@ ErrorOr<URL::URL> decode(Decoder& decoder)
         .environment { .origin = TRY(decoder.decode<URL::Origin>()) },
     });
 
-    return url;
+    return url.release_value();
 }
 
 template<>
@@ -118,17 +120,6 @@ ErrorOr<URL::Host> decode(Decoder& decoder)
 {
     auto value = TRY(decoder.decode<URL::Host::VariantType>());
     return URL::Host { move(value) };
-}
-
-template<>
-ErrorOr<File> decode(Decoder& decoder)
-{
-    auto file = TRY(decoder.files().try_dequeue());
-    auto fd = file.fd();
-
-    auto fd_flags = TRY(Core::System::fcntl(fd, F_GETFD));
-    TRY(Core::System::fcntl(fd, F_SETFD, fd_flags | FD_CLOEXEC));
-    return file;
 }
 
 template<>

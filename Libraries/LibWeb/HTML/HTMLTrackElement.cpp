@@ -6,6 +6,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibURL/Parser.h>
 #include <LibWeb/Bindings/HTMLTrackElementPrototype.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/DOM/Document.h>
@@ -180,11 +181,20 @@ void HTMLTrackElement::start_the_track_processing_model_parallel_steps(JS::Realm
 
     // 9. End the synchronous section, continuing the remaining steps in parallel.
 
+    auto fire_error_event = [&]() {
+        queue_an_element_task(Task::Source::DOMManipulation, [this, &realm]() {
+            m_track->set_readiness_state(TextTrack::ReadinessState::FailedToLoad);
+            dispatch_event(DOM::Event::create(realm, HTML::EventNames::error));
+        });
+    };
+
     // 10. If URL is not the empty string, then:
     if (!url.is_empty()) {
         // 1. Let request be the result of creating a potential-CORS request given URL, "track", and corsAttributeState,
         // and with the same-origin fallback flag set.
-        auto request = create_potential_CORS_request(realm.vm(), url, Fetch::Infrastructure::Request::Destination::Track, cors_attribute_state, SameOriginFallbackFlag::Yes);
+        auto parsed_url = URL::Parser::basic_parse(url);
+        VERIFY(parsed_url.has_value());
+        auto request = create_potential_CORS_request(realm.vm(), parsed_url.release_value(), Fetch::Infrastructure::Request::Destination::Track, cors_attribute_state, SameOriginFallbackFlag::Yes);
 
         // 2. Set request's client to the track element's node document's relevant settings object.
         request->set_client(&document().relevant_settings_object());
@@ -193,17 +203,14 @@ void HTMLTrackElement::start_the_track_processing_model_parallel_steps(JS::Realm
         request->set_initiator_type(Fetch::Infrastructure::Request::InitiatorType::Track);
 
         Fetch::Infrastructure::FetchAlgorithms::Input fetch_algorithms_input {};
-        fetch_algorithms_input.process_response_consume_body = [this, &realm](auto response, auto body_bytes) {
+        fetch_algorithms_input.process_response_consume_body = [this, &realm, &fire_error_event](auto response, auto body_bytes) {
             m_loading = false;
 
             // If fetching fails for any reason (network error, the server returns an error code, CORS fails, etc.),
             // or if URL is the empty string, then queue an element task on the DOM manipulation task source given the media element
             // to first change the text track readiness state to failed to load and then fire an event named error at the track element.
             if (!response->url().has_value() || body_bytes.template has<Empty>() || body_bytes.template has<Fetch::Infrastructure::FetchAlgorithms::ConsumeBodyFailureTag>() || !Fetch::Infrastructure::is_ok_status(response->status()) || response->is_network_error()) {
-                queue_an_element_task(Task::Source::DOMManipulation, [this, &realm]() {
-                    m_track->set_readiness_state(TextTrack::ReadinessState::FailedToLoad);
-                    dispatch_event(DOM::Event::create(realm, HTML::EventNames::error));
-                });
+                fire_error_event();
                 return;
             }
 
@@ -231,6 +238,8 @@ void HTMLTrackElement::start_the_track_processing_model_parallel_steps(JS::Realm
         // 4. Fetch request.
         m_fetch_algorithms = Fetch::Infrastructure::FetchAlgorithms::create(vm(), move(fetch_algorithms_input));
         m_fetch_controller = MUST(Fetch::Fetching::fetch(realm, request, *m_fetch_algorithms));
+    } else {
+        fire_error_event();
         return;
     }
 

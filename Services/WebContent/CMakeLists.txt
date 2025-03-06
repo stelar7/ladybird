@@ -1,9 +1,11 @@
 include(audio)
 
 set(SOURCES
+    BackingStoreManager.cpp
     ConnectionFromClient.cpp
     ConsoleGlobalEnvironmentExtensions.cpp
-    BackingStoreManager.cpp
+    DevToolsConsoleClient.cpp
+    InspectorConsoleClient.cpp
     PageClient.cpp
     PageHost.cpp
     WebContentConsoleClient.cpp
@@ -28,7 +30,8 @@ target_include_directories(webcontentservice PUBLIC $<BUILD_INTERFACE:${CMAKE_CU
 target_include_directories(webcontentservice PUBLIC $<BUILD_INTERFACE:${LADYBIRD_SOURCE_DIR}>)
 target_include_directories(webcontentservice PUBLIC $<BUILD_INTERFACE:${LADYBIRD_SOURCE_DIR}/Services/>)
 
-target_link_libraries(webcontentservice PUBLIC LibCore LibFileSystem LibGfx LibIPC LibJS LibMain LibMedia LibWeb LibWebSocket LibRequests LibWebView LibImageDecoderClient LibGC)
+target_link_libraries(webcontentservice PUBLIC LibCore LibCrypto LibFileSystem LibGfx LibIPC LibJS LibMain LibMedia LibWeb LibWebSocket LibRequests LibWebView LibImageDecoderClient LibGC)
+target_link_libraries(webcontentservice PRIVATE OpenSSL::Crypto OpenSSL::SSL)
 
 if (ENABLE_QT)
     qt_add_executable(WebContent main.cpp)

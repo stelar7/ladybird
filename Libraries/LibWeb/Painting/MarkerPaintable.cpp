@@ -6,6 +6,7 @@
 
 #include <LibGC/Heap.h>
 #include <LibWeb/Layout/ListItemMarkerBox.h>
+#include <LibWeb/Painting/DisplayListRecorder.h>
 #include <LibWeb/Painting/MarkerPaintable.h>
 
 namespace Web::Painting {
@@ -66,7 +67,7 @@ void MarkerPaintable::paint(PaintContext& context, PaintPhase phase) const
 
     auto color = computed_values().color();
 
-    if (auto& text = layout_box().text(); text.has_value()) {
+    if (auto text = layout_box().text(); text.has_value()) {
         // FIXME: This should use proper text layout logic!
         // This does not line up with the text in the <li> element which looks very sad :(
         context.display_list_recorder().draw_text(device_enclosing.to_type<int>(), *text, layout_box().scaled_font(context), Gfx::TextAlignment::Center, color);

@@ -27,6 +27,7 @@
 #include <LibGfx/Font/WOFF2/Loader.h>
 #include <LibWeb/Animations/AnimationEffect.h>
 #include <LibWeb/Animations/DocumentTimeline.h>
+#include <LibWeb/Bindings/PrincipalHostDefined.h>
 #include <LibWeb/CSS/AnimationEvent.h>
 #include <LibWeb/CSS/CSSAnimation.h>
 #include <LibWeb/CSS/CSSFontFaceRule.h>
@@ -36,6 +37,7 @@
 #include <LibWeb/CSS/CSSNestedDeclarations.h>
 #include <LibWeb/CSS/CSSStyleRule.h>
 #include <LibWeb/CSS/CSSTransition.h>
+#include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/Interpolation.h>
 #include <LibWeb/CSS/InvalidationSet.h>
 #include <LibWeb/CSS/Parser/Parser.h>
@@ -242,8 +244,12 @@ void FontLoader::start_loading_next_url()
         return;
     if (m_urls.is_empty())
         return;
+    auto& style_computer_realm = m_style_computer.document().realm();
+    auto& page = Bindings::principal_host_defined_page(HTML::principal_realm(style_computer_realm));
+
     LoadRequest request;
     request.set_url(m_urls.take_first());
+    request.set_page(page);
 
     // HACK: We're crudely computing the referer value and shoving it into the
     //       request until fetch infrastructure is used here.
@@ -381,7 +387,7 @@ void StyleComputer::for_each_stylesheet(CascadeOrigin cascade_origin, Callback c
     }
 }
 
-StyleComputer::RuleCache const* StyleComputer::rule_cache_for_cascade_origin(CascadeOrigin cascade_origin, FlyString const& qualified_layer_name, GC::Ptr<DOM::ShadowRoot const> shadow_root) const
+RuleCache const* StyleComputer::rule_cache_for_cascade_origin(CascadeOrigin cascade_origin, FlyString const& qualified_layer_name, GC::Ptr<DOM::ShadowRoot const> shadow_root) const
 {
     auto const* rule_caches_for_document_and_shadow_roots = [&]() -> RuleCachesForDocumentAndShadowRoots const* {
         switch (cascade_origin) {
@@ -415,20 +421,10 @@ StyleComputer::RuleCache const* StyleComputer::rule_cache_for_cascade_origin(Cas
     return true;
 }
 
-bool StyleComputer::should_reject_with_ancestor_filter(Selector const& selector) const
-{
-    for (u32 hash : selector.ancestor_hashes()) {
-        if (hash == 0)
-            break;
-        if (!m_ancestor_filter.may_contain(hash))
-            return true;
-    }
-    return false;
-}
-Vector<MatchingRule> const& StyleComputer::get_hover_rules() const
+RuleCache const& StyleComputer::get_hover_rules() const
 {
     build_rule_cache_if_needed();
-    return m_hover_rules;
+    return *m_hover_rule_cache;
 }
 
 InvalidationSet StyleComputer::invalidation_set_for_properties(Vector<InvalidationSet::Property> const& properties) const
@@ -508,7 +504,8 @@ Vector<MatchingRule const*> StyleComputer::collect_matching_rules(DOM::Element c
         if (!rule_is_relevant_for_current_scope)
             return;
 
-        if (should_reject_with_ancestor_filter(rule_to_run.selector))
+        auto const& selector = rule_to_run.selector;
+        if (selector.can_use_ancestor_filter() && should_reject_with_ancestor_filter(selector))
             return;
 
         rules_to_run.unchecked_append(rule_to_run);
@@ -530,33 +527,10 @@ Vector<MatchingRule const*> StyleComputer::collect_matching_rules(DOM::Element c
     };
 
     auto add_rules_from_cache = [&](RuleCache const& rule_cache) {
-        for (auto const& class_name : element.class_names()) {
-            if (auto it = rule_cache.rules_by_class.find(class_name); it != rule_cache.rules_by_class.end())
-                add_rules_to_run(it->value);
-        }
-        if (auto id = element.id(); id.has_value()) {
-            if (auto it = rule_cache.rules_by_id.find(id.value()); it != rule_cache.rules_by_id.end())
-                add_rules_to_run(it->value);
-        }
-        if (auto it = rule_cache.rules_by_tag_name.find(element.local_name()); it != rule_cache.rules_by_tag_name.end())
-            add_rules_to_run(it->value);
-        if (pseudo_element.has_value()) {
-            if (CSS::Selector::PseudoElement::is_known_pseudo_element_type(pseudo_element.value())) {
-                add_rules_to_run(rule_cache.rules_by_pseudo_element.at(to_underlying(pseudo_element.value())));
-            } else {
-                // NOTE: We don't cache rules for unknown pseudo-elements. They can't match anything anyway.
-            }
-        }
-
-        if (element.is_document_element())
-            add_rules_to_run(rule_cache.root_rules);
-
-        element.for_each_attribute([&](auto& name, auto&) {
-            if (auto it = rule_cache.rules_by_attribute_name.find(name); it != rule_cache.rules_by_attribute_name.end())
-                add_rules_to_run(it->value);
+        rule_cache.for_each_matching_rules(element, pseudo_element, [&](auto const& matching_rules) {
+            add_rules_to_run(matching_rules);
+            return IterationDecision::Continue;
         });
-
-        add_rules_to_run(rule_cache.other_rules);
     };
 
     if (auto const* rule_cache = rule_cache_for_cascade_origin(cascade_origin, qualified_layer_name, nullptr))
@@ -1903,12 +1877,11 @@ RefPtr<Gfx::FontCascadeList const> StyleComputer::compute_font_for_style_values(
             auto length = value.as_length().length();
             if (length.is_absolute() || length.is_relative()) {
                 Length::FontMetrics font_metrics { font_size_in_px, font_pixel_metrics };
-                return length.to_px(viewport_rect(), font_metrics, m_root_element_font_metrics);
+                return length.to_px(viewport_rect(), font_metrics, root_element_font_metrics_for_element(element));
             }
         }
         return font_size_in_px;
-    };
-    Length::FontMetrics font_metrics { parent_font_size(), font_pixel_metrics };
+    }();
 
     if (font_size.is_keyword()) {
         auto const keyword = font_size.to_keyword();
@@ -1952,7 +1925,7 @@ RefPtr<Gfx::FontCascadeList const> StyleComputer::compute_font_for_style_values(
                     return scale;
                 return 1.0 / scale;
             };
-            font_size_in_px = parent_font_size().scale_by(math_scaling_factor());
+            font_size_in_px = parent_font_size.scale_by(math_scaling_factor());
         } else {
             // https://w3c.github.io/csswg-drafts/css-fonts/#valdef-font-size-relative-size
             // TODO: If the parent element has a keyword font size in the absolute size keyword mapping table,
@@ -1968,20 +1941,20 @@ RefPtr<Gfx::FontCascadeList const> StyleComputer::compute_font_for_style_values(
     } else {
         Length::ResolutionContext const length_resolution_context {
             .viewport_rect = viewport_rect(),
-            .font_metrics = font_metrics,
-            .root_font_metrics = m_root_element_font_metrics,
+            .font_metrics = Length::FontMetrics { parent_font_size, font_pixel_metrics },
+            .root_font_metrics = root_element_font_metrics_for_element(element),
         };
 
         Optional<Length> maybe_length;
         if (font_size.is_percentage()) {
             // Percentages refer to parent element's font size
-            maybe_length = Length::make_px(CSSPixels::nearest_value_for(font_size.as_percentage().percentage().as_fraction() * parent_font_size().to_double()));
+            maybe_length = Length::make_px(CSSPixels::nearest_value_for(font_size.as_percentage().percentage().as_fraction() * parent_font_size.to_double()));
 
         } else if (font_size.is_length()) {
             maybe_length = font_size.as_length().length();
         } else if (font_size.is_calculated()) {
             maybe_length = font_size.as_calculated().resolve_length({
-                .percentage_basis = Length::make_px(parent_font_size()),
+                .percentage_basis = Length::make_px(parent_font_size),
                 .length_resolution_context = length_resolution_context,
             });
         }
@@ -2155,10 +2128,10 @@ Gfx::Font const& StyleComputer::initial_font() const
     return ComputedProperties::font_fallback(false, false, 12);
 }
 
-void StyleComputer::absolutize_values(ComputedProperties& style) const
+void StyleComputer::absolutize_values(ComputedProperties& style, GC::Ptr<DOM::Element const> element) const
 {
     Length::FontMetrics font_metrics {
-        m_root_element_font_metrics.font_size,
+        root_element_font_metrics_for_element(element).font_size,
         style.first_available_computed_font().pixel_metrics()
     };
 
@@ -2386,7 +2359,7 @@ GC::Ref<ComputedProperties> StyleComputer::create_document_style() const
     compute_math_depth(style, nullptr, {});
     compute_font(style, nullptr, {});
     compute_defaulted_values(style, nullptr, {});
-    absolutize_values(style);
+    absolutize_values(style, nullptr);
     style->set_property(CSS::PropertyID::Width, CSS::LengthStyleValue::create(CSS::Length::make_px(viewport_rect().width())));
     style->set_property(CSS::PropertyID::Height, CSS::LengthStyleValue::create(CSS::Length::make_px(viewport_rect().height())));
     style->set_property(CSS::PropertyID::Display, CSS::DisplayStyleValue::create(CSS::Display::from_short(CSS::Display::Short::Block)));
@@ -2464,14 +2437,105 @@ GC::Ptr<ComputedProperties> StyleComputer::compute_style_impl(DOM::Element& elem
     return computed_properties;
 }
 
+static bool is_monospace(CSSStyleValue const& value)
+{
+    if (value.to_keyword() == Keyword::Monospace)
+        return true;
+    if (value.is_value_list()) {
+        auto const& values = value.as_value_list().values();
+        if (values.size() == 1 && values[0]->to_keyword() == Keyword::Monospace)
+            return true;
+    }
+    return false;
+}
+
+// HACK: This function implements time-travelling inheritance for the font-size property
+//       in situations where the cascade ended up with `font-family: monospace`.
+//       In such cases, other browsers will magically change the meaning of keyword font sizes
+//       *even in earlier stages of the cascade!!* to be relative to the default monospace font size (13px)
+//       instead of the default font size (16px).
+//       See this blog post for a lot more details about this weirdness:
+//       https://manishearth.github.io/blog/2017/08/10/font-size-an-unexpectedly-complex-css-property/
+RefPtr<CSSStyleValue> StyleComputer::recascade_font_size_if_needed(
+    DOM::Element& element,
+    Optional<CSS::Selector::PseudoElement::Type> pseudo_element,
+    CascadedProperties& cascaded_properties) const
+{
+    // Check for `font-family: monospace`. Note that `font-family: monospace, AnythingElse` does not trigger this path.
+    // Some CSS frameworks use `font-family: monospace, monospace` to work around this behavior.
+    auto font_family_value = cascaded_properties.property(CSS::PropertyID::FontFamily);
+    if (!font_family_value || !is_monospace(*font_family_value))
+        return nullptr;
+
+    // FIXME: This should be configurable.
+    constexpr CSSPixels default_monospace_font_size_in_px = 13;
+    static auto monospace_font_family_name = Platform::FontPlugin::the().generic_font_name(Platform::GenericFont::Monospace);
+    static auto monospace_font = Gfx::FontDatabase::the().get(monospace_font_family_name, default_monospace_font_size_in_px * 0.75f, 400, Gfx::FontWidth::Normal, 0);
+
+    // Reconstruct the line of ancestor elements we need to inherit style from, and then do the cascade again
+    // but only for the font-size property.
+    Vector<DOM::Element&> ancestors;
+    if (pseudo_element.has_value())
+        ancestors.append(element);
+    for (auto* ancestor = element.parent_element(); ancestor; ancestor = ancestor->parent_element())
+        ancestors.append(*ancestor);
+
+    NonnullRefPtr<CSSStyleValue> new_font_size = CSS::LengthStyleValue::create(CSS::Length::make_px(default_monospace_font_size_in_px));
+    CSSPixels current_size_in_px = default_monospace_font_size_in_px;
+
+    for (auto& ancestor : ancestors.in_reverse()) {
+        auto& ancestor_cascaded_properties = *ancestor.cascaded_properties({});
+        auto font_size_value = ancestor_cascaded_properties.property(CSS::PropertyID::FontSize);
+
+        if (!font_size_value)
+            continue;
+        if (font_size_value->is_initial() || font_size_value->is_unset()) {
+            current_size_in_px = default_monospace_font_size_in_px;
+            continue;
+        }
+        if (font_size_value->is_inherit()) {
+            // Do nothing.
+            continue;
+        }
+
+        if (font_size_value->is_keyword()) {
+            current_size_in_px = default_monospace_font_size_in_px * absolute_size_mapping(font_size_value->to_keyword());
+            continue;
+        }
+
+        if (font_size_value->is_percentage()) {
+            current_size_in_px = CSSPixels::nearest_value_for(font_size_value->as_percentage().percentage().as_fraction() * current_size_in_px);
+            continue;
+        }
+
+        if (font_size_value->is_calculated()) {
+            dbgln("FIXME: Support calc() when time-traveling for monospace font-size");
+            continue;
+        }
+
+        VERIFY(font_size_value->is_length());
+        current_size_in_px = font_size_value->as_length().length().to_px(viewport_rect(), Length::FontMetrics { current_size_in_px, monospace_font->with_size(current_size_in_px * 0.75f)->pixel_metrics() }, m_root_element_font_metrics);
+    };
+
+    return CSS::LengthStyleValue::create(CSS::Length::make_px(current_size_in_px));
+}
+
 GC::Ref<ComputedProperties> StyleComputer::compute_properties(DOM::Element& element, Optional<Selector::PseudoElement::Type> pseudo_element, CascadedProperties& cascaded_properties) const
 {
     auto computed_style = document().heap().allocate<CSS::ComputedProperties>();
+
+    auto new_font_size = recascade_font_size_if_needed(element, pseudo_element, cascaded_properties);
+    if (new_font_size)
+        computed_style->set_property(PropertyID::FontSize, *new_font_size, ComputedProperties::Inherited::No, Important::No);
 
     for (auto i = to_underlying(first_longhand_property_id); i <= to_underlying(last_longhand_property_id); ++i) {
         auto property_id = static_cast<CSS::PropertyID>(i);
         auto value = cascaded_properties.property(property_id);
         auto inherited = ComputedProperties::Inherited::No;
+
+        // NOTE: We've already handled font-size above.
+        if (property_id == PropertyID::FontSize && !value && new_font_size)
+            continue;
 
         if ((!value && is_inherited_property(property_id))
             || (value && value->is_inherit())) {
@@ -2541,7 +2605,7 @@ GC::Ref<ComputedProperties> StyleComputer::compute_properties(DOM::Element& elem
                 effect->set_target(&element);
                 element.set_cached_animation_name_animation(animation, pseudo_element);
 
-                if (!element.has_display_none_ancestor()) {
+                if (!element.has_inclusive_ancestor_with_display_none()) {
                     HTML::TemporaryExecutionContext context(realm);
                     animation->play().release_value_but_fixme_should_propagate_errors();
                 }
@@ -2580,7 +2644,7 @@ GC::Ref<ComputedProperties> StyleComputer::compute_properties(DOM::Element& elem
     compute_font(computed_style, &element, pseudo_element);
 
     // 4. Absolutize values, turning font/viewport relative lengths into absolute lengths
-    absolutize_values(computed_style);
+    absolutize_values(computed_style, element);
 
     // 5. Default the values, applying inheritance and 'initial' as needed
     compute_defaulted_values(computed_style, &element, pseudo_element);
@@ -2664,16 +2728,8 @@ void StyleComputer::collect_selector_insights(Selector const& selector, Selector
     }
 }
 
-void StyleComputer::make_rule_cache_for_cascade_origin(CascadeOrigin cascade_origin, SelectorInsights& insights, Vector<MatchingRule>& hover_rules)
+void StyleComputer::make_rule_cache_for_cascade_origin(CascadeOrigin cascade_origin, SelectorInsights& insights)
 {
-    size_t num_class_rules = 0;
-    size_t num_id_rules = 0;
-    size_t num_tag_name_rules = 0;
-    size_t num_pseudo_element_rules = 0;
-    size_t num_root_rules = 0;
-    size_t num_attribute_rules = 0;
-    size_t num_hover_rules = 0;
-
     Vector<MatchingRule> matching_rules;
     size_t style_sheet_index = 0;
     for_each_stylesheet(cascade_origin, [&](auto& sheet, GC::Ptr<DOM::ShadowRoot> shadow_root) {
@@ -2739,21 +2795,18 @@ void StyleComputer::make_rule_cache_for_cascade_origin(CascadeOrigin cascade_ori
                         if (simple_selector.type == CSS::Selector::SimpleSelector::Type::PseudoElement) {
                             matching_rule.contains_pseudo_element = true;
                             pseudo_element = simple_selector.pseudo_element().type();
-                            ++num_pseudo_element_rules;
                         }
                     }
                     if (!contains_root_pseudo_class) {
                         if (simple_selector.type == CSS::Selector::SimpleSelector::Type::PseudoClass
                             && simple_selector.pseudo_class().type == CSS::PseudoClass::Root) {
                             contains_root_pseudo_class = true;
-                            ++num_root_rules;
                         }
                     }
 
                     if (!matching_rule.must_be_hovered) {
                         if (simple_selector.type == CSS::Selector::SimpleSelector::Type::PseudoClass && simple_selector.pseudo_class().type == CSS::PseudoClass::Hover) {
                             matching_rule.must_be_hovered = true;
-                            ++num_hover_rules;
                         }
                         if (simple_selector.type == CSS::Selector::SimpleSelector::Type::PseudoClass
                             && (simple_selector.pseudo_class().type == CSS::PseudoClass::Is
@@ -2765,7 +2818,6 @@ void StyleComputer::make_rule_cache_for_cascade_origin(CascadeOrigin cascade_ori
                                 if (simple_argument_selector.type == CSS::Selector::SimpleSelector::Type::PseudoClass
                                     && simple_argument_selector.pseudo_class().type == CSS::PseudoClass::Hover) {
                                     matching_rule.must_be_hovered = true;
-                                    ++num_hover_rules;
                                 }
                             }
                         }
@@ -2773,83 +2825,10 @@ void StyleComputer::make_rule_cache_for_cascade_origin(CascadeOrigin cascade_ori
                 }
 
                 if (selector.contains_hover_pseudo_class()) {
-                    hover_rules.append(matching_rule);
+                    // For hover rule cache we intentionally pass pseudo_element as None, because we don't want to bucket hover rules by pseudo element type
+                    m_hover_rule_cache->add_rule(matching_rule, {}, contains_root_pseudo_class);
                 }
-
-                // NOTE: We traverse the simple selectors in reverse order to make sure that class/ID buckets are preferred over tag buckets
-                //       in the common case of div.foo or div#foo selectors.
-                bool added_to_bucket = false;
-
-                auto add_to_id_bucket = [&](FlyString const& name) {
-                    rule_cache.rules_by_id.ensure(name).append(move(matching_rule));
-                    ++num_id_rules;
-                    added_to_bucket = true;
-                };
-
-                auto add_to_class_bucket = [&](FlyString const& name) {
-                    rule_cache.rules_by_class.ensure(name).append(move(matching_rule));
-                    ++num_class_rules;
-                    added_to_bucket = true;
-                };
-
-                auto add_to_tag_name_bucket = [&](FlyString const& name) {
-                    rule_cache.rules_by_tag_name.ensure(name).append(move(matching_rule));
-                    ++num_tag_name_rules;
-                    added_to_bucket = true;
-                };
-
-                for (auto const& simple_selector : selector.compound_selectors().last().simple_selectors.in_reverse()) {
-                    if (simple_selector.type == CSS::Selector::SimpleSelector::Type::Id) {
-                        add_to_id_bucket(simple_selector.name());
-                        break;
-                    }
-                    if (simple_selector.type == CSS::Selector::SimpleSelector::Type::Class) {
-                        add_to_class_bucket(simple_selector.name());
-                        break;
-                    }
-                    if (simple_selector.type == CSS::Selector::SimpleSelector::Type::TagName) {
-                        add_to_tag_name_bucket(simple_selector.qualified_name().name.lowercase_name);
-                        break;
-                    }
-                    // NOTE: Selectors like `:is/where(.foo)` and `:is/where(.foo .bar)` are bucketed as class selectors for `foo` and `bar` respectively.
-                    if (auto simplified = is_roundabout_selector_bucketable_as_something_simpler(simple_selector); simplified.has_value()) {
-                        if (simplified->type == CSS::Selector::SimpleSelector::Type::TagName) {
-                            add_to_tag_name_bucket(simplified->name);
-                            break;
-                        }
-                        if (simplified->type == CSS::Selector::SimpleSelector::Type::Class) {
-                            add_to_class_bucket(simplified->name);
-                            break;
-                        }
-                        if (simplified->type == CSS::Selector::SimpleSelector::Type::Id) {
-                            add_to_id_bucket(simplified->name);
-                            break;
-                        }
-                    }
-                }
-                if (!added_to_bucket) {
-                    if (matching_rule.contains_pseudo_element) {
-                        if (CSS::Selector::PseudoElement::is_known_pseudo_element_type(pseudo_element.value())) {
-                            rule_cache.rules_by_pseudo_element[to_underlying(pseudo_element.value())].append(move(matching_rule));
-                        } else {
-                            // NOTE: We don't cache rules for unknown pseudo-elements. They can't match anything anyway.
-                        }
-                    } else if (contains_root_pseudo_class) {
-                        rule_cache.root_rules.append(move(matching_rule));
-                    } else {
-                        for (auto const& simple_selector : selector.compound_selectors().last().simple_selectors) {
-                            if (simple_selector.type == CSS::Selector::SimpleSelector::Type::Attribute) {
-                                rule_cache.rules_by_attribute_name.ensure(simple_selector.attribute().qualified_name.name.lowercase_name).append(move(matching_rule));
-                                ++num_attribute_rules;
-                                added_to_bucket = true;
-                                break;
-                            }
-                        }
-                        if (!added_to_bucket) {
-                            rule_cache.other_rules.append(move(matching_rule));
-                        }
-                    }
-                }
+                rule_cache.add_rule(matching_rule, pseudo_element, contains_root_pseudo_class);
             }
             ++rule_index;
         });
@@ -2976,9 +2955,10 @@ void StyleComputer::build_rule_cache()
 
     build_qualified_layer_names_cache();
 
-    make_rule_cache_for_cascade_origin(CascadeOrigin::Author, *m_selector_insights, m_hover_rules);
-    make_rule_cache_for_cascade_origin(CascadeOrigin::User, *m_selector_insights, m_hover_rules);
-    make_rule_cache_for_cascade_origin(CascadeOrigin::UserAgent, *m_selector_insights, m_hover_rules);
+    m_hover_rule_cache = make<RuleCache>();
+    make_rule_cache_for_cascade_origin(CascadeOrigin::Author, *m_selector_insights);
+    make_rule_cache_for_cascade_origin(CascadeOrigin::User, *m_selector_insights);
+    make_rule_cache_for_cascade_origin(CascadeOrigin::UserAgent, *m_selector_insights);
 }
 
 void StyleComputer::invalidate_rule_cache()
@@ -2995,7 +2975,7 @@ void StyleComputer::invalidate_rule_cache()
     //       If we are sure that it's safe, we could keep it as an optimization.
     m_user_agent_rule_cache = nullptr;
 
-    m_hover_rules.clear_with_capacity();
+    m_hover_rule_cache = nullptr;
     m_style_invalidation_data = nullptr;
 }
 
@@ -3176,6 +3156,122 @@ bool StyleComputer::have_has_selectors() const
 {
     build_rule_cache_if_needed();
     return m_selector_insights->has_has_selectors;
+}
+
+void RuleCache::add_rule(MatchingRule const& matching_rule, Optional<Selector::PseudoElement::Type> pseudo_element, bool contains_root_pseudo_class)
+{
+    // NOTE: We traverse the simple selectors in reverse order to make sure that class/ID buckets are preferred over tag buckets
+    //       in the common case of div.foo or div#foo selectors.
+    auto add_to_id_bucket = [&](FlyString const& name) {
+        rules_by_id.ensure(name).append(matching_rule);
+    };
+
+    auto add_to_class_bucket = [&](FlyString const& name) {
+        rules_by_class.ensure(name).append(matching_rule);
+    };
+
+    auto add_to_tag_name_bucket = [&](FlyString const& name) {
+        rules_by_tag_name.ensure(name).append(matching_rule);
+    };
+
+    for (auto const& simple_selector : matching_rule.selector.compound_selectors().last().simple_selectors.in_reverse()) {
+        if (simple_selector.type == Selector::SimpleSelector::Type::Id) {
+            add_to_id_bucket(simple_selector.name());
+            return;
+        }
+        if (simple_selector.type == Selector::SimpleSelector::Type::Class) {
+            add_to_class_bucket(simple_selector.name());
+            return;
+        }
+        if (simple_selector.type == Selector::SimpleSelector::Type::TagName) {
+            add_to_tag_name_bucket(simple_selector.qualified_name().name.lowercase_name);
+            return;
+        }
+        // NOTE: Selectors like `:is/where(.foo)` and `:is/where(.foo .bar)` are bucketed as class selectors for `foo` and `bar` respectively.
+        if (auto simplified = is_roundabout_selector_bucketable_as_something_simpler(simple_selector); simplified.has_value()) {
+            if (simplified->type == Selector::SimpleSelector::Type::TagName) {
+                add_to_tag_name_bucket(simplified->name);
+                return;
+            }
+            if (simplified->type == Selector::SimpleSelector::Type::Class) {
+                add_to_class_bucket(simplified->name);
+                return;
+            }
+            if (simplified->type == Selector::SimpleSelector::Type::Id) {
+                add_to_id_bucket(simplified->name);
+                return;
+            }
+        }
+    }
+
+    if (matching_rule.contains_pseudo_element && pseudo_element.has_value()) {
+        if (Selector::PseudoElement::is_known_pseudo_element_type(pseudo_element.value())) {
+            rules_by_pseudo_element[to_underlying(pseudo_element.value())].append(matching_rule);
+        } else {
+            // NOTE: We don't cache rules for unknown pseudo-elements. They can't match anything anyway.
+        }
+    } else if (contains_root_pseudo_class) {
+        root_rules.append(matching_rule);
+    } else {
+        for (auto const& simple_selector : matching_rule.selector.compound_selectors().last().simple_selectors) {
+            if (simple_selector.type == Selector::SimpleSelector::Type::Attribute) {
+                rules_by_attribute_name.ensure(simple_selector.attribute().qualified_name.name.lowercase_name).append(matching_rule);
+                return;
+            }
+        }
+        other_rules.append(matching_rule);
+    }
+}
+
+void RuleCache::for_each_matching_rules(DOM::Element const& element, Optional<Selector::PseudoElement::Type> pseudo_element, Function<IterationDecision(Vector<MatchingRule> const&)> callback) const
+{
+    for (auto const& class_name : element.class_names()) {
+        if (auto it = rules_by_class.find(class_name); it != rules_by_class.end()) {
+            if (callback(it->value) == IterationDecision::Break)
+                return;
+        }
+    }
+    if (auto id = element.id(); id.has_value()) {
+        if (auto it = rules_by_id.find(id.value()); it != rules_by_id.end()) {
+            if (callback(it->value) == IterationDecision::Break)
+                return;
+        }
+    }
+    if (auto it = rules_by_tag_name.find(element.local_name()); it != rules_by_tag_name.end()) {
+        if (callback(it->value) == IterationDecision::Break)
+            return;
+    }
+    if (pseudo_element.has_value()) {
+        if (Selector::PseudoElement::is_known_pseudo_element_type(pseudo_element.value())) {
+            if (callback(rules_by_pseudo_element.at(to_underlying(pseudo_element.value()))) == IterationDecision::Break)
+                return;
+        } else {
+            // NOTE: We don't cache rules for unknown pseudo-elements. They can't match anything anyway.
+        }
+    }
+
+    if (element.is_document_element()) {
+        if (callback(root_rules) == IterationDecision::Break)
+            return;
+    }
+
+    IterationDecision decision = IterationDecision::Continue;
+    element.for_each_attribute([&](auto& name, auto&) {
+        if (auto it = rules_by_attribute_name.find(name); it != rules_by_attribute_name.end()) {
+            decision = callback(it->value);
+        }
+    });
+    if (decision == IterationDecision::Break)
+        return;
+
+    (void)callback(other_rules);
+}
+
+Length::FontMetrics const& StyleComputer::root_element_font_metrics_for_element(GC::Ptr<DOM::Element const> element) const
+{
+    if (element && element->document().document_element() == element)
+        return m_default_font_metrics;
+    return m_root_element_font_metrics;
 }
 
 }

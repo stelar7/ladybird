@@ -23,6 +23,8 @@
 #include <LibWeb/HTML/HTMLSelectElement.h>
 #include <LibWeb/HTML/HTMLTextAreaElement.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
+#include <LibWeb/HTML/ValidityState.h>
+#include <LibWeb/Infra/Strings.h>
 #include <LibWeb/Painting/Paintable.h>
 #include <LibWeb/Selection/Selection.h>
 
@@ -46,6 +48,25 @@ void FormAssociatedElement::set_form(HTMLFormElement* form)
     m_form = form;
     if (m_form)
         m_form->add_associated_element({}, form_associated_element_to_html_element());
+}
+
+// https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#dom-cva-validity
+GC::Ref<ValidityState const> FormAssociatedElement::validity() const
+{
+    auto& realm = form_associated_element_to_html_element().realm();
+    return realm.create<ValidityState>(realm, *this);
+}
+
+// https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#dom-cva-setcustomvalidity
+void FormAssociatedElement::set_custom_validity(String& error)
+{
+    // The setCustomValidity(error) method steps are:
+
+    // 1. Set error to the result of normalizing newlines given error.
+    error = Infra::normalize_newlines(error);
+
+    // 2. Set the custom validity error message to error.
+    m_custom_validity_error_message = error;
 }
 
 bool FormAssociatedElement::enabled() const
@@ -194,13 +215,29 @@ String FormAssociatedElement::form_action() const
     }
 
     auto document_base_url = html_element.document().base_url();
-    return document_base_url.complete_url(form_action_attribute.value()).to_string();
+    if (auto maybe_url = document_base_url.complete_url(form_action_attribute.value()); maybe_url.has_value())
+        return maybe_url->to_string();
+    return {};
 }
 
 WebIDL::ExceptionOr<void> FormAssociatedElement::set_form_action(String const& value)
 {
     auto& html_element = form_associated_element_to_html_element();
     return html_element.set_attribute(HTML::AttributeNames::formaction, value);
+}
+
+// https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#check-validity-steps
+bool FormAssociatedElement::check_validity_steps()
+{
+    // 1. If element is a candidate for constraint validation and does not satisfy its constraints
+    if (is_candidate_for_constraint_validation() && !satisfies_its_constraints()) {
+        auto& element = form_associated_element_to_html_element();
+        // 1. Fire an event named invalid at element, with the cancelable attribute initialized to true
+        element.dispatch_event(DOM::Event::create(element.realm(), EventNames::invalid, { .cancelable = true }));
+        // 2. Return false.
+        return false;
+    }
+    return true;
 }
 
 // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#candidate-for-constraint-validation
@@ -252,8 +289,8 @@ bool FormAssociatedElement::is_candidate_for_constraint_validation() const
         auto const& button_element = as<HTMLButtonElement>(html_element);
 
         // https://html.spec.whatwg.org/multipage/form-elements.html#the-button-element%3Abarred-from-constraint-validation
-        // If the type attribute is in the Reset Button state or the Button state, the element is barred from constraint validation.
-        if (button_element.type_state() == HTMLButtonElement::TypeAttributeState::Button || button_element.type_state() == HTMLButtonElement::TypeAttributeState::Reset)
+        // If the element is not a submit button, the element is barred from constraint validation.
+        if (!button_element.is_submit_button())
             return false;
     }
 
@@ -291,8 +328,9 @@ bool FormAssociatedElement::suffering_from_being_too_short() const
 // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#suffering-from-a-custom-error
 bool FormAssociatedElement::suffering_from_a_custom_error() const
 {
-    // FIXME: Implement this.
-    return false;
+    // When a control's custom validity error message (as set by the element's setCustomValidity() method or ElementInternals's setValidity() method) is not the empty
+    // string.
+    return !m_custom_validity_error_message.is_empty();
 }
 
 // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#concept-textarea/input-relevant-value
@@ -929,6 +967,11 @@ GC::Ptr<DOM::Position> FormAssociatedTextControlElement::cursor_position() const
     if (m_selection_start == m_selection_end)
         return DOM::Position::create(node->realm(), const_cast<DOM::Text&>(*node), m_selection_start);
     return nullptr;
+}
+
+GC::Ref<JS::Cell> FormAssociatedTextControlElement::as_cell()
+{
+    return form_associated_element_to_html_element();
 }
 
 }

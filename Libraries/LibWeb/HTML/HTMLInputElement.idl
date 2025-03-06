@@ -11,7 +11,7 @@ interface HTMLInputElement : HTMLElement {
 
     [CEReactions, Reflect] attribute DOMString accept;
     [CEReactions, Reflect] attribute DOMString alt;
-    [CEReactions, Enumerated=Autocomplete, Reflect] attribute DOMString autocomplete;
+    [CEReactions] attribute DOMString autocomplete;
     [CEReactions, Reflect=checked] attribute boolean defaultChecked;
     [ImplementedAs=checked_binding] attribute boolean checked;
     [CEReactions, Reflect=dirname] attribute DOMString dirName;
@@ -32,7 +32,7 @@ interface HTMLInputElement : HTMLElement {
     [CEReactions] attribute long minLength;
     [CEReactions, Reflect] attribute boolean multiple;
     [CEReactions, Reflect] attribute DOMString name;
-    [FIXME, CEReactions] attribute DOMString pattern;
+    [CEReactions, Reflect] attribute DOMString pattern;
     [CEReactions, Reflect] attribute DOMString placeholder;
     [CEReactions, Reflect=readonly] attribute boolean readOnly;
     [CEReactions, Reflect] attribute boolean required;
@@ -51,7 +51,7 @@ interface HTMLInputElement : HTMLElement {
     undefined stepUp(optional long n = 1);
     undefined stepDown(optional long n = 1);
 
-    [FIXME] readonly attribute boolean willValidate;
+    readonly attribute boolean willValidate;
     readonly attribute ValidityState validity;
     [FIXME] readonly attribute DOMString validationMessage;
     boolean checkValidity();

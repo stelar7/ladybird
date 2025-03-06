@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2024, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2018-2025, Andreas Kling <andreas@ladybird.org>
  * Copyright (c) 2020-2021, the SerenityOS developers.
  * Copyright (c) 2021-2025, Sam Atkins <sam@ladybird.org>
  * Copyright (c) 2021, Tobias Christiansen <tobyase@serenityos.org>
@@ -26,11 +26,13 @@
 #include <LibWeb/CSS/StyleValues/ColorSchemeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ContentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterDefinitionsStyleValue.h>
+#include <LibWeb/CSS/StyleValues/CursorStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CustomIdentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/CSS/StyleValues/EasingStyleValue.h>
 #include <LibWeb/CSS/StyleValues/EdgeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FilterValueListStyleValue.h>
+#include <LibWeb/CSS/StyleValues/FitContentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FlexStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FrequencyStyleValue.h>
 #include <LibWeb/CSS/StyleValues/GridAutoFlowStyleValue.h>
@@ -55,6 +57,7 @@
 #include <LibWeb/CSS/StyleValues/TransitionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/UnresolvedStyleValue.h>
 #include <LibWeb/Dump.h>
+#include <LibWeb/Infra/Strings.h>
 
 namespace Web::CSS::Parser {
 
@@ -157,7 +160,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         // Custom idents
         if (auto property = any_property_accepts_type(property_ids, ValueType::CustomIdent); property.has_value()) {
             auto context_guard = push_temporary_value_parsing_context(*property);
-            if (auto custom_ident = parse_custom_ident_value(tokens, {}))
+            if (auto custom_ident = parse_custom_ident_value(tokens, property_custom_ident_blacklist(*property)))
                 return PropertyAndValue { *property, custom_ident };
         }
     }
@@ -298,6 +301,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             if (value->is_frequency() && property_accepts_frequency(*property, value->as_frequency().frequency()))
                 return PropertyAndValue { *property, value };
         }
+    }
+
+    if (auto property = any_property_accepts_type(property_ids, ValueType::FitContent); property.has_value()) {
+        auto context_guard = push_temporary_value_parsing_context(*property);
+        if (auto value = parse_fit_content_value(tokens))
+            return PropertyAndValue { *property, value };
     }
 
     if (auto property = any_property_accepts_type(property_ids, ValueType::Length); property.has_value()) {
@@ -527,6 +536,10 @@ Parser::ParseErrorOr<NonnullRefPtr<CSSStyleValue>> Parser::parse_css_value(Prope
         return ParseError::SyntaxError;
     case PropertyID::CounterSet:
         if (auto parsed_value = parse_counter_set_value(tokens); parsed_value && !tokens.has_next_token())
+            return parsed_value.release_nonnull();
+        return ParseError::SyntaxError;
+    case PropertyID::Cursor:
+        if (auto parsed_value = parse_cursor_value(tokens); parsed_value && !tokens.has_next_token())
             return parsed_value.release_nonnull();
         return ParseError::SyntaxError;
     case PropertyID::Display:
@@ -834,7 +847,7 @@ RefPtr<CSSStyleValue> Parser::parse_color_scheme_value(TokenStream<ComponentValu
 
         // The 'normal', 'light', 'dark', and 'only' keywords are not valid <custom-ident>s in this property.
         // Note: only 'normal' is blacklisted here because 'light' and 'dark' aren't parsed differently and 'only' is checked for afterwards
-        auto ident = parse_custom_ident_value(tokens, { "normal"sv });
+        auto ident = parse_custom_ident_value(tokens, { { "normal"sv } });
         if (!ident)
             return {};
 
@@ -948,6 +961,72 @@ RefPtr<CSSStyleValue> Parser::parse_counter_set_value(TokenStream<ComponentValue
         return none;
 
     return parse_counter_definitions_value(tokens, AllowReversed::No, 0);
+}
+
+// https://drafts.csswg.org/css-ui-3/#cursor
+RefPtr<CSSStyleValue> Parser::parse_cursor_value(TokenStream<ComponentValue>& tokens)
+{
+    // [ [<url> [<x> <y>]?,]* <built-in-cursor> ]
+    // So, any number of custom cursor definitions, and then a mandatory cursor name keyword, all comma-separated.
+
+    auto transaction = tokens.begin_transaction();
+
+    StyleValueVector cursors;
+
+    auto parts = parse_a_comma_separated_list_of_component_values(tokens);
+    for (auto i = 0u; i < parts.size(); ++i) {
+        auto& part = parts[i];
+        TokenStream part_tokens { part };
+
+        if (i == parts.size() - 1) {
+            // Cursor keyword
+            part_tokens.discard_whitespace();
+            auto keyword_value = parse_keyword_value(part_tokens);
+            if (!keyword_value || !keyword_to_cursor(keyword_value->to_keyword()).has_value())
+                return {};
+
+            part_tokens.discard_whitespace();
+            if (part_tokens.has_next_token())
+                return {};
+
+            cursors.append(keyword_value.release_nonnull());
+        } else {
+            // Custom cursor definition
+            // <url> [<x> <y>]?
+            // "Conforming user agents may, instead of <url>, support <image> which is a superset."
+
+            part_tokens.discard_whitespace();
+            auto image_value = parse_image_value(part_tokens);
+            if (!image_value)
+                return {};
+
+            part_tokens.discard_whitespace();
+
+            if (part_tokens.has_next_token()) {
+                // x and y, which are both <number>
+                auto x = parse_number(part_tokens);
+                part_tokens.discard_whitespace();
+                auto y = parse_number(part_tokens);
+                part_tokens.discard_whitespace();
+                if (!x.has_value() || !y.has_value() || part_tokens.has_next_token())
+                    return nullptr;
+
+                cursors.append(CursorStyleValue::create(image_value.release_nonnull(), x.release_value(), y.release_value()));
+                continue;
+            }
+
+            cursors.append(CursorStyleValue::create(image_value.release_nonnull(), {}, {}));
+        }
+    }
+
+    if (cursors.is_empty())
+        return nullptr;
+
+    transaction.commit();
+    if (cursors.size() == 1)
+        return *cursors.first();
+
+    return StyleValueList::create(move(cursors), StyleValueList::Separator::Comma);
 }
 
 // https://www.w3.org/TR/css-sizing-4/#aspect-ratio
@@ -3431,6 +3510,8 @@ RefPtr<CSSStyleValue> Parser::parse_text_decoration_line_value(TokenStream<Compo
 {
     StyleValueVector style_values;
 
+    bool includes_spelling_or_grammar_error_value = false;
+
     while (tokens.has_next_token()) {
         auto maybe_value = parse_css_value_for_property(PropertyID::TextDecorationLine, tokens);
         if (!maybe_value)
@@ -3443,6 +3524,9 @@ RefPtr<CSSStyleValue> Parser::parse_text_decoration_line_value(TokenStream<Compo
                     break;
                 return value;
             }
+            if (first_is_one_of(*maybe_line, TextDecorationLine::SpellingError, TextDecorationLine::GrammarError)) {
+                includes_spelling_or_grammar_error_value = true;
+            }
             if (style_values.contains_slow(value))
                 break;
             style_values.append(move(value));
@@ -3454,6 +3538,13 @@ RefPtr<CSSStyleValue> Parser::parse_text_decoration_line_value(TokenStream<Compo
 
     if (style_values.is_empty())
         return nullptr;
+
+    // These can only appear on their own.
+    if (style_values.size() > 1 && includes_spelling_or_grammar_error_value)
+        return nullptr;
+
+    if (style_values.size() == 1)
+        return *style_values.first();
 
     quick_sort(style_values, [](auto& left, auto& right) {
         return *keyword_to_text_decoration_line(left->to_keyword()) < *keyword_to_text_decoration_line(right->to_keyword());

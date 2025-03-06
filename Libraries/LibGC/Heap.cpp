@@ -176,7 +176,7 @@ public:
         for (auto& it : m_graph) {
             AK::JsonArray edges;
             for (auto const& value : it.value.edges) {
-                edges.must_append(ByteString::formatted("{}", value));
+                edges.must_append(MUST(String::formatted("{}", value)));
             }
 
             auto node = AK::JsonObject();
@@ -185,19 +185,19 @@ public:
                 auto location = it.value.root_origin->location;
                 switch (type) {
                 case HeapRoot::Type::Root:
-                    node.set("root"sv, ByteString::formatted("Root {} {}:{}", location->function_name(), location->filename(), location->line_number()));
+                    node.set("root"sv, MUST(String::formatted("Root {} {}:{}", location->function_name(), location->filename(), location->line_number())));
                     break;
                 case HeapRoot::Type::RootVector:
-                    node.set("root"sv, "RootVector");
+                    node.set("root"sv, "RootVector"sv);
                     break;
                 case HeapRoot::Type::RegisterPointer:
-                    node.set("root"sv, "RegisterPointer");
+                    node.set("root"sv, "RegisterPointer"sv);
                     break;
                 case HeapRoot::Type::StackPointer:
-                    node.set("root"sv, "StackPointer");
+                    node.set("root"sv, "StackPointer"sv);
                     break;
                 case HeapRoot::Type::VM:
-                    node.set("root"sv, "VM");
+                    node.set("root"sv, "VM"sv);
                     break;
                 default:
                     VERIFY_NOT_REACHED();
@@ -430,6 +430,14 @@ void Heap::mark_live_cells(HashMap<Cell*, HeapRoot> const& roots)
     for (auto& inverse_root : m_uprooted_cells)
         inverse_root->set_marked(false);
 
+    for_each_block([&](auto& block) {
+        block.template for_each_cell_in_state<Cell::State::Live>([&](Cell* cell) {
+            if (!cell->is_marked() && cell_must_survive_garbage_collection(*cell))
+                cell->visit_edges(visitor);
+        });
+        return IterationDecision::Continue;
+    });
+
     m_uprooted_cells.clear();
 }
 
@@ -444,7 +452,7 @@ void Heap::finalize_unmarked_cells()
 {
     for_each_block([&](auto& block) {
         block.template for_each_cell_in_state<Cell::State::Live>([](Cell* cell) {
-            if (!cell->is_marked() && !cell_must_survive_garbage_collection(*cell))
+            if (!cell->is_marked())
                 cell->finalize();
         });
         return IterationDecision::Continue;
@@ -466,7 +474,7 @@ void Heap::sweep_dead_cells(bool print_report, Core::ElapsedTimer const& measure
         bool block_has_live_cells = false;
         bool block_was_full = block.is_full();
         block.template for_each_cell_in_state<Cell::State::Live>([&](Cell* cell) {
-            if (!cell->is_marked() && !cell_must_survive_garbage_collection(*cell)) {
+            if (!cell->is_marked()) {
                 dbgln_if(HEAP_DEBUG, "  ~ {}", cell);
                 block.deallocate(cell);
                 ++collected_cells;

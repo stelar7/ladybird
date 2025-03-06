@@ -1,5 +1,6 @@
 #include <LibCore/AnonymousBuffer.h>
 #include <LibGfx/Color.h>
+#include <LibGfx/Cursor.h>
 #include <LibGfx/ShareableBitmap.h>
 #include <LibURL/URL.h>
 #include <LibWeb/Cookie/Cookie.h>
@@ -15,8 +16,9 @@
 #include <LibWeb/Page/EventResult.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWebView/Attribute.h>
-#include <LibWebView/ProcessHandle.h>
+#include <LibWebView/ConsoleOutput.h>
 #include <LibWebView/PageInfo.h>
+#include <LibWebView/ProcessHandle.h>
 
 endpoint WebContentClient
 {
@@ -24,7 +26,7 @@ endpoint WebContentClient
     did_finish_loading(u64 page_id, URL::URL url) =|
     did_request_refresh(u64 page_id) =|
     did_paint(u64 page_id, Gfx::IntRect content_rect, i32 bitmap_id) =|
-    did_request_cursor_change(u64 page_id, i32 cursor_type) =|
+    did_request_cursor_change(u64 page_id, Gfx::Cursor cursor) =|
     did_change_title(u64 page_id, ByteString title) =|
     did_change_url(u64 page_id, URL::URL url) =|
     did_request_tooltip_override(u64 page_id, Gfx::IntPoint position, ByteString title) =|
@@ -47,9 +49,9 @@ endpoint WebContentClient
     did_request_dismiss_dialog(u64 page_id) =|
     did_get_source(u64 page_id, URL::URL url, URL::URL base_url, String source) =|
 
-    did_inspect_dom_tree(u64 page_id, ByteString dom_tree) =|
-    did_inspect_dom_node(u64 page_id, bool has_style, ByteString computed_style,  ByteString resolved_style,  ByteString custom_properties, ByteString node_box_sizing, ByteString aria_properties_state, ByteString fonts) =|
-    did_inspect_accessibility_tree(u64 page_id, ByteString accessibility_tree) =|
+    did_inspect_dom_tree(u64 page_id, String dom_tree) =|
+    did_inspect_dom_node(u64 page_id, bool has_style, String computed_style,  String resolved_style,  String custom_properties, String node_box_sizing, String aria_properties_state, String fonts) =|
+    did_inspect_accessibility_tree(u64 page_id, String accessibility_tree) =|
     did_get_hovered_node_id(u64 page_id, Web::UniqueNodeID node_id) =|
     did_finish_editing_dom_node(u64 page_id, Optional<Web::UniqueNodeID> node_id) =|
     did_get_dom_node_html(u64 page_id, String html) =|
@@ -91,8 +93,10 @@ endpoint WebContentClient
 
     did_change_audio_play_state(u64 page_id, Web::HTML::AudioPlayState play_state) =|
 
+    did_execute_js_console_input(u64 page_id, JsonValue result) =|
     did_output_js_console_message(u64 page_id, i32 message_index) =|
-    did_get_js_console_messages(u64 page_id, i32 start_index, Vector<ByteString> message_types, Vector<ByteString> messages) =|
+    did_get_styled_js_console_messages(u64 page_id, i32 start_index, Vector<String> message_types, Vector<String> messages) =|
+    did_get_unstyled_js_console_messages(u64 page_id, i32 start_index, Vector<WebView::ConsoleOutput> console_output) =|
 
     did_finish_text_test(u64 page_id, String text) =|
     did_set_test_timeout(u64 page_id, double milliseconds) =|

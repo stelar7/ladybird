@@ -111,7 +111,7 @@ ErrorOr<void> generate_implementation_file(JsonObject& enums_data, Core::File& f
 namespace Web::CSS {
 )~~~");
 
-    enums_data.for_each_member([&](auto& name, auto& value) -> void {
+    enums_data.for_each_member([&](String const& name, JsonValue const& value) {
         VERIFY(value.is_array());
         auto& members = value.as_array();
 
@@ -128,7 +128,7 @@ Optional<@name:titlecase@> keyword_to_@name:snakecase@(Keyword keyword)
             auto member_generator = enum_generator.fork();
             auto member_name = member.as_string();
             if (member_name.contains('=')) {
-                auto parts = member_name.split_view('=');
+                auto parts = MUST(member_name.split('='));
                 member_generator.set("valueid:titlecase", title_casify(parts[0]));
                 member_generator.set("member:titlecase", title_casify(parts[1]));
             } else {

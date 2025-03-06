@@ -9,28 +9,20 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/ElementFactory.h>
 #include <LibWeb/DOM/Event.h>
-#include <LibWeb/DOM/HTMLCollection.h>
 #include <LibWeb/DOM/Range.h>
-#include <LibWeb/DOMURL/DOMURL.h>
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/BrowsingContextGroup.h>
-#include <LibWeb/HTML/CrossOrigin/OpenerPolicy.h>
-#include <LibWeb/HTML/DocumentState.h>
-#include <LibWeb/HTML/HTMLAnchorElement.h>
 #include <LibWeb/HTML/HTMLDocument.h>
 #include <LibWeb/HTML/HTMLInputElement.h>
-#include <LibWeb/HTML/NavigableContainer.h>
 #include <LibWeb/HTML/SandboxingFlagSet.h>
 #include <LibWeb/HTML/Scripting/WindowEnvironmentSettingsObject.h>
 #include <LibWeb/HTML/TraversableNavigable.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HTML/WindowProxy.h>
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
-#include <LibWeb/Layout/BreakNode.h>
 #include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Page/Page.h>
-#include <LibWeb/Painting/Paintable.h>
 
 namespace Web::HTML {
 
@@ -73,7 +65,7 @@ URL::Origin determine_the_origin(Optional<URL::URL const&> url, SandboxingFlagSe
     }
 
     // 3. If url is about:srcdoc, then:
-    if (url == "about:srcdoc"sv) {
+    if (url == URL::about_srcdoc()) {
         // 1. Assert: sourceOrigin is non-null.
         VERIFY(source_origin.has_value());
 
@@ -167,7 +159,7 @@ WebIDL::ExceptionOr<BrowsingContext::BrowsingContextAndDocument> BrowsingContext
     SandboxingFlagSet sandbox_flags = {};
 
     // 7. Let origin be the result of determining the origin given about:blank, sandboxFlags, and creatorOrigin.
-    auto origin = determine_the_origin(URL::URL("about:blank"sv), sandbox_flags, creator_origin);
+    auto origin = determine_the_origin(URL::about_blank(), sandbox_flags, creator_origin);
 
     // FIXME: 8. Let permissionsPolicy be the result of creating a permissions policy given embedder and origin. [PERMISSIONSPOLICY]
 
@@ -192,7 +184,7 @@ WebIDL::ExceptionOr<BrowsingContext::BrowsingContextAndDocument> BrowsingContext
         });
 
     // 11. Let topLevelCreationURL be about:blank if embedder is null; otherwise embedder's relevant settings object's top-level creation URL.
-    auto top_level_creation_url = !embedder ? URL::URL("about:blank") : relevant_settings_object(*embedder).top_level_creation_url;
+    auto top_level_creation_url = !embedder ? URL::about_blank() : relevant_settings_object(*embedder).top_level_creation_url;
 
     // 12. Let topLevelOrigin be origin if embedder is null; otherwise embedder's relevant settings object's top-level origin.
     auto top_level_origin = !embedder ? origin : relevant_settings_object(*embedder).origin();
@@ -200,7 +192,7 @@ WebIDL::ExceptionOr<BrowsingContext::BrowsingContextAndDocument> BrowsingContext
     // 13. Set up a window environment settings object with about:blank, realm execution context, null, topLevelCreationURL, and topLevelOrigin.
     WindowEnvironmentSettingsObject::setup(
         page,
-        URL::URL("about:blank"),
+        URL::about_blank(),
         move(realm_execution_context),
         {},
         top_level_creation_url,
@@ -259,7 +251,7 @@ WebIDL::ExceptionOr<BrowsingContext::BrowsingContextAndDocument> BrowsingContext
         document->set_referrer(creator->url().serialize());
 
         // 2. Set document's policy container to a clone of creator's policy container.
-        document->set_policy_container(creator->policy_container());
+        document->set_policy_container(creator->policy_container()->clone(document->realm()));
 
         // 3. If creator's origin is same origin with creator's relevant settings object's top-level origin,
         if (creator->origin().is_same_origin(creator->relevant_settings_object().top_level_origin)) {
@@ -271,8 +263,8 @@ WebIDL::ExceptionOr<BrowsingContext::BrowsingContextAndDocument> BrowsingContext
     }
 
     // 17. Assert: document's URL and document's relevant settings object's creation URL are about:blank.
-    VERIFY(document->url() == "about:blank"sv);
-    VERIFY(document->relevant_settings_object().creation_url == "about:blank"sv);
+    VERIFY(document->url() == URL::about_blank());
+    VERIFY(document->relevant_settings_object().creation_url == URL::about_blank());
 
     // 18. Mark document as ready for post-load tasks.
     document->set_ready_for_post_load_tasks(true);
@@ -312,7 +304,7 @@ void BrowsingContext::visit_edges(Cell::Visitor& visitor)
 }
 
 // https://html.spec.whatwg.org/multipage/document-sequences.html#bc-traversable
-GC::Ref<HTML::TraversableNavigable> BrowsingContext::top_level_traversable() const
+GC::Ref<TraversableNavigable> BrowsingContext::top_level_traversable() const
 {
     // A browsing context's top-level traversable is its active document's node navigable's top-level traversable.
     auto traversable = active_document()->navigable()->top_level_traversable();
@@ -433,15 +425,6 @@ BrowsingContext const* BrowsingContext::the_one_permitted_sandboxed_navigator() 
 {
     // FIXME: Implement this.
     return nullptr;
-}
-
-GC::Ptr<BrowsingContext> BrowsingContext::first_child() const
-{
-    return m_first_child;
-}
-GC::Ptr<BrowsingContext> BrowsingContext::next_sibling() const
-{
-    return m_next_sibling;
 }
 
 // https://html.spec.whatwg.org/multipage/document-sequences.html#ancestor-browsing-context

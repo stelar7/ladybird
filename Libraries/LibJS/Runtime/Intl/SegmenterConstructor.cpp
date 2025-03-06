@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2022, Idan Horowitz <idan.horowitz@serenityos.org>
- * Copyright (c) 2023-2024, Tim Flynn <trflynn89@serenityos.org>
+ * Copyright (c) 2023-2025, Tim Flynn <trflynn89@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -11,13 +11,12 @@
 #include <LibJS/Runtime/Intl/AbstractOperations.h>
 #include <LibJS/Runtime/Intl/Segmenter.h>
 #include <LibJS/Runtime/Intl/SegmenterConstructor.h>
-#include <LibJS/Runtime/Temporal/AbstractOperations.h>
 
 namespace JS::Intl {
 
 GC_DEFINE_ALLOCATOR(SegmenterConstructor);
 
-// 18.1 The Intl.Segmenter Constructor, https://tc39.es/ecma402/#sec-intl-segmenter-constructor
+// 19.1 The Intl.Segmenter Constructor, https://tc39.es/ecma402/#sec-intl-segmenter-constructor
 SegmenterConstructor::SegmenterConstructor(Realm& realm)
     : NativeFunction(realm.vm().names.Segmenter.as_string(), realm.intrinsics().function_prototype())
 {
@@ -29,7 +28,7 @@ void SegmenterConstructor::initialize(Realm& realm)
 
     auto& vm = this->vm();
 
-    // 18.2.1 Intl.Segmenter.prototype, https://tc39.es/ecma402/#sec-intl.segmenter.prototype
+    // 19.2.1 Intl.Segmenter.prototype, https://tc39.es/ecma402/#sec-intl.segmenter.prototype
     define_direct_property(vm.names.prototype, realm.intrinsics().intl_segmenter_prototype(), 0);
     define_direct_property(vm.names.length, Value(0), Attribute::Configurable);
 
@@ -37,14 +36,14 @@ void SegmenterConstructor::initialize(Realm& realm)
     define_native_function(realm, vm.names.supportedLocalesOf, supported_locales_of, 1, attr);
 }
 
-// 18.1.1 Intl.Segmenter ( [ locales [ , options ] ] ), https://tc39.es/ecma402/#sec-intl.segmenter
+// 19.1.1 Intl.Segmenter ( [ locales [ , options ] ] ), https://tc39.es/ecma402/#sec-intl.segmenter
 ThrowCompletionOr<Value> SegmenterConstructor::call()
 {
     // 1. If NewTarget is undefined, throw a TypeError exception.
     return vm().throw_completion<TypeError>(ErrorType::ConstructorWithoutNew, "Intl.Segmenter");
 }
 
-// 18.1.1 Intl.Segmenter ( [ locales [ , options ] ] ), https://tc39.es/ecma402/#sec-intl.segmenter
+// 19.1.1 Intl.Segmenter ( [ locales [ , options ] ] ), https://tc39.es/ecma402/#sec-intl.segmenter
 ThrowCompletionOr<GC::Ref<Object>> SegmenterConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
@@ -60,7 +59,7 @@ ThrowCompletionOr<GC::Ref<Object>> SegmenterConstructor::construct(FunctionObjec
     auto requested_locales = TRY(canonicalize_locale_list(vm, locales));
 
     // 5. Set options to ? GetOptionsObject(options).
-    auto options = TRY(Temporal::get_options_object(vm, options_value));
+    auto options = TRY(get_options_object(vm, options_value));
 
     // 6. Let opt be a new Record.
     LocaleOptions opt {};
@@ -90,13 +89,13 @@ ThrowCompletionOr<GC::Ref<Object>> SegmenterConstructor::construct(FunctionObjec
     return segmenter;
 }
 
-// 18.2.2 Intl.Segmenter.supportedLocalesOf ( locales [ , options ] ), https://tc39.es/ecma402/#sec-intl.segmenter.supportedlocalesof
+// 19.2.2 Intl.Segmenter.supportedLocalesOf ( locales [ , options ] ), https://tc39.es/ecma402/#sec-intl.segmenter.supportedlocalesof
 JS_DEFINE_NATIVE_FUNCTION(SegmenterConstructor::supported_locales_of)
 {
     auto locales = vm.argument(0);
     auto options = vm.argument(1);
 
-    // 1. Let availableLocales be %Segmenter%.[[AvailableLocales]].
+    // 1. Let availableLocales be %Intl.Segmenter%.[[AvailableLocales]].
 
     // 2. Let requestedLocales be ? CanonicalizeLocaleList(locales).
     auto requested_locales = TRY(canonicalize_locale_list(vm, locales));

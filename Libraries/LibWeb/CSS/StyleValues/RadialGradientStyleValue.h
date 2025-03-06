@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2018-2020, Andreas Kling <andreas@ladybird.org>
  * Copyright (c) 2021, Tobias Christiansen <tobyase@serenityos.org>
- * Copyright (c) 2021-2023, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2021-2025, Sam Atkins <sam@ladybird.org>
  * Copyright (c) 2022-2023, MacDue <macdue@dueutil.tech>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -62,7 +62,7 @@ public:
 
     bool is_paintable() const override { return true; }
 
-    void resolve_for_size(Layout::NodeWithStyleAndBoxModelMetrics const&, CSSPixelSize) const override;
+    void resolve_for_size(Layout::NodeWithStyle const&, CSSPixelSize) const override;
 
     CSSPixelSize resolve_size(Layout::Node const&, CSSPixelPoint, CSSPixelRect const&) const;
 
@@ -86,12 +86,18 @@ private:
         bool operator==(Properties const&) const = default;
     } m_properties;
 
+    struct ResolvedDataCacheKey {
+        Length::ResolutionContext length_resolution_context;
+        CSSPixelSize size;
+        bool operator==(ResolvedDataCacheKey const&) const = default;
+    };
+    mutable Optional<ResolvedDataCacheKey> m_resolved_data_cache_key;
+
     struct ResolvedData {
         Painting::RadialGradientData data;
         CSSPixelSize gradient_size;
         CSSPixelPoint center;
     };
-
     mutable Optional<ResolvedData> m_resolved;
 };
 

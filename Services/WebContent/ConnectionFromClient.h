@@ -47,12 +47,15 @@ public:
 
     Function<void(IPC::File const&)> on_image_decoder_connection;
 
+    Queue<Web::QueuedInputEvent>& input_event_queue() { return m_input_event_queue; }
+
 private:
     explicit ConnectionFromClient(GC::Heap&, IPC::Transport);
 
     Optional<PageClient&> page(u64 index, SourceLocation = SourceLocation::current());
     Optional<PageClient const&> page(u64 index, SourceLocation = SourceLocation::current()) const;
 
+    virtual Messages::WebContentServer::InitTransportResponse init_transport(int peer_pid) override;
     virtual void close_server() override;
     virtual Messages::WebContentServer::GetWindowHandleResponse get_window_handle(u64 page_id) override;
     virtual void set_window_handle(u64 page_id, String const& handle) override;
@@ -73,6 +76,7 @@ private:
     virtual void get_source(u64 page_id) override;
     virtual void inspect_dom_tree(u64 page_id) override;
     virtual void inspect_dom_node(u64 page_id, Web::UniqueNodeID const& node_id, Optional<Web::CSS::Selector::PseudoElement::Type> const& pseudo_element) override;
+    virtual void highlight_dom_node(u64 page_id, Web::UniqueNodeID const& node_id, Optional<Web::CSS::Selector::PseudoElement::Type> const& pseudo_element) override;
     virtual void inspect_accessibility_tree(u64 page_id) override;
     virtual void get_hovered_node_id(u64 page_id) override;
 
@@ -107,8 +111,8 @@ private:
     virtual void handle_file_return(u64 page_id, i32 error, Optional<IPC::File> const& file, i32 request_id) override;
     virtual void set_system_visibility_state(u64 page_id, Web::HTML::VisibilityState) override;
 
-    virtual void js_console_input(u64 page_id, ByteString const&) override;
-    virtual void run_javascript(u64 page_id, ByteString const&) override;
+    virtual void js_console_input(u64 page_id, String const&) override;
+    virtual void run_javascript(u64 page_id, String const&) override;
     virtual void js_console_request_messages(u64 page_id, i32) override;
 
     virtual void alert_closed(u64 page_id) override;
@@ -148,26 +152,15 @@ private:
 
     virtual void system_time_zone_changed() override;
 
-    void report_finished_handling_input_event(u64 page_id, Web::EventResult event_was_handled);
-
     GC::Heap& m_heap;
     NonnullOwnPtr<PageHost> m_page_host;
 
     HashMap<int, Web::FileRequest> m_requested_files {};
     int last_id { 0 };
 
-    struct QueuedInputEvent {
-        u64 page_id { 0 };
-        Web::InputEvent event;
-        size_t coalesced_event_count { 0 };
-    };
+    void enqueue_input_event(Web::QueuedInputEvent);
 
-    void enqueue_input_event(QueuedInputEvent);
-    void process_next_input_event();
-
-    Queue<QueuedInputEvent> m_input_event_queue;
-
-    GC::Root<Web::Platform::Timer> m_input_event_queue_timer;
+    Queue<Web::QueuedInputEvent> m_input_event_queue;
 };
 
 }

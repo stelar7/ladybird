@@ -91,6 +91,7 @@
 #include <LibWeb/SVG/SVGDefsElement.h>
 #include <LibWeb/SVG/SVGDescElement.h>
 #include <LibWeb/SVG/SVGEllipseElement.h>
+#include <LibWeb/SVG/SVGFilterElement.h>
 #include <LibWeb/SVG/SVGForeignObjectElement.h>
 #include <LibWeb/SVG/SVGGElement.h>
 #include <LibWeb/SVG/SVGImageElement.h>
@@ -460,6 +461,8 @@ static GC::Ref<SVG::SVGElement> create_svg_element(JS::Realm& realm, Document& d
         return realm.create<SVG::SVGDescElement>(document, move(qualified_name));
     if (local_name == SVG::TagNames::ellipse)
         return realm.create<SVG::SVGEllipseElement>(document, move(qualified_name));
+    if (local_name == SVG::TagNames::filter)
+        return realm.create<SVG::SVGFilterElement>(document, move(qualified_name));
     if (local_name.equals_ignoring_ascii_case(SVG::TagNames::foreignObject))
         return realm.create<SVG::SVGForeignObjectElement>(document, move(qualified_name));
     if (local_name == SVG::TagNames::line)
@@ -656,7 +659,7 @@ WebIDL::ExceptionOr<GC::Ref<Element>> create_element(Document& document, FlyStri
 
     if (namespace_ == Namespace::HTML) {
         auto element = create_html_element(realm, document, move(qualified_name));
-        element->set_is_value(move(is_value));
+        element->set_is_value(is_value);
         element->set_custom_element_state(CustomElementState::Uncustomized);
 
         // 3. If namespace is the HTML namespace, and either localName is a valid custom element name or is is non-null,
@@ -669,14 +672,14 @@ WebIDL::ExceptionOr<GC::Ref<Element>> create_element(Document& document, FlyStri
 
     if (namespace_ == Namespace::SVG) {
         auto element = create_svg_element(realm, document, qualified_name);
-        element->set_is_value(move(is_value));
+        element->set_is_value(is_value);
         element->set_custom_element_state(CustomElementState::Uncustomized);
         return element;
     }
 
     if (namespace_ == Namespace::MathML) {
         auto element = create_mathml_element(realm, document, qualified_name);
-        element->set_is_value(move(is_value));
+        element->set_is_value(is_value);
         element->set_custom_element_state(CustomElementState::Uncustomized);
         return element;
     }

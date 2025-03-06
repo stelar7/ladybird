@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2024, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2020-2025, Andreas Kling <andreas@ladybird.org>
  * Copyright (c) 2021, Luke Wilde <lukew@serenityos.org>
  * Copyright (c) 2023-2024, Shannon Booth <shannon@serenityos.org>
  *
@@ -30,6 +30,7 @@
 #include <LibWeb/HTML/HTMLFormElement.h>
 #include <LibWeb/HTML/HTMLHeadElement.h>
 #include <LibWeb/HTML/HTMLHtmlElement.h>
+#include <LibWeb/HTML/HTMLLinkElement.h>
 #include <LibWeb/HTML/HTMLScriptElement.h>
 #include <LibWeb/HTML/HTMLTableElement.h>
 #include <LibWeb/HTML/HTMLTemplateElement.h>
@@ -199,8 +200,12 @@ void HTMLParser::run(HTMLTokenizer::StopAtInsertionPoint stop_at_insertion_point
 
         dbgln_if(HTML_PARSER_DEBUG, "[{}] {}", insertion_mode_name(), token.to_string());
 
-        if (token.is_end_of_file() && m_tokenizer.is_eof_inserted())
-            break;
+        if (m_next_line_feed_can_be_ignored) {
+            m_next_line_feed_can_be_ignored = false;
+            if (token.is_character() && token.code_point() == '\n') {
+                continue;
+            }
+        }
 
         // https://html.spec.whatwg.org/multipage/parsing.html#tree-construction-dispatcher
         // As each token is emitted from the tokenizer, the user agent must follow the appropriate steps from the following list, known as the tree construction dispatcher:
@@ -228,6 +233,9 @@ void HTMLParser::run(HTMLTokenizer::StopAtInsertionPoint stop_at_insertion_point
             // Process the token according to the rules given in the section for parsing tokens in foreign content.
             process_using_the_rules_for_foreign_content(token);
         }
+
+        if (token.is_end_of_file() && m_tokenizer.is_eof_inserted())
+            break;
 
         if (m_stop_parsing) {
             dbgln_if(HTML_PARSER_DEBUG, "Stop parsing{}! :^)", m_parsing_fragment ? " fragment" : "");
@@ -633,10 +641,18 @@ void HTMLParser::handle_before_html(HTMLToken& token)
 
     // -> Anything else
 AnythingElse:
+
     // Create an html element whose node document is the Document object. Append it to the Document object. Put this element in the stack of open elements.
-    auto element = create_element(document(), HTML::TagNames::html, Namespace::HTML).release_value_but_fixme_should_propagate_errors();
-    MUST(document().append_child(element));
-    m_stack_of_open_elements.push(element);
+
+    // AD-HOC: First check if we've already inserted a <html> element into the document.
+    //         This can happen by mixing document.write() and DOM manipulation.
+    if (auto* html_element = document().document_element(); html_element && html_element->is_html_html_element()) {
+        m_stack_of_open_elements.push(*html_element);
+    } else {
+        auto element = create_element(document(), HTML::TagNames::html, Namespace::HTML).release_value_but_fixme_should_propagate_errors();
+        MUST(document().append_child(element));
+        m_stack_of_open_elements.push(element);
+    }
 
     // Switch the insertion mode to "before head", then reprocess the token.
     m_insertion_mode = InsertionMode::BeforeHead;
@@ -675,6 +691,7 @@ GC::Ptr<DOM::Element> HTMLParser::node_before_current_node()
 HTMLParser::AdjustedInsertionLocation HTMLParser::find_appropriate_place_for_inserting_node(GC::Ptr<DOM::Element> override_target)
 {
     // 1. If there was an override target specified, then let target be the override target.
+    //    Otherwise, let target be the current node.
     auto& target = override_target ? *override_target.ptr() : *current_node();
     HTMLParser::AdjustedInsertionLocation adjusted_insertion_location;
 
@@ -765,6 +782,12 @@ GC::Ref<DOM::Element> HTMLParser::create_element_for(HTMLToken const& token, Opt
     // 9. Let element be the result of creating an element given document, localName, given namespace, null, is, and willExecuteScript.
     auto element = create_element(*document, local_name, namespace_, {}, is_value, will_execute_script).release_value_but_fixme_should_propagate_errors();
 
+    // AD-HOC: Let <link> elements know which document they were originally parsed for.
+    //         This is used for the render-blocking logic.
+    if (local_name == HTML::TagNames::link && namespace_ == Namespace::HTML) {
+        as<HTMLLinkElement>(*element).set_parser_document({}, document);
+    }
+
     // 10. Append each attribute in the given token to element.
     token.for_each_attribute([&](auto const& attribute) {
         DOM::QualifiedName qualified_name { attribute.local_name, attribute.prefix, attribute.namespace_ };
@@ -832,8 +855,11 @@ GC::Ref<DOM::Element> HTMLParser::insert_foreign_element(HTMLToken const& token,
     return element;
 }
 
+// https://html.spec.whatwg.org/multipage/parsing.html#insert-an-html-element
 GC::Ref<DOM::Element> HTMLParser::insert_html_element(HTMLToken const& token)
 {
+    // When the steps below require the user agent to insert an HTML element for a token, the user agent must insert a
+    // foreign element for the token, with the HTML namespace and false.
     return insert_foreign_element(token, Namespace::HTML, OnlyAddToElementStack::No);
 }
 
@@ -1201,16 +1227,16 @@ void HTMLParser::parse_generic_raw_text_element(HTMLToken& token)
     m_insertion_mode = InsertionMode::Text;
 }
 
-static bool is_empty_text_node(DOM::Node const* node)
+static bool is_text_node(DOM::Node const* node)
 {
-    return node && node->is_text() && static_cast<DOM::Text const*>(node)->data().is_empty();
+    return node && node->is_text();
 }
 
 DOM::Text* HTMLParser::find_character_insertion_node()
 {
     auto adjusted_insertion_location = find_appropriate_place_for_inserting_node();
     if (adjusted_insertion_location.insert_before_sibling) {
-        if (is_empty_text_node(adjusted_insertion_location.insert_before_sibling->previous_sibling()))
+        if (is_text_node(adjusted_insertion_location.insert_before_sibling->previous_sibling()))
             return static_cast<DOM::Text*>(adjusted_insertion_location.insert_before_sibling->previous_sibling());
         auto new_text_node = realm().create<DOM::Text>(document(), String {});
         adjusted_insertion_location.parent->insert_before(*new_text_node, *adjusted_insertion_location.insert_before_sibling);
@@ -1218,7 +1244,7 @@ DOM::Text* HTMLParser::find_character_insertion_node()
     }
     if (adjusted_insertion_location.parent->is_document())
         return nullptr;
-    if (is_empty_text_node(adjusted_insertion_location.parent->last_child()))
+    if (is_text_node(adjusted_insertion_location.parent->last_child()))
         return static_cast<DOM::Text*>(adjusted_insertion_location.parent->last_child());
     auto new_text_node = realm().create<DOM::Text>(document(), String {});
     MUST(adjusted_insertion_location.parent->append_child(*new_text_node));
@@ -1229,7 +1255,10 @@ void HTMLParser::flush_character_insertions()
 {
     if (m_character_insertion_builder.is_empty())
         return;
-    m_character_insertion_node->set_data(MUST(m_character_insertion_builder.to_string()));
+    if (m_character_insertion_node->data().is_empty())
+        m_character_insertion_node->set_data(MUST(m_character_insertion_builder.to_string()));
+    else
+        (void)m_character_insertion_node->append_data(MUST(m_character_insertion_builder.to_string()));
     m_character_insertion_builder.clear();
 }
 
@@ -1449,6 +1478,9 @@ Create:
 
     // FIXME: Hold on to the real token!
     auto new_element = insert_html_element(HTMLToken::make_start_tag(entry->element->local_name()));
+    entry->element->for_each_attribute([&](auto& name, auto& value) {
+        new_element->append_attribute(name, value);
+    });
 
     // 9. Replace the entry for entry in the list with an entry for new element.
     m_list_of_active_formatting_elements.entries().at(index).element = new_element;
@@ -1889,6 +1921,8 @@ void HTMLParser::handle_in_body(HTMLToken& token)
 
         // 4. Switch the insertion mode to "in frameset".
         m_insertion_mode = InsertionMode::InFrameset;
+
+        return;
     }
 
     // -> An end-of-file token
@@ -2004,15 +2038,11 @@ void HTMLParser::handle_in_body(HTMLToken& token)
         // If the next token is a U+000A LINE FEED (LF) character token,
         // then ignore that token and move on to the next one.
         // (Newlines at the start of pre blocks are ignored as an authoring convenience.)
-        auto next_token = m_tokenizer.next_token();
-        if (next_token.has_value() && next_token.value().is_character() && next_token.value().code_point() == '\n') {
-            // Ignore it.
-        } else if (next_token.has_value()) {
-            process_using_the_rules_for(m_insertion_mode, next_token.value());
-        }
+        m_next_line_feed_can_be_ignored = true;
 
         // Set the frameset-ok flag to "not ok".
         m_frameset_ok = false;
+
         return;
     }
 
@@ -2548,15 +2578,13 @@ void HTMLParser::handle_in_body(HTMLToken& token)
         // 1. Insert an HTML element for the token.
         (void)insert_html_element(token);
 
-        // FIXME: 2. If the next token is a U+000A LINE FEED (LF) character token, then ignore that token and move on to the next one. (Newlines at the start of textarea elements are ignored as an authoring convenience.)
+        // 2. If the next token is a U+000A LINE FEED (LF) character token,
+        //    then ignore that token and move on to the next one.
+        //    (Newlines at the start of textarea elements are ignored as an authoring convenience.)
+        m_next_line_feed_can_be_ignored = true;
 
         // 3. Switch the tokenizer to the RCDATA state.
         m_tokenizer.switch_to({}, HTMLTokenizer::State::RCDATA);
-
-        // If the next token is a U+000A LINE FEED (LF) character token,
-        // then ignore that token and move on to the next one.
-        // (Newlines at the start of pre blocks are ignored as an authoring convenience.)
-        auto next_token = m_tokenizer.next_token();
 
         // 4. Let the original insertion mode be the current insertion mode.
         m_original_insertion_mode = m_insertion_mode;
@@ -2566,13 +2594,6 @@ void HTMLParser::handle_in_body(HTMLToken& token)
 
         // 6. Switch the insertion mode to "text".
         m_insertion_mode = InsertionMode::Text;
-
-        // FIXME: This step is not in the spec.
-        if (next_token.has_value() && next_token.value().is_character() && next_token.value().code_point() == '\n') {
-            // Ignore it.
-        } else if (next_token.has_value()) {
-            process_using_the_rules_for(m_insertion_mode, next_token.value());
-        }
         return;
     }
 
@@ -4294,6 +4315,7 @@ void HTMLParser::process_using_the_rules_for_foreign_content(HTMLToken& token)
 
         // If the active speculative HTML parser is null and the user agent supports SVG, then Process the SVG script element according to the SVG rules. [SVG]
         // FIXME: If the active speculative HTML parser is null
+        script_element.set_parser_inserted({});
         script_element.process_the_script_element();
 
         // Decrement the parser's script nesting level by one.
@@ -4351,103 +4373,143 @@ void HTMLParser::process_using_the_rules_for_foreign_content(HTMLToken& token)
 // https://html.spec.whatwg.org/multipage/parsing.html#reset-the-insertion-mode-appropriately
 void HTMLParser::reset_the_insertion_mode_appropriately()
 {
+    // 1. Let last be false.
+    bool last = false;
+
+    // 2. Let node be the last node in the stack of open elements.
     for (ssize_t i = m_stack_of_open_elements.elements().size() - 1; i >= 0; --i) {
-        bool last = i == 0;
-        // NOTE: When parsing fragments, we substitute the context element for the root of the stack of open elements.
+        // 3. Loop: If node is the first node in the stack of open elements, then set last to true, and, if the parser
+        //    was created as part of the HTML fragment parsing algorithm (fragment case), set node to the context
+        //    element passed to that algorithm.
         GC::Ptr<DOM::Element> node;
+        if (i == 0)
+            last = true;
+
         if (last && m_parsing_fragment) {
             node = m_context_element.ptr();
         } else {
             node = m_stack_of_open_elements.elements().at(i).ptr();
         }
 
-        if (node->namespace_uri() != Namespace::HTML)
-            continue;
+        // NOTE: The following steps only apply to HTML elements, so skip ones that aren't.
+        if (node->namespace_uri() == Namespace::HTML) {
+            // 4. If node is a select element, run these substeps:
+            if (node->local_name() == HTML::TagNames::select) {
+                // 1. If last is true, jump to the step below labeled done.
+                if (!last) {
+                    // 2. Let ancestor be node.
+                    // 3. Loop: If ancestor is the first node in the stack of open elements, jump to the step below labeled done.
+                    for (ssize_t j = i; j > 0; --j) {
+                        // 4. Let ancestor be the node before ancestor in the stack of open elements.
+                        auto& ancestor = m_stack_of_open_elements.elements().at(j - 1);
 
-        if (node->local_name() == HTML::TagNames::select) {
-            if (!last) {
-                for (ssize_t j = i; j > 0; --j) {
-                    auto& ancestor = m_stack_of_open_elements.elements().at(j - 1);
+                        // 5. If ancestor is a template node, jump to the step below labeled done.
+                        if (is<HTMLTemplateElement>(*ancestor))
+                            break;
 
-                    if (is<HTMLTemplateElement>(*ancestor))
-                        break;
+                        // 6. If ancestor is a table node, switch the insertion mode to "in select in table" and return.
+                        if (is<HTMLTableElement>(*ancestor)) {
+                            m_insertion_mode = InsertionMode::InSelectInTable;
+                            return;
+                        }
 
-                    if (is<HTMLTableElement>(*ancestor)) {
-                        m_insertion_mode = InsertionMode::InSelectInTable;
-                        return;
+                        // 7. Jump back to the step labeled loop.
                     }
                 }
+
+                // 8. Done: Switch the insertion mode to "in select" and return.
+                m_insertion_mode = InsertionMode::InSelect;
+                return;
             }
 
-            m_insertion_mode = InsertionMode::InSelect;
-            return;
+            // 5. If node is a td or th element and last is false, then switch the insertion mode to "in cell" and return.
+            if (!last && node->local_name().is_one_of(HTML::TagNames::td, HTML::TagNames::th)) {
+                m_insertion_mode = InsertionMode::InCell;
+                return;
+            }
+
+            // 6. If node is a tr element, then switch the insertion mode to "in row" and return.
+            if (node->local_name() == HTML::TagNames::tr) {
+                m_insertion_mode = InsertionMode::InRow;
+                return;
+            }
+
+            // 7. If node is a tbody, thead, or tfoot element, then switch the insertion mode to "in table body" and return.
+            if (node->local_name().is_one_of(HTML::TagNames::tbody, HTML::TagNames::thead, HTML::TagNames::tfoot)) {
+                m_insertion_mode = InsertionMode::InTableBody;
+                return;
+            }
+
+            // 8. If node is a caption element, then switch the insertion mode to "in caption" and return.
+            if (node->local_name() == HTML::TagNames::caption) {
+                m_insertion_mode = InsertionMode::InCaption;
+                return;
+            }
+
+            // 9. If node is a colgroup element, then switch the insertion mode to "in column group" and return.
+            if (node->local_name() == HTML::TagNames::colgroup) {
+                m_insertion_mode = InsertionMode::InColumnGroup;
+                return;
+            }
+
+            // 10. If node is a table element, then switch the insertion mode to "in table" and return.
+            if (node->local_name() == HTML::TagNames::table) {
+                m_insertion_mode = InsertionMode::InTable;
+                return;
+            }
+
+            // 11. If node is a template element, then switch the insertion mode to the current template insertion mode and return.
+            if (node->local_name() == HTML::TagNames::template_) {
+                m_insertion_mode = m_stack_of_template_insertion_modes.last();
+                return;
+            }
+
+            // 12. If node is a head element and last is false, then switch the insertion mode to "in head" and return.
+            if (!last && node->local_name() == HTML::TagNames::head) {
+                m_insertion_mode = InsertionMode::InHead;
+                return;
+            }
+
+            // 13. If node is a body element, then switch the insertion mode to "in body" and return.
+            if (node->local_name() == HTML::TagNames::body) {
+                m_insertion_mode = InsertionMode::InBody;
+                return;
+            }
+
+            // 14. If node is a frameset element, then switch the insertion mode to "in frameset" and return. (fragment case)
+            if (node->local_name() == HTML::TagNames::frameset) {
+                VERIFY(m_parsing_fragment);
+                m_insertion_mode = InsertionMode::InFrameset;
+                return;
+            }
+
+            // 15. If node is an html element, run these substeps:
+            if (node->local_name() == HTML::TagNames::html) {
+                // 1. If the head element pointer is null, switch the insertion mode to "before head" and return. (fragment case)
+                if (!m_head_element) {
+                    VERIFY(m_parsing_fragment);
+                    m_insertion_mode = InsertionMode::BeforeHead;
+                    return;
+                }
+
+                // 2. Otherwise, the head element pointer is not null, switch the insertion mode to "after head" and return.
+                m_insertion_mode = InsertionMode::AfterHead;
+                return;
+            }
         }
 
-        if (!last && node->local_name().is_one_of(HTML::TagNames::td, HTML::TagNames::th)) {
-            m_insertion_mode = InsertionMode::InCell;
-            return;
-        }
-
-        if (node->local_name() == HTML::TagNames::tr) {
-            m_insertion_mode = InsertionMode::InRow;
-            return;
-        }
-
-        if (node->local_name().is_one_of(HTML::TagNames::tbody, HTML::TagNames::thead, HTML::TagNames::tfoot)) {
-            m_insertion_mode = InsertionMode::InTableBody;
-            return;
-        }
-
-        if (node->local_name() == HTML::TagNames::caption) {
-            m_insertion_mode = InsertionMode::InCaption;
-            return;
-        }
-
-        if (node->local_name() == HTML::TagNames::colgroup) {
-            m_insertion_mode = InsertionMode::InColumnGroup;
-            return;
-        }
-
-        if (node->local_name() == HTML::TagNames::table) {
-            m_insertion_mode = InsertionMode::InTable;
-            return;
-        }
-
-        if (node->local_name() == HTML::TagNames::template_) {
-            m_insertion_mode = m_stack_of_template_insertion_modes.last();
-            return;
-        }
-
-        if (!last && node->local_name() == HTML::TagNames::head) {
-            m_insertion_mode = InsertionMode::InHead;
-            return;
-        }
-
-        if (node->local_name() == HTML::TagNames::body) {
+        // 16. If last is true, then switch the insertion mode to "in body" and return. (fragment case)
+        if (last) {
+            VERIFY(m_parsing_fragment);
             m_insertion_mode = InsertionMode::InBody;
             return;
         }
 
-        if (node->local_name() == HTML::TagNames::frameset) {
-            VERIFY(m_parsing_fragment);
-            m_insertion_mode = InsertionMode::InFrameset;
-            return;
-        }
-
-        if (node->local_name() == HTML::TagNames::html) {
-            if (!m_head_element) {
-                VERIFY(m_parsing_fragment);
-                m_insertion_mode = InsertionMode::BeforeHead;
-                return;
-            }
-
-            m_insertion_mode = InsertionMode::AfterHead;
-            return;
-        }
+        // 17. Let node now be the node before node in the stack of open elements.
+        // 18. Return to the step labeled loop.
     }
 
-    VERIFY(m_parsing_fragment);
-    m_insertion_mode = InsertionMode::InBody;
+    VERIFY_NOT_REACHED();
 }
 
 char const* HTMLParser::insertion_mode_name() const

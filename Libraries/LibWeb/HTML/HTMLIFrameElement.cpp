@@ -7,6 +7,7 @@
 
 #include <LibURL/Origin.h>
 #include <LibWeb/Bindings/HTMLIFrameElementPrototype.h>
+#include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/DOM/DOMTokenList.h>
 #include <LibWeb/DOM/Document.h>
@@ -15,6 +16,7 @@
 #include <LibWeb/HTML/HTMLIFrameElement.h>
 #include <LibWeb/HTML/Navigable.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
+#include <LibWeb/HTML/TraversableNavigable.h>
 #include <LibWeb/Layout/NavigableContainerViewport.h>
 
 namespace Web::HTML {
@@ -65,6 +67,13 @@ void HTMLIFrameElement::attribute_changed(FlyString const& name, Optional<String
         // FIXME: This should only invalidate the layout, not the style.
         invalidate_style(DOM::StyleInvalidationReason::HTMLIFrameElementGeometryChange);
     }
+
+    if (name == HTML::AttributeNames::marginwidth || name == HTML::AttributeNames::marginheight) {
+        if (auto* document = this->content_document_without_origin_check()) {
+            if (auto* body_element = document->body())
+                const_cast<HTMLElement*>(body_element)->set_needs_style_update(true);
+        }
+    }
 }
 
 // https://html.spec.whatwg.org/multipage/iframe-embed-object.html#the-iframe-element:html-element-post-connection-steps
@@ -84,7 +93,13 @@ void HTMLIFrameElement::post_connection()
 
         // 3. Process the iframe attributes for insertedNode, with initialInsertion set to true.
         process_the_iframe_attributes(true);
-        set_content_navigable_initialized();
+
+        if (auto navigable = content_navigable()) {
+            auto traversable = navigable->traversable_navigable();
+            traversable->append_session_history_traversal_steps(GC::create_function(heap(), [this] {
+                set_content_navigable_has_session_history_entry_and_ready_for_navigation();
+            }));
+        }
     })));
 }
 
@@ -104,7 +119,7 @@ void HTMLIFrameElement::process_the_iframe_attributes(bool initial_insertion)
             // 1. Set element's lazy load resumption steps to the rest of this algorithm starting with the step labeled navigate to the srcdoc resource.
             set_lazy_load_resumption_steps([this]() {
                 // 3. Navigate to the srcdoc resource: navigate an iframe or frame given element, about:srcdoc, the empty string, and the value of element's srcdoc attribute.
-                navigate_an_iframe_or_frame(URL::URL("about:srcdoc"sv), ReferrerPolicy::ReferrerPolicy::EmptyString, get_attribute(HTML::AttributeNames::srcdoc));
+                navigate_an_iframe_or_frame(URL::about_srcdoc(), ReferrerPolicy::ReferrerPolicy::EmptyString, get_attribute(HTML::AttributeNames::srcdoc));
 
                 // FIXME: The resulting Document must be considered an iframe srcdoc document.
             });
@@ -120,7 +135,7 @@ void HTMLIFrameElement::process_the_iframe_attributes(bool initial_insertion)
         }
 
         // 3. Navigate to the srcdoc resource: navigate an iframe or frame given element, about:srcdoc, the empty string, and the value of element's srcdoc attribute.
-        navigate_an_iframe_or_frame(URL::URL("about:srcdoc"sv), ReferrerPolicy::ReferrerPolicy::EmptyString, get_attribute(HTML::AttributeNames::srcdoc));
+        navigate_an_iframe_or_frame(URL::about_srcdoc(), ReferrerPolicy::ReferrerPolicy::EmptyString, get_attribute(HTML::AttributeNames::srcdoc));
 
         // FIXME: The resulting Document must be considered an iframe srcdoc document.
 

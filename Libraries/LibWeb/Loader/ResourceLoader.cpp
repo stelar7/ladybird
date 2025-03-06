@@ -10,9 +10,11 @@
 #include <LibCore/Directory.h>
 #include <LibCore/MimeData.h>
 #include <LibCore/Resource.h>
+#include <LibGC/Function.h>
 #include <LibHTTP/HttpResponse.h>
 #include <LibRequests/Request.h>
 #include <LibRequests/RequestClient.h>
+#include <LibURL/Parser.h>
 #include <LibWeb/Cookie/Cookie.h>
 #include <LibWeb/Cookie/ParsedCookie.h>
 #include <LibWeb/Fetch/Infrastructure/URL.h>
@@ -108,11 +110,11 @@ RefPtr<Resource> ResourceLoader::load_resource(Resource::Type type, LoadRequest&
 
     load(
         request,
-        GC::create_function(m_heap, [=](ReadonlyBytes data, HTTP::HeaderMap const& headers, Optional<u32> status_code, Optional<String> const&) {
-            const_cast<Resource&>(*resource).did_load({}, data, headers, status_code);
+        GC::create_function(m_heap, [resource](ReadonlyBytes data, HTTP::HeaderMap const& headers, Optional<u32> status_code, Optional<String> const&) {
+            resource->did_load({}, data, headers, status_code);
         }),
-        GC::create_function(m_heap, [=](ByteString const& error, Optional<u32> status_code, Optional<String> const&, ReadonlyBytes data, HTTP::HeaderMap const& headers) {
-            const_cast<Resource&>(*resource).did_fail({}, error, data, headers, status_code);
+        GC::create_function(m_heap, [resource](ByteString const& error, Optional<u32> status_code, Optional<String> const&, ReadonlyBytes data, HTTP::HeaderMap const& headers) {
+            resource->did_fail({}, error, data, headers, status_code);
         }));
 
     return resource;
@@ -320,7 +322,9 @@ void ResourceLoader::load(LoadRequest& request, GC::Root<SuccessCallback> succes
 
         // When resource URI is a directory use file directory loader to generate response
         if (resource.value()->is_directory()) {
-            respond_directory_page(request, resource.value()->file_url(), success_callback, error_callback);
+            auto url = URL::Parser::basic_parse(resource.value()->file_url());
+            VERIFY(url.has_value());
+            respond_directory_page(request, url.release_value(), success_callback, error_callback);
             return;
         }
 
@@ -334,11 +338,9 @@ void ResourceLoader::load(LoadRequest& request, GC::Root<SuccessCallback> succes
     }
 
     if (url.scheme() == "file") {
-        if (request.page())
-            m_page = request.page();
-
-        if (!m_page.has_value()) {
-            log_failure(request, "INTERNAL ERROR: No Page for request");
+        auto page = request.page();
+        if (!page) {
+            log_failure(request, "INTERNAL ERROR: No Page for file scheme request");
             return;
         }
 
@@ -396,7 +398,7 @@ void ResourceLoader::load(LoadRequest& request, GC::Root<SuccessCallback> succes
             success_callback->function()(data, response_headers, {}, {});
         });
 
-        (*m_page)->client().request_file(move(file_request));
+        page->client().request_file(move(file_request));
 
         ++m_pending_loads;
         if (on_load_counter_change)

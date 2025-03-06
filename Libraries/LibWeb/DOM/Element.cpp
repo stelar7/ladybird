@@ -49,6 +49,9 @@
 #include <LibWeb/HTML/HTMLFrameSetElement.h>
 #include <LibWeb/HTML/HTMLHtmlElement.h>
 #include <LibWeb/HTML/HTMLInputElement.h>
+#include <LibWeb/HTML/HTMLLIElement.h>
+#include <LibWeb/HTML/HTMLMenuElement.h>
+#include <LibWeb/HTML/HTMLOListElement.h>
 #include <LibWeb/HTML/HTMLOptGroupElement.h>
 #include <LibWeb/HTML/HTMLOptionElement.h>
 #include <LibWeb/HTML/HTMLSelectElement.h>
@@ -57,6 +60,7 @@
 #include <LibWeb/HTML/HTMLTableElement.h>
 #include <LibWeb/HTML/HTMLTemplateElement.h>
 #include <LibWeb/HTML/HTMLTextAreaElement.h>
+#include <LibWeb/HTML/HTMLUListElement.h>
 #include <LibWeb/HTML/Numbers.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
 #include <LibWeb/HTML/Scripting/Agent.h>
@@ -461,6 +465,11 @@ GC::Ptr<Layout::NodeWithStyle> Element::create_layout_node_for_display_type(DOM:
         return document.heap().allocate<Layout::BlockContainer>(document, element, move(style));
 
     dbgln("FIXME: CSS display '{}' not implemented yet.", display.to_string());
+
+    // FIXME: We don't actually support `display: block ruby`, this is just a hack to prevent a crash
+    if (display.is_ruby_inside())
+        return document.heap().allocate<Layout::BlockContainer>(document, element, move(style));
+
     return document.heap().allocate<Layout::InlineNode>(document, element, move(style));
 }
 
@@ -498,6 +507,8 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_style()
     VERIFY(parent());
 
     m_affected_by_has_pseudo_class_in_subject_position = false;
+    m_affected_by_has_pseudo_class_in_non_subject_position = false;
+    m_affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator = false;
     m_affected_by_sibling_combinator = false;
     m_affected_by_first_or_last_child_pseudo_class = false;
     m_affected_by_nth_child_pseudo_class = false;
@@ -523,8 +534,15 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_style()
         invalidation = CSS::RequiredInvalidationAfterStyleChange::full();
     }
 
+    auto old_display_is_none = m_computed_properties ? m_computed_properties->display().is_none() : true;
+    auto new_display_is_none = new_computed_properties->display().is_none();
+
     if (!invalidation.is_none())
         set_computed_properties(move(new_computed_properties));
+
+    if (old_display_is_none != new_display_is_none) {
+        play_or_cancel_animations_after_display_property_change();
+    }
 
     // Any document change that can cause this element's style to change, could also affect its pseudo-elements.
     auto recompute_pseudo_element_style = [&](CSS::Selector::PseudoElement::Type pseudo_element) {
@@ -591,25 +609,37 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_inherited_style()
 
     CSS::RequiredInvalidationAfterStyleChange invalidation;
 
+    HashMap<size_t, RefPtr<CSS::CSSStyleValue const>> old_values_with_relative_units;
     for (auto i = to_underlying(CSS::first_property_id); i <= to_underlying(CSS::last_property_id); ++i) {
         auto property_id = static_cast<CSS::PropertyID>(i);
         auto const& preabsolutized_value = m_cascaded_properties->property(property_id);
+        RefPtr old_value = computed_properties->maybe_null_property(property_id);
         // Update property if it uses relative units as it might have been affected by a change in ancestor element style.
         if (preabsolutized_value && preabsolutized_value->is_length() && preabsolutized_value->as_length().length().is_font_relative()) {
             auto is_inherited = computed_properties->is_property_inherited(property_id);
             computed_properties->set_property(property_id, *preabsolutized_value, is_inherited ? CSS::ComputedProperties::Inherited::Yes : CSS::ComputedProperties::Inherited::No);
-            invalidation |= CSS::compute_property_invalidation(property_id, preabsolutized_value, preabsolutized_value);
+            old_values_with_relative_units.set(i, old_value);
         }
         if (!computed_properties->is_property_inherited(property_id))
             continue;
-        RefPtr old_value = computed_properties->maybe_null_property(property_id);
         RefPtr new_value = CSS::StyleComputer::get_inherit_value(property_id, this);
         computed_properties->set_property(property_id, *new_value, CSS::ComputedProperties::Inherited::Yes);
         invalidation |= CSS::compute_property_invalidation(property_id, old_value, new_value);
     }
 
+    if (invalidation.is_none() && old_values_with_relative_units.is_empty())
+        return invalidation;
+
     document().style_computer().compute_font(*computed_properties, this, {});
-    document().style_computer().absolutize_values(*computed_properties);
+    document().style_computer().absolutize_values(*computed_properties, this);
+
+    for (auto [property_id, old_value] : old_values_with_relative_units) {
+        auto new_value = computed_properties->maybe_null_property(static_cast<CSS::PropertyID>(property_id));
+        invalidation |= CSS::compute_property_invalidation(static_cast<CSS::PropertyID>(property_id), old_value, new_value);
+    }
+
+    if (invalidation.is_none())
+        return invalidation;
 
     layout_node()->apply_style(*computed_properties);
     return invalidation;
@@ -842,7 +872,7 @@ WebIDL::ExceptionOr<void> Element::set_inner_html(StringView value)
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-element-innerhtml
 WebIDL::ExceptionOr<String> Element::inner_html() const
 {
-    return serialize_fragment(DOMParsing::RequireWellFormed::Yes);
+    return serialize_fragment(HTML::RequireWellFormed::Yes);
 }
 
 bool Element::is_focused() const
@@ -1106,22 +1136,24 @@ void Element::inserted()
 {
     Base::inserted();
 
-    if (m_id.has_value())
-        document().element_with_id_was_added({}, *this);
-
-    if (m_name.has_value())
-        document().element_with_name_was_added({}, *this);
+    if (is_connected()) {
+        if (m_id.has_value())
+            document().element_with_id_was_added({}, *this);
+        if (m_name.has_value())
+            document().element_with_name_was_added({}, *this);
+    }
 }
 
 void Element::removed_from(Node* old_parent, Node& old_root)
 {
     Base::removed_from(old_parent, old_root);
 
-    if (m_id.has_value())
-        document().element_with_id_was_removed({}, *this);
-
-    if (m_name.has_value())
-        document().element_with_name_was_removed({}, *this);
+    if (old_root.is_connected()) {
+        if (m_id.has_value())
+            document().element_with_id_was_removed({}, *this);
+        if (m_name.has_value())
+            document().element_with_name_was_removed({}, *this);
+    }
 }
 
 void Element::children_changed(ChildrenChangedMetadata const* metadata)
@@ -1310,6 +1342,16 @@ bool Element::includes_properties_from_invalidation_set(CSS::InvalidationSet con
         return IterationDecision::Continue;
     });
     return includes_any;
+}
+
+void Element::invalidate_style_if_affected_by_has()
+{
+    if (affected_by_has_pseudo_class_in_subject_position()) {
+        set_needs_style_update(true);
+    }
+    if (affected_by_has_pseudo_class_in_non_subject_position()) {
+        invalidate_style(StyleInvalidationReason::Other, { { CSS::InvalidationSet::Property::Type::PseudoClass, CSS::PseudoClass::Has } }, {});
+    }
 }
 
 bool Element::has_pseudo_elements() const
@@ -1733,7 +1775,7 @@ WebIDL::ExceptionOr<GC::Ref<DOM::DocumentFragment>> Element::parse_fragment(Stri
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-element-outerhtml
 WebIDL::ExceptionOr<String> Element::outer_html() const
 {
-    return serialize_fragment(DOMParsing::RequireWellFormed::Yes, FragmentSerializationMode::Outer);
+    return serialize_fragment(HTML::RequireWellFormed::Yes, FragmentSerializationMode::Outer);
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-element-outerhtml
@@ -2613,69 +2655,8 @@ void Element::set_cascaded_properties(Optional<CSS::Selector::PseudoElement::Typ
     }
 }
 
-bool Element::has_display_none_ancestor()
-{
-    for (auto* ancestor = parent_or_shadow_host(); ancestor; ancestor = ancestor->parent_or_shadow_host()) {
-        if (!ancestor->is_element())
-            continue;
-        auto const& ancestor_element = static_cast<Element&>(*ancestor);
-        if (ancestor_element.computed_properties() && ancestor_element.computed_properties()->display().is_none()) {
-            return true;
-        }
-    }
-    return false;
-}
-
-void Element::play_or_cancel_animations_after_display_property_change(Optional<CSS::Display> old_display, Optional<CSS::Display> new_display)
-{
-    // https://www.w3.org/TR/css-animations-1/#animations
-    // Setting the display property to none will terminate any running animation applied to the element and its descendants.
-    // If an element has a display of none, updating display to a value other than none will start all animations applied to
-    // the element by the animation-name property, as well as all animations applied to descendants with display other than none.
-
-    if (has_display_none_ancestor())
-        return;
-
-    bool previous_display_is_none = old_display.has_value() && old_display->is_none();
-    bool new_display_is_none = new_display.has_value() && new_display->is_none();
-    if (previous_display_is_none == new_display_is_none)
-        return;
-
-    auto play_or_cancel_depending_on_display = [&](Animations::Animation& animation) {
-        if (new_display_is_none) {
-            animation.cancel();
-        } else {
-            HTML::TemporaryExecutionContext context(realm());
-            animation.play().release_value_but_fixme_should_propagate_errors();
-        }
-    };
-
-    for_each_shadow_including_inclusive_descendant([&](auto& node) {
-        if (!node.is_element())
-            return TraversalDecision::Continue;
-
-        auto const& element = static_cast<Element const&>(node);
-        if (auto animation = element.cached_animation_name_animation({}))
-            play_or_cancel_depending_on_display(*animation);
-        for (auto i = 0; i < to_underlying(CSS::Selector::PseudoElement::Type::KnownPseudoElementCount); i++) {
-            auto pseudo_element = static_cast<CSS::Selector::PseudoElement::Type>(i);
-            if (auto animation = element.cached_animation_name_animation(pseudo_element))
-                play_or_cancel_depending_on_display(*animation);
-        }
-        return TraversalDecision::Continue;
-    });
-}
-
 void Element::set_computed_properties(GC::Ptr<CSS::ComputedProperties> style)
 {
-    Optional<CSS::Display> old_display;
-    Optional<CSS::Display> new_display;
-    if (m_computed_properties)
-        old_display = m_computed_properties->display();
-    if (style)
-        new_display = style->display();
-    play_or_cancel_animations_after_display_property_change(old_display, new_display);
-
     m_computed_properties = style;
     computed_properties_changed();
 }
@@ -3113,6 +3094,111 @@ bool Element::has_paint_containment() const
     return false;
 }
 
+size_t Element::number_of_owned_list_items() const
+{
+    auto number_of_owned_li_elements = 0;
+    for_each_child_of_type<DOM::Element>([&](auto& child) {
+        if (child.list_owner() == this) {
+            number_of_owned_li_elements++;
+        }
+        return IterationDecision::Continue;
+    });
+    return number_of_owned_li_elements;
+}
+
+// https://html.spec.whatwg.org/multipage/grouping-content.html#list-owner
+Element const* Element::list_owner() const
+{
+    // Any element whose computed value of 'display' is 'list-item' has a list owner, which is determined as follows:
+    if (!computed_properties()->display().is_list_item())
+        return nullptr;
+
+    // 1. If the element is not being rendered, return null; the element has no list owner.
+    if (!layout_node())
+        return nullptr;
+
+    // 2. Let ancestor be the element's parent.
+    auto const* ancestor = parent_element();
+
+    // 3. If the element has an ol, ul, or menu ancestor, set ancestor to the closest such ancestor element.
+    for_each_ancestor([&ancestor](GC::Ref<Node> node) {
+        if (is<HTML::HTMLOListElement>(*node) || is<HTML::HTMLUListElement>(*node) || is<HTML::HTMLMenuElement>(*node)) {
+            ancestor = static_cast<Element const*>(node.ptr());
+            return IterationDecision::Break;
+        }
+        return IterationDecision::Continue;
+    });
+
+    // 4. Return the closest inclusive ancestor of ancestor that produces a CSS box.
+    // Spec-Note: Such an element will always exist, as at the very least the document element will always produce a CSS box.
+    ancestor->for_each_inclusive_ancestor([&ancestor](GC::Ref<Node> node) {
+        if (is<Element>(*node) && node->paintable_box()) {
+            ancestor = static_cast<Element const*>(node.ptr());
+            return IterationDecision::Break;
+        }
+        return IterationDecision::Continue;
+    });
+    return ancestor;
+}
+
+// https://html.spec.whatwg.org/multipage/grouping-content.html#ordinal-value
+size_t Element::ordinal_value() const
+{
+    // NOTE: The spec provides an algorithm to determine the ordinal value of each element owned by a given list owner.
+    //       However, we are only interested in the ordinal value of this element.
+
+    // FIXME: 1. Let i be 1.
+
+    // 2. If owner is an ol element, let numbering be owner's starting value. Otherwise, let numbering be 1.
+    auto const* owner = list_owner();
+    if (!owner) {
+        return 1;
+    }
+
+    auto numbering = 1;
+    auto reversed = false;
+    if (is<HTML::HTMLOListElement>(owner)) {
+        auto const* ol_element = static_cast<const HTML::HTMLOListElement*>(owner);
+        numbering = ol_element->starting_value();
+        reversed = ol_element->has_attribute(HTML::AttributeNames::reversed);
+    }
+
+    // FIXME: 3. Loop : If i is greater than the number of list items that owner owns, then return; all of owner's owned list items have been assigned ordinal values.
+    // FIXME: 4. Let item be the ith of owner's owned list items, in tree order.
+
+    owner->for_each_child_of_type<DOM::Element>([&](auto& item) {
+        if (item.list_owner() == owner) {
+            // 5. If item is an li element that has a value attribute, then:
+            auto value_attribute = item.get_attribute(HTML::AttributeNames::value);
+            if (is<HTML::HTMLLIElement>(item) && value_attribute.has_value()) {
+                // 1. Let parsed be the result of parsing the value of the attribute as an integer.
+                auto parsed = HTML::parse_integer(value_attribute.value());
+
+                // 2. If parsed is not an error, then set numbering to parsed.
+                if (parsed.has_value())
+                    numbering = parsed.value();
+            }
+
+            // FIXME: 6. The ordinal value of item is numbering.
+            if (&item == this)
+                return IterationDecision::Break;
+
+            // 7. If owner is an ol element, and owner has a reversed attribute, decrement numbering by 1; otherwise, increment numbering by 1.
+            if (reversed) {
+                numbering--;
+            } else {
+                numbering++;
+            }
+
+            // FIXME: 8. Increment i by 1.
+        }
+        return IterationDecision::Continue;
+    });
+
+    // FIXME: 9. Go to the step labeled loop.
+    return numbering;
+}
+
 bool Element::id_reference_exists(String const& id_reference) const
 {
     return document().get_element_by_id(id_reference);
@@ -3392,14 +3478,16 @@ void Element::attribute_changed(FlyString const& local_name, Optional<String> co
         else
             m_id = value_or_empty;
 
-        document().element_id_changed({}, *this);
+        if (is_connected())
+            document().element_id_changed({}, *this);
     } else if (local_name == HTML::AttributeNames::name) {
         if (value_or_empty.is_empty())
             m_name = {};
         else
             m_name = value_or_empty;
 
-        document().element_name_changed({}, *this);
+        if (is_connected())
+            document().element_name_changed({}, *this);
     } else if (local_name == HTML::AttributeNames::class_) {
         if (value_or_empty.is_empty()) {
             m_classes.clear();
@@ -3641,6 +3729,10 @@ Optional<String> Element::lang() const
         }
 
         //      - If there is no pragma-set default language set, then language information from a higher-level protocol (such as HTTP),
+        if (document().http_content_language().has_value()) {
+            return document().http_content_language();
+        }
+
         //        if any, must be used as the final fallback language instead.
         //      - In the absence of any such language information, and in cases where the higher-level protocol reports multiple languages,
         //        the language of the node is unknown, and the corresponding language tag is the empty string.
@@ -3654,5 +3746,4 @@ Optional<String> Element::lang() const
         return {};
     return maybe_lang.release_value();
 }
-
 }

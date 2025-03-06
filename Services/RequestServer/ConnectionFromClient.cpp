@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include "WebSocketImplCurl.h"
+
 #include <AK/Badge.h>
 #include <AK/IDAllocator.h>
 #include <AK/NonnullOwnPtr.h>
@@ -12,6 +14,7 @@
 #include <LibCore/Proxy.h>
 #include <LibCore/Socket.h>
 #include <LibRequests/NetworkErrorEnum.h>
+#include <LibRequests/WebSocket.h>
 #include <LibTLS/TLSv12.h>
 #include <LibTextCodec/Decoder.h>
 #include <LibWebSocket/ConnectionInfo.h>
@@ -51,8 +54,14 @@ static NonnullRefPtr<Resolver> default_resolver()
         }
 
         if (g_dns_info.use_dns_over_tls) {
+            TLS::Options options;
+            options.set_blocking(false);
+
+            if (!g_default_certificate_path.is_empty())
+                options.set_root_certificates_path(g_default_certificate_path);
+
             return DNS::Resolver::SocketResult {
-                MaybeOwned<Core::Socket>(TRY(TLS::TLSv12::connect(*g_dns_info.server_address, *g_dns_info.server_hostname))),
+                MaybeOwned<Core::Socket>(TRY(TLS::TLSv12::connect(*g_dns_info.server_address, *g_dns_info.server_hostname, move(options)))),
                 DNS::Resolver::ConnectionMode::TCP,
             };
         }
@@ -65,6 +74,24 @@ static NonnullRefPtr<Resolver> default_resolver()
 
     s_resolver = resolver;
     return resolver;
+}
+
+ByteString build_curl_resolve_list(DNS::LookupResult const& dns_result, StringView host, u16 port)
+{
+    StringBuilder resolve_opt_builder;
+    resolve_opt_builder.appendff("{}:{}:", host, port);
+    auto first = true;
+    for (auto& addr : dns_result.cached_addresses()) {
+        auto formatted_address = addr.visit(
+            [&](IPv4Address const& ipv4) { return ipv4.to_byte_string(); },
+            [&](IPv6Address const& ipv6) { return MUST(ipv6.to_string()).to_byte_string(); });
+        if (!first)
+            resolve_opt_builder.append(',');
+        first = false;
+        resolve_opt_builder.append(formatted_address);
+    }
+
+    return resolve_opt_builder.to_byte_string();
 }
 
 struct ConnectionFromClient::ActiveRequest {
@@ -279,6 +306,15 @@ void ConnectionFromClient::die()
         Core::EventLoop::current().quit(0);
 }
 
+Messages::RequestServer::InitTransportResponse ConnectionFromClient::init_transport([[maybe_unused]] int peer_pid)
+{
+#ifdef AK_OS_WINDOWS
+    m_transport.set_peer_pid(peer_pid);
+    return Core::System::getpid();
+#endif
+    VERIFY_NOT_REACHED();
+}
+
 Messages::RequestServer::ConnectNewClientResponse ConnectionFromClient::connect_new_client()
 {
     static_assert(IsSame<IPC::Transport, IPC::TransportSocket>, "Need to handle other IPC transports here");
@@ -337,13 +373,12 @@ void ConnectionFromClient::set_dns_server(ByteString const& host_or_address, u16
 
 void ConnectionFromClient::start_request(i32 request_id, ByteString const& method, URL::URL const& url, HTTP::HeaderMap const& request_headers, ByteBuffer const& request_body, Core::ProxyData const& proxy_data)
 {
-    if (!url.is_valid()) {
-        dbgln("StartRequest: Invalid URL requested: '{}'", url);
-        async_request_finished(request_id, 0, Requests::NetworkError::MalformedUrl);
-        return;
-    }
-
     auto host = url.serialized_host().to_byte_string();
+
+    // Check if host has the bracket notation for IPV6 addresses and remove them
+    if (host.starts_with("["sv) && host.ends_with("]"sv))
+        host = host.substring(1, host.length() - 2);
+
     m_resolver->dns.lookup(host, DNS::Messages::Class::IN, { DNS::Messages::ResourceType::A, DNS::Messages::ResourceType::AAAA })
         ->when_rejected([this, request_id](auto const& error) {
             dbgln("StartRequest: DNS lookup failed: {}", error);
@@ -419,6 +454,18 @@ void ConnectionFromClient::start_request(i32 request_id, ByteString const& metho
                 curl_headers = curl_slist_append(curl_headers, "Content-Type:");
 
             for (auto const& header : request_headers.headers()) {
+                if (header.value.is_empty()) {
+                    // Special case for headers with an empty value. curl will discard the header unless we pass the
+                    // header name followed by a semicolon.
+                    //
+                    // i.e. we need to pass "Content-Type;" instead of "Content-Type: "
+                    //
+                    // See: https://curl.se/libcurl/c/httpcustomheader.html
+                    auto header_string = ByteString::formatted("{};", header.name);
+                    curl_headers = curl_slist_append(curl_headers, header_string.characters());
+                    continue;
+                }
+
                 auto header_string = ByteString::formatted("{}: {}", header.name, header.value);
                 curl_headers = curl_slist_append(curl_headers, header_string.characters());
             }
@@ -437,20 +484,7 @@ void ConnectionFromClient::start_request(i32 request_id, ByteString const& metho
             set_option(CURLOPT_HEADERFUNCTION, &on_header_received);
             set_option(CURLOPT_HEADERDATA, reinterpret_cast<void*>(request.ptr()));
 
-            StringBuilder resolve_opt_builder;
-            resolve_opt_builder.appendff("{}:{}:", host, url.port_or_default());
-            auto first = true;
-            for (auto& addr : dns_result->cached_addresses()) {
-                auto formatted_address = addr.visit(
-                    [&](IPv4Address const& ipv4) { return ipv4.to_byte_string(); },
-                    [&](IPv6Address const& ipv6) { return MUST(ipv6.to_string()).to_byte_string(); });
-                if (!first)
-                    resolve_opt_builder.append(',');
-                first = false;
-                resolve_opt_builder.append(formatted_address);
-            }
-
-            auto formatted_address = resolve_opt_builder.to_byte_string();
+            auto formatted_address = build_curl_resolve_list(*dns_result, host, url.port_or_default());
             if (curl_slist* resolve_list = curl_slist_append(nullptr, formatted_address.characters())) {
                 set_option(CURLOPT_RESOLVE, resolve_list);
                 request->curl_string_lists.append(resolve_list);
@@ -495,9 +529,22 @@ void ConnectionFromClient::check_active_requests()
         if (msg->msg != CURLMSG_DONE)
             continue;
 
-        ActiveRequest* request = nullptr;
-        auto result = curl_easy_getinfo(msg->easy_handle, CURLINFO_PRIVATE, &request);
+        void* application_private = nullptr;
+        auto result = curl_easy_getinfo(msg->easy_handle, CURLINFO_PRIVATE, &application_private);
         VERIFY(result == CURLE_OK);
+        VERIFY(application_private != nullptr);
+
+        // FIXME: Come up with a unified way to track websockets and standard fetches instead of this nasty tagged pointer
+        if (reinterpret_cast<uintptr_t>(application_private) & websocket_private_tag) {
+            auto* websocket_impl = reinterpret_cast<WebSocketImplCurl*>(reinterpret_cast<uintptr_t>(application_private) & ~websocket_private_tag);
+            if (msg->data.result == CURLE_OK)
+                websocket_impl->did_connect();
+            else
+                websocket_impl->on_connection_error();
+            continue;
+        }
+
+        auto* request = static_cast<ActiveRequest*>(application_private);
 
         if (!request->is_connect_only) {
             request->flush_headers_if_needed();
@@ -560,11 +607,6 @@ Messages::RequestServer::SetCertificateResponse ConnectionFromClient::set_certif
 
 void ConnectionFromClient::ensure_connection(URL::URL const& url, ::RequestServer::CacheLevel const& cache_level)
 {
-    if (!url.is_valid()) {
-        dbgln("EnsureConnection: Invalid URL requested: '{}'", url);
-        return;
-    }
-
     auto const url_string_value = url.to_string();
 
     if (cache_level == CacheLevel::CreateConnection) {
@@ -619,36 +661,56 @@ void ConnectionFromClient::ensure_connection(URL::URL const& url, ::RequestServe
 
 void ConnectionFromClient::websocket_connect(i64 websocket_id, URL::URL const& url, ByteString const& origin, Vector<ByteString> const& protocols, Vector<ByteString> const& extensions, HTTP::HeaderMap const& additional_request_headers)
 {
-    if (!url.is_valid()) {
-        dbgln("WebSocket::Connect: Invalid URL requested: '{}'", url);
-        return;
-    }
+    auto host = url.serialized_host().to_byte_string();
 
-    WebSocket::ConnectionInfo connection_info(url);
-    connection_info.set_origin(origin);
-    connection_info.set_protocols(protocols);
-    connection_info.set_extensions(extensions);
-    connection_info.set_headers(additional_request_headers);
+    // Check if host has the bracket notation for IPV6 addresses and remove them
+    if (host.starts_with("["sv) && host.ends_with("]"sv))
+        host = host.substring(1, host.length() - 2);
 
-    auto connection = WebSocket::WebSocket::create(move(connection_info));
-    connection->on_open = [this, websocket_id]() {
-        async_websocket_connected(websocket_id);
-    };
-    connection->on_message = [this, websocket_id](auto message) {
-        async_websocket_received(websocket_id, message.is_text(), message.data());
-    };
-    connection->on_error = [this, websocket_id](auto message) {
-        async_websocket_errored(websocket_id, (i32)message);
-    };
-    connection->on_close = [this, websocket_id](u16 code, ByteString reason, bool was_clean) {
-        async_websocket_closed(websocket_id, code, move(reason), was_clean);
-    };
-    connection->on_ready_state_change = [this, websocket_id](auto state) {
-        async_websocket_ready_state_changed(websocket_id, (u32)state);
-    };
+    m_resolver->dns.lookup(host, DNS::Messages::Class::IN, { DNS::Messages::ResourceType::A, DNS::Messages::ResourceType::AAAA })
+        ->when_rejected([this, websocket_id](auto const& error) {
+            dbgln("WebSocketConnect: DNS lookup failed: {}", error);
+            async_websocket_errored(websocket_id, static_cast<i32>(Requests::WebSocket::Error::CouldNotEstablishConnection));
+        })
+        .when_resolved([this, websocket_id, host, url, origin, protocols, extensions, additional_request_headers](auto dns_result) {
+            if (dns_result->records().is_empty() || dns_result->cached_addresses().is_empty()) {
+                dbgln("WebSocketConnect: DNS lookup failed for '{}'", host);
+                async_websocket_errored(websocket_id, static_cast<i32>(Requests::WebSocket::Error::CouldNotEstablishConnection));
+                return;
+            }
 
-    connection->start();
-    m_websockets.set(websocket_id, move(connection));
+            WebSocket::ConnectionInfo connection_info(url);
+            connection_info.set_origin(origin);
+            connection_info.set_protocols(protocols);
+            connection_info.set_extensions(extensions);
+            connection_info.set_headers(additional_request_headers);
+            connection_info.set_dns_result(move(dns_result));
+
+            if (!g_default_certificate_path.is_empty())
+                connection_info.set_root_certificates_path(g_default_certificate_path);
+
+            auto impl = WebSocketImplCurl::create(m_curl_multi);
+            auto connection = WebSocket::WebSocket::create(move(connection_info), move(impl));
+
+            connection->on_open = [this, websocket_id]() {
+                async_websocket_connected(websocket_id);
+            };
+            connection->on_message = [this, websocket_id](auto message) {
+                async_websocket_received(websocket_id, message.is_text(), message.data());
+            };
+            connection->on_error = [this, websocket_id](auto message) {
+                async_websocket_errored(websocket_id, (i32)message);
+            };
+            connection->on_close = [this, websocket_id](u16 code, ByteString reason, bool was_clean) {
+                async_websocket_closed(websocket_id, code, move(reason), was_clean);
+            };
+            connection->on_ready_state_change = [this, websocket_id](auto state) {
+                async_websocket_ready_state_changed(websocket_id, (u32)state);
+            };
+
+            connection->start();
+            m_websockets.set(websocket_id, move(connection));
+        });
 }
 
 void ConnectionFromClient::websocket_send(i64 websocket_id, bool is_text, ByteBuffer const& data)

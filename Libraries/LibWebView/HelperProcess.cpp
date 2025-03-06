@@ -53,6 +53,11 @@ static ErrorOr<NonnullRefPtr<ClientType>> launch_server_process(
             if constexpr (requires { client->set_pid(pid_t {}); })
                 client->set_pid(process.pid());
 
+            if constexpr (requires { client->transport().set_peer_pid(0); } && !IsSame<ClientType, Web::HTML::WebWorkerClient>) {
+                auto response = client->template send_sync<typename ClientType::InitTransport>(Core::System::getpid());
+                client->transport().set_peer_pid(response->peer_pid());
+            }
+
             WebView::Application::the().add_child_process(move(process));
 
             if (chrome_options.profile_helper_process == process_type) {
@@ -79,6 +84,7 @@ ErrorOr<NonnullRefPtr<WebView::WebContentClient>> launch_web_content_process(
     IPC::File image_decoder_socket,
     Optional<IPC::File> request_server_socket)
 {
+    auto const& chrome_options = WebView::Application::chrome_options();
     auto const& web_content_options = WebView::Application::web_content_options();
 
     Vector<ByteString> arguments {
@@ -88,6 +94,8 @@ ErrorOr<NonnullRefPtr<WebView::WebContentClient>> launch_web_content_process(
         web_content_options.executable_path.to_byte_string(),
     };
 
+    if (chrome_options.devtools_port.has_value())
+        arguments.append("--devtools"sv);
     if (web_content_options.config_path.has_value()) {
         arguments.append("--config-path"sv);
         arguments.append(web_content_options.config_path.value());

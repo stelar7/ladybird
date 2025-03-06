@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020-2023, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2023-2025, Sam Atkins <sam@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -10,6 +11,7 @@
 #include <AK/HashMap.h>
 #include <AK/Optional.h>
 #include <LibGfx/Filter.h>
+#include <LibGfx/Font/FontVariant.h>
 #include <LibGfx/FontCascadeList.h>
 #include <LibGfx/ScalingMode.h>
 #include <LibWeb/CSS/CalculatedOr.h>
@@ -27,7 +29,7 @@
 #include <LibWeb/CSS/Size.h>
 #include <LibWeb/CSS/StyleValues/AbstractImageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BasicShapeStyleValue.h>
-#include <LibWeb/CSS/StyleValues/PositionStyleValue.h>
+#include <LibWeb/CSS/StyleValues/CursorStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ShadowStyleValue.h>
 #include <LibWeb/CSS/Transformation.h>
 
@@ -78,6 +80,8 @@ struct Containment {
     bool is_empty() const { return !(size_containment || inline_size_containment || layout_containment || style_containment || paint_containment); }
 };
 
+using CursorData = Variant<NonnullRefPtr<CursorStyleValue>, Cursor>;
+
 using ListStyleType = Variant<CounterStyleNameKeyword, String>;
 
 class InitialValues {
@@ -93,7 +97,7 @@ public:
     static CSS::Clip clip() { return CSS::Clip::make_auto(); }
     static CSS::PreferredColorScheme color_scheme() { return CSS::PreferredColorScheme::Auto; }
     static CSS::ContentVisibility content_visibility() { return CSS::ContentVisibility::Visible; }
-    static CSS::Cursor cursor() { return CSS::Cursor::Auto; }
+    static CursorData cursor() { return { CSS::Cursor::Auto }; }
     static CSS::WhiteSpace white_space() { return CSS::WhiteSpace::Normal; }
     static CSS::WordBreak word_break() { return CSS::WordBreak::Normal; }
     static CSS::LengthOrCalculated word_spacing() { return CSS::Length::make_px(0); }
@@ -188,6 +192,7 @@ public:
     static CSS::Isolation isolation() { return CSS::Isolation::Auto; }
     static CSS::Containment contain() { return {}; }
     static CSS::MixBlendMode mix_blend_mode() { return CSS::MixBlendMode::Normal; }
+    static Optional<int> z_index() { return OptionalNone(); }
 
     // https://www.w3.org/TR/SVG/geometry.html
     static LengthPercentage cx() { return CSS::Length::make_px(0); }
@@ -373,7 +378,7 @@ public:
     CSS::Clip clip() const { return m_noninherited.clip; }
     CSS::PreferredColorScheme color_scheme() const { return m_inherited.color_scheme; }
     CSS::ContentVisibility content_visibility() const { return m_inherited.content_visibility; }
-    CSS::Cursor cursor() const { return m_inherited.cursor; }
+    Vector<CursorData> const& cursor() const { return m_inherited.cursor; }
     CSS::ContentData content() const { return m_noninherited.content; }
     CSS::PointerEvents pointer_events() const { return m_inherited.pointer_events; }
     CSS::Display display() const { return m_noninherited.display; }
@@ -446,6 +451,7 @@ public:
     CSS::Isolation isolation() const { return m_noninherited.isolation; }
     CSS::Containment const& contain() const { return m_noninherited.contain; }
     CSS::MixBlendMode mix_blend_mode() const { return m_noninherited.mix_blend_mode; }
+    Optional<FlyString> view_transition_name() const { return m_noninherited.view_transition_name; }
 
     CSS::LengthBox const& inset() const { return m_noninherited.inset; }
     const CSS::LengthBox& margin() const { return m_noninherited.margin; }
@@ -572,7 +578,7 @@ protected:
         Optional<Color> accent_color {};
         Color webkit_text_fill_color { InitialValues::color() };
         CSS::ContentVisibility content_visibility { InitialValues::content_visibility() };
-        CSS::Cursor cursor { InitialValues::cursor() };
+        Vector<CursorData> cursor { InitialValues::cursor() };
         CSS::ImageRendering image_rendering { InitialValues::image_rendering() };
         CSS::PointerEvents pointer_events { InitialValues::pointer_events() };
         Variant<LengthOrCalculated, NumberOrCalculated> tab_size { InitialValues::tab_size() };
@@ -701,6 +707,7 @@ protected:
         CSS::Isolation isolation { InitialValues::isolation() };
         CSS::Containment contain { InitialValues::contain() };
         CSS::MixBlendMode mix_blend_mode { InitialValues::mix_blend_mode() };
+        Optional<FlyString> view_transition_name;
 
         Optional<CSS::Transformation> rotate;
         Optional<CSS::Transformation> translate;
@@ -759,7 +766,7 @@ public:
     void set_clip(CSS::Clip const& clip) { m_noninherited.clip = clip; }
     void set_content(ContentData const& content) { m_noninherited.content = content; }
     void set_content_visibility(CSS::ContentVisibility content_visibility) { m_inherited.content_visibility = content_visibility; }
-    void set_cursor(CSS::Cursor cursor) { m_inherited.cursor = cursor; }
+    void set_cursor(Vector<CursorData> cursor) { m_inherited.cursor = move(cursor); }
     void set_image_rendering(CSS::ImageRendering value) { m_inherited.image_rendering = value; }
     void set_pointer_events(CSS::PointerEvents value) { m_inherited.pointer_events = value; }
     void set_background_color(Color color) { m_noninherited.background_color = color; }
@@ -877,6 +884,7 @@ public:
     void set_isolation(CSS::Isolation value) { m_noninherited.isolation = value; }
     void set_contain(CSS::Containment value) { m_noninherited.contain = move(value); }
     void set_mix_blend_mode(CSS::MixBlendMode value) { m_noninherited.mix_blend_mode = value; }
+    void set_view_transition_name(Optional<FlyString> value) { m_noninherited.view_transition_name = value; }
 
     void set_fill(SVGPaint value) { m_inherited.fill = move(value); }
     void set_stroke(SVGPaint value) { m_inherited.stroke = move(value); }

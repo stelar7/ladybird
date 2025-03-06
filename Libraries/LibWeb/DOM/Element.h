@@ -14,7 +14,6 @@
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Bindings/ShadowRootPrototype.h>
 #include <LibWeb/CSS/CascadedProperties.h>
-#include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/CountersSet.h>
 #include <LibWeb/CSS/Selector.h>
 #include <LibWeb/CSS/StyleInvalidation.h>
@@ -210,8 +209,6 @@ public:
     void set_pseudo_element_computed_properties(CSS::Selector::PseudoElement::Type, GC::Ptr<CSS::ComputedProperties>);
     GC::Ptr<CSS::ComputedProperties> pseudo_element_computed_properties(CSS::Selector::PseudoElement::Type);
 
-    bool has_display_none_ancestor();
-    void play_or_cancel_animations_after_display_property_change(Optional<CSS::Display> old_display, Optional<CSS::Display> new_display);
     void reset_animated_css_properties();
 
     GC::Ptr<CSS::ElementInlineCSSStyleDeclaration> inline_style() { return m_inline_style; }
@@ -273,6 +270,7 @@ public:
 
     void set_pseudo_element_node(Badge<Layout::TreeBuilder>, CSS::Selector::PseudoElement::Type, GC::Ptr<Layout::NodeWithStyle>);
     GC::Ptr<Layout::NodeWithStyle> get_pseudo_element_node(CSS::Selector::PseudoElement::Type) const;
+    bool has_pseudo_element(CSS::Selector::PseudoElement::Type) const;
     bool has_pseudo_elements() const;
     void clear_pseudo_element_nodes(Badge<Layout::TreeBuilder>);
     void serialize_pseudo_elements_as_json(JsonArraySerializer<StringBuilder>& children_array) const;
@@ -428,8 +426,13 @@ public:
     bool matches_link_pseudo_class() const;
     bool matches_local_link_pseudo_class() const;
 
+    void invalidate_style_if_affected_by_has();
+
     bool affected_by_has_pseudo_class_in_subject_position() const { return m_affected_by_has_pseudo_class_in_subject_position; }
     void set_affected_by_has_pseudo_class_in_subject_position(bool value) { m_affected_by_has_pseudo_class_in_subject_position = value; }
+
+    bool affected_by_has_pseudo_class_in_non_subject_position() const { return m_affected_by_has_pseudo_class_in_non_subject_position; }
+    void set_affected_by_has_pseudo_class_in_non_subject_position(bool value) { m_affected_by_has_pseudo_class_in_non_subject_position = value; }
 
     bool affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator() const { return m_affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator; }
     void set_affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator(bool value) { m_affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator = value; }
@@ -447,6 +450,10 @@ public:
     {
         return affected_by_sibling_combinator() || affected_by_first_or_last_child_pseudo_class() || affected_by_nth_child_pseudo_class();
     }
+
+    size_t number_of_owned_list_items() const;
+    Element const* list_owner() const;
+    size_t ordinal_value() const;
 
 protected:
     Element(Document&, DOM::QualifiedName);
@@ -539,6 +546,7 @@ private:
     bool m_rendered_in_top_layer : 1 { false };
     bool m_style_uses_css_custom_properties { false };
     bool m_affected_by_has_pseudo_class_in_subject_position : 1 { false };
+    bool m_affected_by_has_pseudo_class_in_non_subject_position : 1 { false };
     bool m_affected_by_sibling_combinator : 1 { false };
     bool m_affected_by_first_or_last_child_pseudo_class : 1 { false };
     bool m_affected_by_nth_child_pseudo_class : 1 { false };
@@ -581,6 +589,15 @@ inline bool Element::has_class(FlyString const& class_name, CaseSensitivity case
     return any_of(m_classes, [&](auto& it) {
         return it.equals_ignoring_ascii_case(class_name);
     });
+}
+
+inline bool Element::has_pseudo_element(CSS::Selector::PseudoElement::Type type) const
+{
+    if (!m_pseudo_element_data)
+        return false;
+    if (!CSS::Selector::PseudoElement::is_known_pseudo_element_type(type))
+        return false;
+    return m_pseudo_element_data->at(to_underlying(type)).layout_node;
 }
 
 WebIDL::ExceptionOr<QualifiedName> validate_and_extract(JS::Realm&, Optional<FlyString> namespace_, FlyString const& qualified_name);

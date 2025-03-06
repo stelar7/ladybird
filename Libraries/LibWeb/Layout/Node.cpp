@@ -7,6 +7,7 @@
  */
 
 #include <AK/Demangle.h>
+#include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/StyleValues/AbstractImageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BackgroundRepeatStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BackgroundSizeStyleValue.h>
@@ -30,6 +31,8 @@
 #include <LibWeb/Layout/TableWrapper.h>
 #include <LibWeb/Layout/TextNode.h>
 #include <LibWeb/Layout/Viewport.h>
+#include <LibWeb/Page/Page.h>
+#include <LibWeb/SVG/SVGForeignObjectElement.h>
 
 namespace Web::Layout {
 
@@ -243,6 +246,13 @@ bool Node::establishes_stacking_context() const
     // https://drafts.fxtf.org/compositing/#mix-blend-mode
     // Applying a blendmode other than normal to the element must establish a new stacking context.
     if (computed_values().mix_blend_mode() != CSS::MixBlendMode::Normal)
+        return true;
+
+    // https://drafts.csswg.org/css-view-transitions-1/#named-and-transitioning
+    // Elements captured in a view transition during a view transition or whose view-transition-name computed value is
+    // not 'none' (at any time):
+    // - Form a stacking context.
+    if (computed_values().view_transition_name().has_value())
         return true;
 
     return computed_values().opacity() < 1.0f;
@@ -817,16 +827,16 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     else if (stroke_width.is_percentage())
         computed_values.set_stroke_width(CSS::LengthPercentage { stroke_width.as_percentage().percentage() });
 
-    if (auto const& mask_image = computed_style.property(CSS::PropertyID::MaskImage); mask_image.is_abstract_image()) {
+    auto const& mask_image = computed_style.property(CSS::PropertyID::MaskImage);
+    if (mask_image.is_url()) {
+        computed_values.set_mask(mask_image.as_url().url());
+    } else if (mask_image.is_abstract_image()) {
         auto const& abstract_image = mask_image.as_abstract_image();
         computed_values.set_mask_image(abstract_image);
         const_cast<CSS::AbstractImageStyleValue&>(abstract_image).load_any_resources(document());
     }
 
     computed_values.set_mask_type(computed_style.mask_type());
-
-    if (auto const& mask = computed_style.property(CSS::PropertyID::Mask); mask.is_url())
-        computed_values.set_mask(mask.as_url().url());
 
     auto const& clip_path = computed_style.property(CSS::PropertyID::ClipPath);
     if (clip_path.is_url())
@@ -931,6 +941,7 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     computed_values.set_user_select(computed_style.user_select());
     computed_values.set_isolation(computed_style.isolation());
     computed_values.set_mix_blend_mode(computed_style.mix_blend_mode());
+    computed_values.set_view_transition_name(computed_style.view_transition_name());
 
     propagate_style_to_anonymous_wrappers();
 
@@ -1043,6 +1054,11 @@ void NodeWithStyle::reset_table_box_computed_values_used_by_wrapper_to_init_valu
     mutable_computed_values.set_clear(CSS::InitialValues::clear());
     mutable_computed_values.set_inset(CSS::InitialValues::inset());
     mutable_computed_values.set_margin(CSS::InitialValues::margin());
+    // AD-HOC:
+    // To match other browsers, z-index needs to be moved to the wrapper box as well,
+    // even if the spec does not mention that: https://github.com/w3c/csswg-drafts/issues/11689
+    // Note that there may be more properties that need to be added to this list.
+    mutable_computed_values.set_z_index(CSS::InitialValues::z_index());
 }
 
 void NodeWithStyle::transfer_table_box_computed_values_to_wrapper_computed_values(CSS::ComputedValues& wrapper_computed_values)
@@ -1060,6 +1076,12 @@ void NodeWithStyle::transfer_table_box_computed_values_to_wrapper_computed_value
     mutable_wrapper_computed_values.set_float(computed_values().float_());
     mutable_wrapper_computed_values.set_clear(computed_values().clear());
     mutable_wrapper_computed_values.set_margin(computed_values().margin());
+    // AD-HOC:
+    // To match other browsers, z-index needs to be moved to the wrapper box as well,
+    // even if the spec does not mention that: https://github.com/w3c/csswg-drafts/issues/11689
+    // Note that there may be more properties that need to be added to this list.
+    mutable_wrapper_computed_values.set_z_index(computed_values().z_index());
+
     reset_table_box_computed_values_used_by_wrapper_to_init_values();
 }
 
@@ -1197,6 +1219,34 @@ CSS::UserSelect Node::user_select_used_value() const
     }
 
     return computed_value;
+}
+
+bool NodeWithStyleAndBoxModelMetrics::should_create_inline_continuation() const
+{
+    // This node must have an inline parent.
+    if (!parent())
+        return false;
+    auto const& parent_display = parent()->display();
+    if (!parent_display.is_inline_outside() || !parent_display.is_flow_inside())
+        return false;
+
+    // This node must not be inline itself or out of flow (which gets handled separately).
+    if (display().is_inline_outside() || is_out_of_flow())
+        return false;
+
+    // This node must not have `display: contents`; inline continuation gets handled by its children.
+    if (display().is_contents())
+        return false;
+
+    // Parent element must not be <foreignObject>
+    if (is<SVG::SVGForeignObjectElement>(parent()->dom_node()))
+        return false;
+
+    // SVGBoxes are appended directly to their layout parent without changing the parent's (non-)inline behavior.
+    if (is_svg_box())
+        return false;
+
+    return true;
 }
 
 void NodeWithStyleAndBoxModelMetrics::propagate_style_along_continuation(CSS::ComputedProperties const& computed_style) const

@@ -24,8 +24,29 @@
 
 namespace WebView {
 
-ViewImplementation::ViewImplementation()
+static HashMap<u64, ViewImplementation*> s_all_views;
+static u64 s_view_count = 1; // This has to start at 1 for Firefox DevTools.
+
+void ViewImplementation::for_each_view(Function<IterationDecision(ViewImplementation&)> callback)
 {
+    for (auto& view : s_all_views) {
+        if (callback(*view.value) == IterationDecision::Break)
+            break;
+    }
+}
+
+Optional<ViewImplementation&> ViewImplementation::find_view_by_id(u64 id)
+{
+    if (auto view = s_all_views.get(id); view.has_value())
+        return *view.value();
+    return {};
+}
+
+ViewImplementation::ViewImplementation()
+    : m_view_id(s_view_count++)
+{
+    s_all_views.set(m_view_id, this);
+
     m_repeated_crash_timer = Core::Timer::create_single_shot(1000, [this] {
         // Reset the "crashing a lot" counter after 1 second in case we just
         // happen to be visiting crashy websites a lot.
@@ -44,6 +65,8 @@ ViewImplementation::ViewImplementation()
 
 ViewImplementation::~ViewImplementation()
 {
+    s_all_views.remove(m_view_id);
+
     if (m_client_state.client)
         m_client_state.client->unregister_view(m_client_state.page_index);
 }
@@ -280,14 +303,19 @@ void ViewImplementation::inspect_dom_tree()
     client().async_inspect_dom_tree(page_id());
 }
 
-void ViewImplementation::inspect_dom_node(Web::UniqueNodeID node_id, Optional<Web::CSS::Selector::PseudoElement::Type> pseudo_element)
-{
-    client().async_inspect_dom_node(page_id(), node_id, move(pseudo_element));
-}
-
 void ViewImplementation::inspect_accessibility_tree()
 {
     client().async_inspect_accessibility_tree(page_id());
+}
+
+void ViewImplementation::get_hovered_node_id()
+{
+    client().async_get_hovered_node_id(page_id());
+}
+
+void ViewImplementation::inspect_dom_node(Web::UniqueNodeID node_id, Optional<Web::CSS::Selector::PseudoElement::Type> pseudo_element)
+{
+    client().async_inspect_dom_node(page_id(), node_id, move(pseudo_element));
 }
 
 void ViewImplementation::clear_inspected_dom_node()
@@ -295,9 +323,14 @@ void ViewImplementation::clear_inspected_dom_node()
     inspect_dom_node(0, {});
 }
 
-void ViewImplementation::get_hovered_node_id()
+void ViewImplementation::highlight_dom_node(Web::UniqueNodeID node_id, Optional<Web::CSS::Selector::PseudoElement::Type> pseudo_element)
 {
-    client().async_get_hovered_node_id(page_id());
+    client().async_highlight_dom_node(page_id(), node_id, move(pseudo_element));
+}
+
+void ViewImplementation::clear_highlighted_dom_node()
+{
+    highlight_dom_node(0, {});
 }
 
 void ViewImplementation::set_dom_node_text(Web::UniqueNodeID node_id, String text)
@@ -360,14 +393,14 @@ void ViewImplementation::debug_request(ByteString const& request, ByteString con
     client().async_debug_request(page_id(), request, argument);
 }
 
-void ViewImplementation::run_javascript(StringView js_source)
+void ViewImplementation::run_javascript(String js_source)
 {
-    client().async_run_javascript(page_id(), js_source);
+    client().async_run_javascript(page_id(), move(js_source));
 }
 
-void ViewImplementation::js_console_input(ByteString const& js_source)
+void ViewImplementation::js_console_input(String js_source)
 {
-    client().async_js_console_input(page_id(), js_source);
+    client().async_js_console_input(page_id(), move(js_source));
 }
 
 void ViewImplementation::js_console_request_messages(i32 start_index)

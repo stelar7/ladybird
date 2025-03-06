@@ -8,6 +8,7 @@
  */
 
 #include "CalculatedStyleValue.h"
+#include <AK/QuickSort.h>
 #include <AK/TypeCasts.h>
 #include <LibWeb/CSS/Percentage.h>
 #include <LibWeb/CSS/PropertyID.h>
@@ -129,24 +130,304 @@ static NonnullRefPtr<CalculationNode> simplify_2_children(T const& original, Non
     return original;
 }
 
-Optional<CalculationNode::ConstantType> CalculationNode::constant_type_from_string(StringView string)
+static String serialize_a_calculation_tree(CalculationNode const&, CalculationContext const&, CSSStyleValue::SerializationMode);
+
+// https://drafts.csswg.org/css-values-4/#serialize-a-math-function
+static String serialize_a_math_function(CalculationNode const& fn, CalculationContext const& context, CSSStyleValue::SerializationMode serialization_mode)
 {
-    if (string.equals_ignoring_ascii_case("e"sv))
-        return CalculationNode::ConstantType::E;
+    // To serialize a math function fn:
 
-    if (string.equals_ignoring_ascii_case("pi"sv))
-        return CalculationNode::ConstantType::Pi;
+    // 1. If the root of the calculation tree fn represents is a numeric value (number, percentage, or dimension), and
+    //    the serialization being produced is of a computed value or later, then clamp the value to the range allowed
+    //    for its context (if necessary), then serialize the value as normal and return the result.
+    if (fn.type() == CalculationNode::Type::Numeric && serialization_mode == CSSStyleValue::SerializationMode::ResolvedValue) {
+        // FIXME: Clamp the value. Note that we might have an infinite/nan value here.
+        return static_cast<NumericCalculationNode const&>(fn).value_to_string();
+    }
 
-    if (string.equals_ignoring_ascii_case("infinity"sv))
-        return CalculationNode::ConstantType::Infinity;
+    // 2. If fn represents an infinite or NaN value:
+    if (fn.type() == CalculationNode::Type::Numeric) {
+        auto& numeric_node = static_cast<NumericCalculationNode const&>(fn);
+        if (auto infinite_or_nan = numeric_node.infinite_or_nan_value(); infinite_or_nan.has_value()) {
+            // 1. Let s be the string "calc(".
+            StringBuilder builder;
+            builder.append("calc("sv);
 
-    if (string.equals_ignoring_ascii_case("-infinity"sv))
-        return CalculationNode::ConstantType::MinusInfinity;
+            // 2. Serialize the keyword infinity, -infinity, or NaN, as appropriate to represent the value, and append it to s.
+            switch (infinite_or_nan.value()) {
+            case NonFiniteValue::Infinity:
+                builder.append("infinity"sv);
+                break;
+            case NonFiniteValue::NegativeInfinity:
+                builder.append("-infinity"sv);
+                break;
+            case NonFiniteValue::NaN:
+                builder.append("NaN"sv);
+                break;
+            default:
+                VERIFY_NOT_REACHED();
+            }
 
-    if (string.equals_ignoring_ascii_case("NaN"sv))
-        return CalculationNode::ConstantType::NaN;
+            // 3. If fn’s type is anything other than «[ ]» (empty, representing a <number>), append " * " to s.
+            //    Create a numeric value in the canonical unit for fn’s type (such as px for <length>), with a value of 1.
+            //    Serialize this numeric value and append it to s.
+            if (!numeric_node.value().has<Number>()) {
+                numeric_node.value().visit(
+                    [&builder](Angle const&) { builder.append(" * 1deg"sv); },
+                    [&builder](Flex const&) { builder.append(" * 1fr"sv); },
+                    [&builder](Frequency const&) { builder.append(" * 1hz"sv); },
+                    [&builder](Length const&) { builder.append(" * 1px"sv); },
+                    [](Number const&) { VERIFY_NOT_REACHED(); },
+                    [&builder](Percentage const&) { builder.append(" * 1%"sv); },
+                    [&builder](Resolution const&) { builder.append(" * 1dppx"sv); },
+                    [&builder](Time const&) { builder.append(" * 1s"sv); });
+            }
 
-    return {};
+            // 4. Append ")" to s, then return it.
+            builder.append(')');
+            return builder.to_string_without_validation();
+        }
+    }
+
+    // 3. If the calculation tree’s root node is a numeric value, or a calc-operator node, let s be a string initially
+    //    containing "calc(".
+    //    Otherwise, let s be a string initially containing the name of the root node, lowercased (such as "sin" or
+    //    "max"), followed by a "(" (open parenthesis).
+    StringBuilder builder;
+    if (fn.type() == CalculationNode::Type::Numeric || fn.is_calc_operator_node()) {
+        builder.append("calc("sv);
+    } else {
+        builder.appendff("{}(", fn.name());
+    }
+
+    // 4. For each child of the root node, serialize the calculation tree.
+    //    If a result of this serialization starts with a "(" (open parenthesis) and ends with a ")" (close parenthesis),
+    //    remove those characters from the result.
+    //    Concatenate all of the results using ", " (comma followed by space), then append the result to s.
+
+    auto serialized_tree_without_parentheses = [&](CalculationNode const& tree) {
+        auto tree_serialized = serialize_a_calculation_tree(tree, context, serialization_mode);
+        if (tree_serialized.starts_with('(') && tree_serialized.ends_with(')')) {
+            tree_serialized = MUST(tree_serialized.substring_from_byte_offset_with_shared_superstring(1, tree_serialized.byte_count() - 2));
+        }
+        return tree_serialized;
+    };
+
+    // Spec issue: https://github.com/w3c/csswg-drafts/issues/11783
+    //             The three AD-HOCs in this step are mentioned there.
+    // AD-HOC: Numeric nodes have no children and should serialize directly.
+    // AD-HOC: calc-operator nodes should also serialize directly, instead of separating their children by commas.#
+    if (fn.type() == CalculationNode::Type::Numeric || fn.is_calc_operator_node()) {
+        builder.append(serialized_tree_without_parentheses(fn));
+    } else {
+        Vector<String> serialized_children;
+        // AD-HOC: For `clamp()`, the first child is a <rounding-strategy>, which is incompatible with "serialize a calculation tree".
+        //         So, we serialize it directly first, and hope for the best.
+        if (fn.type() == CalculationNode::Type::Round) {
+            auto rounding_strategy = static_cast<RoundCalculationNode const&>(fn).rounding_strategy();
+            serialized_children.append(MUST(String::from_utf8(CSS::to_string(rounding_strategy))));
+        }
+        for (auto const& child : fn.children()) {
+            serialized_children.append(serialized_tree_without_parentheses(child));
+        }
+        builder.join(", "sv, serialized_children);
+    }
+
+    // 5. Append ")" (close parenthesis) to s.
+    builder.append(')');
+
+    // 6. Return s.
+    return builder.to_string_without_validation();
+}
+
+// https://drafts.csswg.org/css-values-4/#sort-a-calculations-children
+static Vector<NonnullRefPtr<CalculationNode>> sort_a_calculations_children(Vector<NonnullRefPtr<CalculationNode>> nodes)
+{
+    // 1. Let ret be an empty list.
+    Vector<NonnullRefPtr<CalculationNode>> ret;
+
+    // 2. If nodes contains a number, remove it from nodes and append it to ret.
+    auto index_of_number = nodes.find_first_index_if([](NonnullRefPtr<CalculationNode> const& node) {
+        if (node->type() != CalculationNode::Type::Numeric)
+            return false;
+        return static_cast<NumericCalculationNode const&>(*node).value().has<Number>();
+    });
+    if (index_of_number.has_value()) {
+        ret.append(nodes.take(*index_of_number));
+    }
+
+    // 3. If nodes contains a percentage, remove it from nodes and append it to ret.
+    auto index_of_percentage = nodes.find_first_index_if([](NonnullRefPtr<CalculationNode> const& node) {
+        if (node->type() != CalculationNode::Type::Numeric)
+            return false;
+        return static_cast<NumericCalculationNode const&>(*node).value().has<Percentage>();
+    });
+    if (index_of_percentage.has_value()) {
+        ret.append(nodes.take(*index_of_percentage));
+    }
+
+    // 4. If nodes contains any dimensions, remove them from nodes, sort them by their units, ordered ASCII
+    //    case-insensitively, and append them to ret.
+    Vector<NonnullRefPtr<CalculationNode>> dimensions;
+    dimensions.ensure_capacity(nodes.size());
+
+    auto next_dimension_index = [&nodes]() {
+        return nodes.find_first_index_if([](NonnullRefPtr<CalculationNode> const& node) {
+            if (node->type() != CalculationNode::Type::Numeric)
+                return false;
+            return static_cast<NumericCalculationNode const&>(*node).value().visit(
+                [](Number const&) { return false; },
+                [](Percentage const&) { return false; },
+                [](auto const&) { return true; });
+        });
+    };
+
+    for (auto index_of_dimension = next_dimension_index(); index_of_dimension.has_value(); index_of_dimension = next_dimension_index()) {
+        dimensions.append(nodes.take(*index_of_dimension));
+    }
+
+    quick_sort(dimensions, [](NonnullRefPtr<CalculationNode> const& a, NonnullRefPtr<CalculationNode> const& b) {
+        auto get_unit = [](NonnullRefPtr<CalculationNode> const& node) -> StringView {
+            auto const& numeric_node = static_cast<NumericCalculationNode const&>(*node);
+            return numeric_node.value().visit(
+                [](Number const&) -> StringView { VERIFY_NOT_REACHED(); },
+                [](Percentage const&) -> StringView { VERIFY_NOT_REACHED(); },
+                [](auto const& dimension) -> StringView { return dimension.unit_name(); });
+        };
+
+        auto a_unit = get_unit(a);
+        auto b_unit = get_unit(b);
+        // NOTE: Our unit name strings are always lowercase, so we don't have to do anything special for a case-insensitive match.
+        return a_unit < b_unit;
+    });
+    ret.extend(dimensions);
+
+    // 5. If nodes still contains any items, append them to ret in the same order.
+    if (!nodes.is_empty())
+        ret.extend(nodes);
+
+    // 6. Return ret.
+    return ret;
+}
+
+// https://drafts.csswg.org/css-values-4/#serialize-a-calculation-tree
+static String serialize_a_calculation_tree(CalculationNode const& root, CalculationContext const& context, CSSStyleValue::SerializationMode serialization_mode)
+{
+    // 1. Let root be the root node of the calculation tree.
+    // NOTE: Already the case.
+
+    // 2. If root is a numeric value, or a non-math function, serialize root per the normal rules for it and return the result.
+    // FIXME: Support non-math functions in calculation trees.
+    if (root.type() == CalculationNode::Type::Numeric)
+        return static_cast<NumericCalculationNode const&>(root).value_to_string();
+
+    // 3. If root is anything but a Sum, Negate, Product, or Invert node, serialize a math function for the function
+    //    corresponding to the node type, treating the node’s children as the function’s comma-separated calculation
+    //    arguments, and return the result.
+    if (!first_is_one_of(root.type(), CalculationNode::Type::Sum, CalculationNode::Type::Product, CalculationNode::Type::Negate, CalculationNode::Type::Invert)) {
+        return serialize_a_math_function(root, context, serialization_mode);
+    }
+
+    // 4. If root is a Negate node, let s be a string initially containing "(-1 * ".
+    if (root.type() == CalculationNode::Type::Negate) {
+        StringBuilder builder;
+        builder.append("(-1 * "sv);
+
+        // Serialize root’s child, and append it to s.
+        builder.append(serialize_a_calculation_tree(root.children().first(), context, serialization_mode));
+
+        // Append ")" to s, then return it.
+        builder.append(')');
+        return builder.to_string_without_validation();
+    }
+
+    // 5. If root is an Invert node, let s be a string initially containing "(1 / ".
+    if (root.type() == CalculationNode::Type::Invert) {
+        StringBuilder builder;
+        builder.append("(1 / "sv);
+
+        // Serialize root’s child, and append it to s.
+        builder.append(serialize_a_calculation_tree(root.children().first(), context, serialization_mode));
+
+        // Append ")" to s, then return it.
+        builder.append(')');
+        return builder.to_string_without_validation();
+    }
+
+    // 6. If root is a Sum node, let s be a string initially containing "(".
+    if (root.type() == CalculationNode::Type::Sum) {
+        StringBuilder builder;
+        builder.append('(');
+
+        auto sorted_children = sort_a_calculations_children(root.children());
+
+        // Serialize root’s first child, and append it to s.
+        builder.append(serialize_a_calculation_tree(sorted_children.first(), context, serialization_mode));
+
+        // For each child of root beyond the first:
+        for (auto i = 1u; i < sorted_children.size(); ++i) {
+            auto& child = *sorted_children[i];
+
+            // 1. If child is a Negate node, append " - " to s, then serialize the Negate’s child and append the
+            //    result to s.
+            if (child.type() == CalculationNode::Type::Negate) {
+                builder.append(" - "sv);
+                builder.append(serialize_a_calculation_tree(static_cast<NegateCalculationNode const&>(child).child(), context, serialization_mode));
+            }
+
+            // 2. If child is a negative numeric value, append " - " to s, then serialize the negation of child as
+            //    normal and append the result to s.
+            else if (child.type() == CalculationNode::Type::Numeric && static_cast<NumericCalculationNode const&>(child).is_negative()) {
+                auto const& numeric_node = static_cast<NumericCalculationNode const&>(child);
+                builder.append(" - "sv);
+                builder.append(serialize_a_calculation_tree(numeric_node.negated(context), context, serialization_mode));
+            }
+
+            // 3. Otherwise, append " + " to s, then serialize child and append the result to s.
+            else {
+                builder.append(" + "sv);
+                builder.append(serialize_a_calculation_tree(child, context, serialization_mode));
+            }
+        }
+
+        // Finally, append ")" to s and return it.
+        builder.append(')');
+        return builder.to_string_without_validation();
+    }
+
+    // 7. If root is a Product node, let s be a string initially containing "(".
+    if (root.type() == CalculationNode::Type::Product) {
+        StringBuilder builder;
+        builder.append('(');
+
+        auto sorted_children = sort_a_calculations_children(root.children());
+
+        // Serialize root’s first child, and append it to s.
+        builder.append(serialize_a_calculation_tree(sorted_children.first(), context, serialization_mode));
+
+        // For each child of root beyond the first:
+        for (auto i = 1u; i < sorted_children.size(); ++i) {
+            auto& child = *sorted_children[i];
+
+            // 1. If child is an Invert node, append " / " to s, then serialize the Invert’s child and append the result to s.
+            if (child.type() == CalculationNode::Type::Invert) {
+                builder.append(" / "sv);
+                builder.append(serialize_a_calculation_tree(static_cast<InvertCalculationNode const&>(child).child(), context, serialization_mode));
+            }
+
+            // 2. Otherwise, append " * " to s, then serialize child and append the result to s.
+            else {
+                builder.append(" * "sv);
+                builder.append(serialize_a_calculation_tree(child, context, serialization_mode));
+            }
+        }
+
+        // Finally, append ")" to s and return it.
+        builder.append(')');
+        return builder.to_string_without_validation();
+    }
+
+    VERIFY_NOT_REACHED();
 }
 
 CalculationNode::CalculationNode(Type type, Optional<CSSNumericType> numeric_type)
@@ -156,6 +437,59 @@ CalculationNode::CalculationNode(Type type, Optional<CSSNumericType> numeric_typ
 }
 
 CalculationNode::~CalculationNode() = default;
+
+StringView CalculationNode::name() const
+{
+    switch (m_type) {
+    case Type::Min:
+        return "min"sv;
+    case Type::Max:
+        return "max"sv;
+    case Type::Clamp:
+        return "clamp"sv;
+    case Type::Abs:
+        return "abs"sv;
+    case Type::Sign:
+        return "sign"sv;
+    case Type::Sin:
+        return "sin"sv;
+    case Type::Cos:
+        return "cos"sv;
+    case Type::Tan:
+        return "tan"sv;
+    case Type::Asin:
+        return "asin"sv;
+    case Type::Acos:
+        return "acos"sv;
+    case Type::Atan:
+        return "atan"sv;
+    case Type::Atan2:
+        return "atan2"sv;
+    case Type::Pow:
+        return "pow"sv;
+    case Type::Sqrt:
+        return "sqrt"sv;
+    case Type::Hypot:
+        return "hypot"sv;
+    case Type::Log:
+        return "log"sv;
+    case Type::Exp:
+        return "exp"sv;
+    case Type::Round:
+        return "round"sv;
+    case Type::Mod:
+        return "mod"sv;
+    case Type::Rem:
+        return "rem"sv;
+    case Type::Numeric:
+    case Type::Sum:
+    case Type::Product:
+    case Type::Negate:
+    case Type::Invert:
+        return "calc"sv;
+    }
+    VERIFY_NOT_REACHED();
+}
 
 static CSSNumericType numeric_type_from_calculated_style_value(CalculatedStyleValue::CalculationResult::Value const& value, CalculationContext const& context)
 {
@@ -228,6 +562,29 @@ NonnullRefPtr<NumericCalculationNode> NumericCalculationNode::create(NumericValu
     return adopt_ref(*new (nothrow) NumericCalculationNode(move(value), numeric_type));
 }
 
+RefPtr<NumericCalculationNode> NumericCalculationNode::from_keyword(Keyword keyword, CalculationContext const& context)
+{
+    switch (keyword) {
+    case Keyword::E:
+        // https://drafts.csswg.org/css-values-4/#valdef-calc-e
+        return create(Number { Number::Type::Number, AK::E<double> }, context);
+    case Keyword::Pi:
+        // https://drafts.csswg.org/css-values-4/#valdef-calc-pi
+        return create(Number { Number::Type::Number, AK::Pi<double> }, context);
+    case Keyword::Infinity:
+        // https://drafts.csswg.org/css-values-4/#valdef-calc-infinity
+        return create(Number { Number::Type::Number, AK::Infinity<double> }, context);
+    case Keyword::NegativeInfinity:
+        // https://drafts.csswg.org/css-values-4/#valdef-calc--infinity
+        return create(Number { Number::Type::Number, -AK::Infinity<double> }, context);
+    case Keyword::Nan:
+        // https://drafts.csswg.org/css-values-4/#valdef-calc-nan
+        return create(Number { Number::Type::Number, AK::NaN<double> }, context);
+    default:
+        return nullptr;
+    }
+}
+
 NumericCalculationNode::NumericCalculationNode(NumericValue value, CSSNumericType numeric_type)
     : CalculationNode(Type::Numeric, move(numeric_type))
     , m_value(move(value))
@@ -236,7 +593,7 @@ NumericCalculationNode::NumericCalculationNode(NumericValue value, CSSNumericTyp
 
 NumericCalculationNode::~NumericCalculationNode() = default;
 
-String NumericCalculationNode::to_string() const
+String NumericCalculationNode::value_to_string() const
 {
     return m_value.visit([](auto& value) { return value.to_string(); });
 }
@@ -331,6 +688,46 @@ RefPtr<CSSStyleValue> NumericCalculationNode::to_style_value(CalculationContext 
         [](Time const& time) -> RefPtr<CSSStyleValue> { return TimeStyleValue::create(time); });
 }
 
+Optional<NonFiniteValue> NumericCalculationNode::infinite_or_nan_value() const
+{
+    auto raw_value = m_value.visit(
+        [](Number const& number) { return number.value(); },
+        [](Percentage const& percentage) { return percentage.as_fraction(); },
+        [](auto const& dimension) { return dimension.raw_value(); });
+
+    if (isnan(raw_value))
+        return NonFiniteValue::NaN;
+    if (!isfinite(raw_value)) {
+        if (raw_value < 0)
+            return NonFiniteValue::NegativeInfinity;
+        return NonFiniteValue::Infinity;
+    }
+
+    return {};
+}
+
+bool NumericCalculationNode::is_negative() const
+{
+    return m_value.visit(
+        [&](Number const& number) { return number.value() < 0; },
+        [](Percentage const& percentage) { return percentage.value() < 0; },
+        [](auto const& dimension) { return dimension.raw_value() < 0; });
+}
+
+NonnullRefPtr<NumericCalculationNode> NumericCalculationNode::negated(CalculationContext const& context) const
+{
+    return value().visit(
+        [&](Percentage const& percentage) {
+            return create(Percentage(-percentage.value()), context);
+        },
+        [&](Number const& number) {
+            return create(Number(number.type(), -number.value()), context);
+        },
+        [&]<typename T>(T const& value) {
+            return create(T(-value.raw_value(), value.type()), context);
+        });
+}
+
 void NumericCalculationNode::dump(StringBuilder& builder, int indent) const
 {
     builder.appendff("{: >{}}NUMERIC({})\n", "", indent, m_value.visit([](auto& it) { return it.to_string(); }));
@@ -363,19 +760,6 @@ SumCalculationNode::SumCalculationNode(Vector<NonnullRefPtr<CalculationNode>> va
 }
 
 SumCalculationNode::~SumCalculationNode() = default;
-
-String SumCalculationNode::to_string() const
-{
-    bool first = true;
-    StringBuilder builder;
-    for (auto& value : m_values) {
-        if (!first)
-            builder.append(" + "sv);
-        builder.append(value->to_string());
-        first = false;
-    }
-    return MUST(builder.to_string());
-}
 
 bool SumCalculationNode::contains_percentage() const
 {
@@ -447,19 +831,6 @@ ProductCalculationNode::ProductCalculationNode(Vector<NonnullRefPtr<CalculationN
 
 ProductCalculationNode::~ProductCalculationNode() = default;
 
-String ProductCalculationNode::to_string() const
-{
-    bool first = true;
-    StringBuilder builder;
-    for (auto& value : m_values) {
-        if (!first)
-            builder.append(" * "sv);
-        builder.append(value->to_string());
-        first = false;
-    }
-    return MUST(builder.to_string());
-}
-
 bool ProductCalculationNode::contains_percentage() const
 {
     for (auto const& value : m_values) {
@@ -526,11 +897,6 @@ NegateCalculationNode::NegateCalculationNode(NonnullRefPtr<CalculationNode> valu
 
 NegateCalculationNode::~NegateCalculationNode() = default;
 
-String NegateCalculationNode::to_string() const
-{
-    return MUST(String::formatted("(0 - {})", m_value->to_string()));
-}
-
 bool NegateCalculationNode::contains_percentage() const
 {
     return m_value->contains_percentage();
@@ -583,11 +949,6 @@ InvertCalculationNode::InvertCalculationNode(NonnullRefPtr<CalculationNode> valu
 
 InvertCalculationNode::~InvertCalculationNode() = default;
 
-String InvertCalculationNode::to_string() const
-{
-    return MUST(String::formatted("(1 / {})", m_value->to_string()));
-}
-
 bool InvertCalculationNode::contains_percentage() const
 {
     return m_value->contains_percentage();
@@ -635,19 +996,6 @@ MinCalculationNode::MinCalculationNode(Vector<NonnullRefPtr<CalculationNode>> va
 }
 
 MinCalculationNode::~MinCalculationNode() = default;
-
-String MinCalculationNode::to_string() const
-{
-    StringBuilder builder;
-    builder.append("min("sv);
-    for (size_t i = 0; i < m_values.size(); ++i) {
-        if (i != 0)
-            builder.append(", "sv);
-        builder.append(m_values[i]->to_string());
-    }
-    builder.append(")"sv);
-    return MUST(builder.to_string());
-}
 
 bool MinCalculationNode::contains_percentage() const
 {
@@ -766,19 +1114,6 @@ MaxCalculationNode::MaxCalculationNode(Vector<NonnullRefPtr<CalculationNode>> va
 
 MaxCalculationNode::~MaxCalculationNode() = default;
 
-String MaxCalculationNode::to_string() const
-{
-    StringBuilder builder;
-    builder.append("max("sv);
-    for (size_t i = 0; i < m_values.size(); ++i) {
-        if (i != 0)
-            builder.append(", "sv);
-        builder.append(m_values[i]->to_string());
-    }
-    builder.append(")"sv);
-    return MUST(builder.to_string());
-}
-
 bool MaxCalculationNode::contains_percentage() const
 {
     for (auto const& value : m_values) {
@@ -857,19 +1192,6 @@ ClampCalculationNode::ClampCalculationNode(NonnullRefPtr<CalculationNode> min, N
 }
 
 ClampCalculationNode::~ClampCalculationNode() = default;
-
-String ClampCalculationNode::to_string() const
-{
-    StringBuilder builder;
-    builder.append("clamp("sv);
-    builder.append(m_min_value->to_string());
-    builder.append(", "sv);
-    builder.append(m_center_value->to_string());
-    builder.append(", "sv);
-    builder.append(m_max_value->to_string());
-    builder.append(")"sv);
-    return MUST(builder.to_string());
-}
 
 bool ClampCalculationNode::contains_percentage() const
 {
@@ -977,15 +1299,6 @@ AbsCalculationNode::AbsCalculationNode(NonnullRefPtr<CalculationNode> value)
 
 AbsCalculationNode::~AbsCalculationNode() = default;
 
-String AbsCalculationNode::to_string() const
-{
-    StringBuilder builder;
-    builder.append("abs("sv);
-    builder.append(m_value->to_string());
-    builder.append(")"sv);
-    return MUST(builder.to_string());
-}
-
 bool AbsCalculationNode::contains_percentage() const
 {
     return m_value->contains_percentage();
@@ -1017,7 +1330,8 @@ Optional<CalculatedStyleValue::CalculationResult> AbsCalculationNode::run_operat
 
 void AbsCalculationNode::dump(StringBuilder& builder, int indent) const
 {
-    builder.appendff("{: >{}}ABS: {}\n", "", indent, to_string());
+    builder.appendff("{: >{}}ABS:\n", "", indent);
+    m_value->dump(builder, indent + 2);
 }
 
 bool AbsCalculationNode::equals(CalculationNode const& other) const
@@ -1043,15 +1357,6 @@ SignCalculationNode::SignCalculationNode(NonnullRefPtr<CalculationNode> value)
 }
 
 SignCalculationNode::~SignCalculationNode() = default;
-
-String SignCalculationNode::to_string() const
-{
-    StringBuilder builder;
-    builder.append("sign("sv);
-    builder.append(m_value->to_string());
-    builder.append(")"sv);
-    return MUST(builder.to_string());
-}
 
 bool SignCalculationNode::contains_percentage() const
 {
@@ -1102,7 +1407,8 @@ Optional<CalculatedStyleValue::CalculationResult> SignCalculationNode::run_opera
 
 void SignCalculationNode::dump(StringBuilder& builder, int indent) const
 {
-    builder.appendff("{: >{}}SIGN: {}\n", "", indent, to_string());
+    builder.appendff("{: >{}}SIGN:\n", "", indent);
+    m_value->dump(builder, indent + 2);
 }
 
 bool SignCalculationNode::equals(CalculationNode const& other) const
@@ -1112,73 +1418,6 @@ bool SignCalculationNode::equals(CalculationNode const& other) const
     if (type() != other.type())
         return false;
     return m_value->equals(*static_cast<SignCalculationNode const&>(other).m_value);
-}
-
-NonnullRefPtr<ConstantCalculationNode> ConstantCalculationNode::create(ConstantType constant)
-{
-    return adopt_ref(*new (nothrow) ConstantCalculationNode(constant));
-}
-
-ConstantCalculationNode::ConstantCalculationNode(ConstantType constant)
-    // https://www.w3.org/TR/css-values-4/#determine-the-type-of-a-calculation
-    // Anything else is a terminal value, whose type is determined based on its CSS type:
-    // -> <calc-constant>
-    //    the type is «[ ]» (empty map)
-    : CalculationNode(Type::Constant, CSSNumericType {})
-    , m_constant(constant)
-{
-}
-
-ConstantCalculationNode::~ConstantCalculationNode() = default;
-
-String ConstantCalculationNode::to_string() const
-{
-    switch (m_constant) {
-    case CalculationNode::ConstantType::E:
-        return "e"_string;
-    case CalculationNode::ConstantType::Pi:
-        return "pi"_string;
-    case CalculationNode::ConstantType::Infinity:
-        return "infinity"_string;
-    case CalculationNode::ConstantType::MinusInfinity:
-        return "-infinity"_string;
-    case CalculationNode::ConstantType::NaN:
-        return "NaN"_string;
-    }
-
-    VERIFY_NOT_REACHED();
-}
-
-CalculatedStyleValue::CalculationResult ConstantCalculationNode::resolve(CalculationResolutionContext const&) const
-{
-    switch (m_constant) {
-    case ConstantType::E:
-        return { AK::E<double>, CSSNumericType {} };
-    case ConstantType::Pi:
-        return { AK::Pi<double>, CSSNumericType {} };
-    case ConstantType::Infinity:
-        return { AK::Infinity<double>, CSSNumericType {} };
-    case ConstantType::MinusInfinity:
-        return { -AK::Infinity<double>, CSSNumericType {} };
-    case ConstantType::NaN:
-        return { AK::NaN<double>, CSSNumericType {} };
-    }
-
-    VERIFY_NOT_REACHED();
-}
-
-void ConstantCalculationNode::dump(StringBuilder& builder, int indent) const
-{
-    builder.appendff("{: >{}}CONSTANT: {}\n", "", indent, to_string());
-}
-
-bool ConstantCalculationNode::equals(CalculationNode const& other) const
-{
-    if (this == &other)
-        return true;
-    if (type() != other.type())
-        return false;
-    return m_constant == static_cast<ConstantCalculationNode const&>(other).m_constant;
 }
 
 NonnullRefPtr<SinCalculationNode> SinCalculationNode::create(NonnullRefPtr<CalculationNode> value)
@@ -1194,15 +1433,6 @@ SinCalculationNode::SinCalculationNode(NonnullRefPtr<CalculationNode> value)
 }
 
 SinCalculationNode::~SinCalculationNode() = default;
-
-String SinCalculationNode::to_string() const
-{
-    StringBuilder builder;
-    builder.append("sin("sv);
-    builder.append(m_value->to_string());
-    builder.append(")"sv);
-    return MUST(builder.to_string());
-}
 
 bool SinCalculationNode::contains_percentage() const
 {
@@ -1270,7 +1500,8 @@ Optional<CalculatedStyleValue::CalculationResult> SinCalculationNode::run_operat
 
 void SinCalculationNode::dump(StringBuilder& builder, int indent) const
 {
-    builder.appendff("{: >{}}SIN: {}\n", "", indent, to_string());
+    builder.appendff("{: >{}}SIN:\n", "", indent);
+    m_value->dump(builder, indent + 2);
 }
 
 bool SinCalculationNode::equals(CalculationNode const& other) const
@@ -1296,15 +1527,6 @@ CosCalculationNode::CosCalculationNode(NonnullRefPtr<CalculationNode> value)
 }
 
 CosCalculationNode::~CosCalculationNode() = default;
-
-String CosCalculationNode::to_string() const
-{
-    StringBuilder builder;
-    builder.append("cos("sv);
-    builder.append(m_value->to_string());
-    builder.append(")"sv);
-    return MUST(builder.to_string());
-}
 
 bool CosCalculationNode::contains_percentage() const
 {
@@ -1333,7 +1555,8 @@ Optional<CalculatedStyleValue::CalculationResult> CosCalculationNode::run_operat
 
 void CosCalculationNode::dump(StringBuilder& builder, int indent) const
 {
-    builder.appendff("{: >{}}COS: {}\n", "", indent, to_string());
+    builder.appendff("{: >{}}COS:\n", "", indent);
+    m_value->dump(builder, indent + 2);
 }
 
 bool CosCalculationNode::equals(CalculationNode const& other) const
@@ -1359,15 +1582,6 @@ TanCalculationNode::TanCalculationNode(NonnullRefPtr<CalculationNode> value)
 }
 
 TanCalculationNode::~TanCalculationNode() = default;
-
-String TanCalculationNode::to_string() const
-{
-    StringBuilder builder;
-    builder.append("tan("sv);
-    builder.append(m_value->to_string());
-    builder.append(")"sv);
-    return MUST(builder.to_string());
-}
 
 bool TanCalculationNode::contains_percentage() const
 {
@@ -1396,7 +1610,8 @@ Optional<CalculatedStyleValue::CalculationResult> TanCalculationNode::run_operat
 
 void TanCalculationNode::dump(StringBuilder& builder, int indent) const
 {
-    builder.appendff("{: >{}}TAN: {}\n", "", indent, to_string());
+    builder.appendff("{: >{}}TAN:\n", "", indent);
+    m_value->dump(builder, indent + 2);
 }
 
 bool TanCalculationNode::equals(CalculationNode const& other) const
@@ -1422,15 +1637,6 @@ AsinCalculationNode::AsinCalculationNode(NonnullRefPtr<CalculationNode> value)
 }
 
 AsinCalculationNode::~AsinCalculationNode() = default;
-
-String AsinCalculationNode::to_string() const
-{
-    StringBuilder builder;
-    builder.append("asin("sv);
-    builder.append(m_value->to_string());
-    builder.append(")"sv);
-    return MUST(builder.to_string());
-}
 
 bool AsinCalculationNode::contains_percentage() const
 {
@@ -1501,7 +1707,8 @@ Optional<CalculatedStyleValue::CalculationResult> AsinCalculationNode::run_opera
 
 void AsinCalculationNode::dump(StringBuilder& builder, int indent) const
 {
-    builder.appendff("{: >{}}ASIN: {}\n", "", indent, to_string());
+    builder.appendff("{: >{}}ASIN:\n", "", indent);
+    m_value->dump(builder, indent + 2);
 }
 
 bool AsinCalculationNode::equals(CalculationNode const& other) const
@@ -1528,15 +1735,6 @@ AcosCalculationNode::AcosCalculationNode(NonnullRefPtr<CalculationNode> value)
 
 AcosCalculationNode::~AcosCalculationNode() = default;
 
-String AcosCalculationNode::to_string() const
-{
-    StringBuilder builder;
-    builder.append("acos("sv);
-    builder.append(m_value->to_string());
-    builder.append(")"sv);
-    return MUST(builder.to_string());
-}
-
 bool AcosCalculationNode::contains_percentage() const
 {
     return m_value->contains_percentage();
@@ -1562,7 +1760,8 @@ Optional<CalculatedStyleValue::CalculationResult> AcosCalculationNode::run_opera
 
 void AcosCalculationNode::dump(StringBuilder& builder, int indent) const
 {
-    builder.appendff("{: >{}}ACOS: {}\n", "", indent, to_string());
+    builder.appendff("{: >{}}ACOS:\n", "", indent);
+    m_value->dump(builder, indent + 2);
 }
 
 bool AcosCalculationNode::equals(CalculationNode const& other) const
@@ -1589,15 +1788,6 @@ AtanCalculationNode::AtanCalculationNode(NonnullRefPtr<CalculationNode> value)
 
 AtanCalculationNode::~AtanCalculationNode() = default;
 
-String AtanCalculationNode::to_string() const
-{
-    StringBuilder builder;
-    builder.append("atan("sv);
-    builder.append(m_value->to_string());
-    builder.append(")"sv);
-    return MUST(builder.to_string());
-}
-
 bool AtanCalculationNode::contains_percentage() const
 {
     return m_value->contains_percentage();
@@ -1623,7 +1813,8 @@ Optional<CalculatedStyleValue::CalculationResult> AtanCalculationNode::run_opera
 
 void AtanCalculationNode::dump(StringBuilder& builder, int indent) const
 {
-    builder.appendff("{: >{}}ATAN: {}\n", "", indent, to_string());
+    builder.appendff("{: >{}}ATAN:\n", "", indent);
+    m_value->dump(builder, indent + 2);
 }
 
 bool AtanCalculationNode::equals(CalculationNode const& other) const
@@ -1650,17 +1841,6 @@ Atan2CalculationNode::Atan2CalculationNode(NonnullRefPtr<CalculationNode> y, Non
 }
 
 Atan2CalculationNode::~Atan2CalculationNode() = default;
-
-String Atan2CalculationNode::to_string() const
-{
-    StringBuilder builder;
-    builder.append("atan2("sv);
-    builder.append(m_y->to_string());
-    builder.append(", "sv);
-    builder.append(m_x->to_string());
-    builder.append(")"sv);
-    return MUST(builder.to_string());
-}
 
 bool Atan2CalculationNode::contains_percentage() const
 {
@@ -1710,7 +1890,9 @@ Optional<CalculatedStyleValue::CalculationResult> Atan2CalculationNode::run_oper
 
 void Atan2CalculationNode::dump(StringBuilder& builder, int indent) const
 {
-    builder.appendff("{: >{}}ATAN2: {}\n", "", indent, to_string());
+    builder.appendff("{: >{}}ATAN2:\n", "", indent);
+    m_x->dump(builder, indent + 2);
+    m_y->dump(builder, indent + 2);
 }
 
 bool Atan2CalculationNode::equals(CalculationNode const& other) const
@@ -1738,17 +1920,6 @@ PowCalculationNode::PowCalculationNode(NonnullRefPtr<CalculationNode> x, Nonnull
 }
 
 PowCalculationNode::~PowCalculationNode() = default;
-
-String PowCalculationNode::to_string() const
-{
-    StringBuilder builder;
-    builder.append("pow("sv);
-    builder.append(m_x->to_string());
-    builder.append(", "sv);
-    builder.append(m_y->to_string());
-    builder.append(")"sv);
-    return MUST(builder.to_string());
-}
 
 CalculatedStyleValue::CalculationResult PowCalculationNode::resolve(CalculationResolutionContext const& context) const
 {
@@ -1783,7 +1954,9 @@ Optional<CalculatedStyleValue::CalculationResult> PowCalculationNode::run_operat
 
 void PowCalculationNode::dump(StringBuilder& builder, int indent) const
 {
-    builder.appendff("{: >{}}POW: {}\n", "", indent, to_string());
+    builder.appendff("{: >{}}POW:\n", "", indent);
+    m_x->dump(builder, indent + 2);
+    m_y->dump(builder, indent + 2);
 }
 
 bool PowCalculationNode::equals(CalculationNode const& other) const
@@ -1810,15 +1983,6 @@ SqrtCalculationNode::SqrtCalculationNode(NonnullRefPtr<CalculationNode> value)
 }
 
 SqrtCalculationNode::~SqrtCalculationNode() = default;
-
-String SqrtCalculationNode::to_string() const
-{
-    StringBuilder builder;
-    builder.append("sqrt("sv);
-    builder.append(m_value->to_string());
-    builder.append(")"sv);
-    return MUST(builder.to_string());
-}
 
 CalculatedStyleValue::CalculationResult SqrtCalculationNode::resolve(CalculationResolutionContext const& context) const
 {
@@ -1852,7 +2016,8 @@ Optional<CalculatedStyleValue::CalculationResult> SqrtCalculationNode::run_opera
 
 void SqrtCalculationNode::dump(StringBuilder& builder, int indent) const
 {
-    builder.appendff("{: >{}}SQRT: {}\n", "", indent, to_string());
+    builder.appendff("{: >{}}SQRT:\n", "", indent);
+    m_value->dump(builder, indent + 2);
 }
 
 bool SqrtCalculationNode::equals(CalculationNode const& other) const
@@ -1879,19 +2044,6 @@ HypotCalculationNode::HypotCalculationNode(Vector<NonnullRefPtr<CalculationNode>
 }
 
 HypotCalculationNode::~HypotCalculationNode() = default;
-
-String HypotCalculationNode::to_string() const
-{
-    StringBuilder builder;
-    builder.append("hypot("sv);
-    for (size_t i = 0; i < m_values.size(); ++i) {
-        if (i != 0)
-            builder.append(", "sv);
-        builder.append(m_values[i]->to_string());
-    }
-    builder.append(")"sv);
-    return MUST(builder.to_string());
-}
 
 bool HypotCalculationNode::contains_percentage() const
 {
@@ -1993,17 +2145,6 @@ LogCalculationNode::LogCalculationNode(NonnullRefPtr<CalculationNode> x, Nonnull
 
 LogCalculationNode::~LogCalculationNode() = default;
 
-String LogCalculationNode::to_string() const
-{
-    StringBuilder builder;
-    builder.append("log("sv);
-    builder.append(m_x->to_string());
-    builder.append(", "sv);
-    builder.append(m_y->to_string());
-    builder.append(")"sv);
-    return MUST(builder.to_string());
-}
-
 CalculatedStyleValue::CalculationResult LogCalculationNode::resolve(CalculationResolutionContext const& context) const
 {
     auto node_a = m_x->resolve(context);
@@ -2038,7 +2179,9 @@ Optional<CalculatedStyleValue::CalculationResult> LogCalculationNode::run_operat
 
 void LogCalculationNode::dump(StringBuilder& builder, int indent) const
 {
-    builder.appendff("{: >{}}LOG: {}\n", "", indent, to_string());
+    builder.appendff("{: >{}}LOG:\n", "", indent);
+    m_x->dump(builder, indent + 2);
+    m_y->dump(builder, indent + 2);
 }
 
 bool LogCalculationNode::equals(CalculationNode const& other) const
@@ -2065,15 +2208,6 @@ ExpCalculationNode::ExpCalculationNode(NonnullRefPtr<CalculationNode> value)
 }
 
 ExpCalculationNode::~ExpCalculationNode() = default;
-
-String ExpCalculationNode::to_string() const
-{
-    StringBuilder builder;
-    builder.append("exp("sv);
-    builder.append(m_value->to_string());
-    builder.append(")"sv);
-    return MUST(builder.to_string());
-}
 
 CalculatedStyleValue::CalculationResult ExpCalculationNode::resolve(CalculationResolutionContext const& context) const
 {
@@ -2106,7 +2240,8 @@ Optional<CalculatedStyleValue::CalculationResult> ExpCalculationNode::run_operat
 
 void ExpCalculationNode::dump(StringBuilder& builder, int indent) const
 {
-    builder.appendff("{: >{}}EXP: {}\n", "", indent, to_string());
+    builder.appendff("{: >{}}EXP:\n", "", indent);
+    m_value->dump(builder, indent + 2);
 }
 
 bool ExpCalculationNode::equals(CalculationNode const& other) const
@@ -2135,19 +2270,6 @@ RoundCalculationNode::RoundCalculationNode(RoundingStrategy mode, NonnullRefPtr<
 }
 
 RoundCalculationNode::~RoundCalculationNode() = default;
-
-String RoundCalculationNode::to_string() const
-{
-    StringBuilder builder;
-    builder.append("round("sv);
-    builder.append(CSS::to_string(m_strategy));
-    builder.append(", "sv);
-    builder.append(m_x->to_string());
-    builder.append(", "sv);
-    builder.append(m_y->to_string());
-    builder.append(")"sv);
-    return MUST(builder.to_string());
-}
 
 bool RoundCalculationNode::contains_percentage() const
 {
@@ -2276,7 +2398,9 @@ Optional<CalculatedStyleValue::CalculationResult> RoundCalculationNode::run_oper
 
 void RoundCalculationNode::dump(StringBuilder& builder, int indent) const
 {
-    builder.appendff("{: >{}}ROUND: {}\n", "", indent, to_string());
+    builder.appendff("{: >{}}ROUND: {}\n", "", indent, CSS::to_string(m_strategy));
+    m_x->dump(builder, indent + 2);
+    m_y->dump(builder, indent + 2);
 }
 
 bool RoundCalculationNode::equals(CalculationNode const& other) const
@@ -2306,17 +2430,6 @@ ModCalculationNode::ModCalculationNode(NonnullRefPtr<CalculationNode> x, Nonnull
 }
 
 ModCalculationNode::~ModCalculationNode() = default;
-
-String ModCalculationNode::to_string() const
-{
-    StringBuilder builder;
-    builder.append("mod("sv);
-    builder.append(m_x->to_string());
-    builder.append(", "sv);
-    builder.append(m_y->to_string());
-    builder.append(")"sv);
-    return MUST(builder.to_string());
-}
 
 bool ModCalculationNode::contains_percentage() const
 {
@@ -2389,7 +2502,9 @@ Optional<CalculatedStyleValue::CalculationResult> ModCalculationNode::run_operat
 
 void ModCalculationNode::dump(StringBuilder& builder, int indent) const
 {
-    builder.appendff("{: >{}}MOD: {}\n", "", indent, to_string());
+    builder.appendff("{: >{}}MOD:\n", "", indent);
+    m_x->dump(builder, indent + 2);
+    m_y->dump(builder, indent + 2);
 }
 
 bool ModCalculationNode::equals(CalculationNode const& other) const
@@ -2419,17 +2534,6 @@ RemCalculationNode::RemCalculationNode(NonnullRefPtr<CalculationNode> x, Nonnull
 
 RemCalculationNode::~RemCalculationNode() = default;
 
-String RemCalculationNode::to_string() const
-{
-    StringBuilder builder;
-    builder.append("rem("sv);
-    builder.append(m_x->to_string());
-    builder.append(", "sv);
-    builder.append(m_y->to_string());
-    builder.append(")"sv);
-    return MUST(builder.to_string());
-}
-
 bool RemCalculationNode::contains_percentage() const
 {
     return m_x->contains_percentage() || m_y->contains_percentage();
@@ -2456,7 +2560,9 @@ Optional<CalculatedStyleValue::CalculationResult> RemCalculationNode::run_operat
 
 void RemCalculationNode::dump(StringBuilder& builder, int indent) const
 {
-    builder.appendff("{: >{}}REM: {}\n", "", indent, to_string());
+    builder.appendff("{: >{}}REM:\n", "", indent);
+    m_x->dump(builder, indent + 2);
+    m_y->dump(builder, indent + 2);
 }
 
 bool RemCalculationNode::equals(CalculationNode const& other) const
@@ -2538,10 +2644,9 @@ void CalculatedStyleValue::CalculationResult::invert()
         m_type = m_type->inverted();
 }
 
-String CalculatedStyleValue::to_string(SerializationMode) const
+String CalculatedStyleValue::to_string(SerializationMode serialization_mode) const
 {
-    // FIXME: Implement this according to https://www.w3.org/TR/css-values-4/#calc-serialize once that stabilizes.
-    return MUST(String::formatted("calc({})", m_calculation->to_string()));
+    return serialize_a_math_function(m_calculation, m_context, serialization_mode);
 }
 
 bool CalculatedStyleValue::equals(CSSStyleValue const& other) const
@@ -2795,22 +2900,11 @@ NonnullRefPtr<CalculationNode> simplify_a_calculation_tree(CalculationNode const
         }
 
         // 3. If root is a <calc-keyword> that can be resolved, return what it resolves to, simplified.
-        // NOTE: This is handled below.
+        // NOTE: We already resolve our `<calc-keyword>`s at parse-time.
+        // FIXME: Revisit this once we support any keywords that need resolving later.
 
         // 4. Otherwise, return root.
         return root;
-    }
-
-    // AD-HOC: Step 1.3 is done here as we have a separate node type for them.
-    if (root->type() == CalculationNode::Type::Constant) {
-        auto const& root_constant = as<ConstantCalculationNode>(*root);
-
-        // 3. If root is a <calc-keyword> that can be resolved, return what it resolves to, simplified.
-        // FIXME: At the moment these are all constant numbers. Revisit this once that's not the case.
-        //        (Notably, relative-color syntax allows some other keywords that are relative to the color.)
-        auto resolved = root_constant.resolve(resolution_context);
-        VERIFY(resolved.type()->matches_number({}));
-        return NumericCalculationNode::create(Number { Number::Type::Number, resolved.value() }, context);
     }
 
     // 2. If root is any other leaf node (not an operator node):
@@ -2896,19 +2990,8 @@ NonnullRefPtr<CalculationNode> simplify_a_calculation_tree(CalculationNode const
         auto const& root_negate = as<NegateCalculationNode>(*root);
         auto const& child = root_negate.child();
         // 1. If root’s child is a numeric value, return an equivalent numeric value, but with the value negated (0 - value).
-        if (child.type() == CalculationNode::Type::Numeric) {
-            auto const& numeric_child = as<NumericCalculationNode>(child);
-            return numeric_child.value().visit(
-                [&](Percentage const& percentage) {
-                    return NumericCalculationNode::create(Percentage(-percentage.value()), context);
-                },
-                [&](Number const& number) {
-                    return NumericCalculationNode::create(Number(number.type(), -number.value()), context);
-                },
-                [&]<typename T>(T const& value) {
-                    return NumericCalculationNode::create(T(-value.raw_value(), value.type()), context);
-                });
-        }
+        if (child.type() == CalculationNode::Type::Numeric)
+            return as<NumericCalculationNode>(child).negated(context);
 
         // 2. If root’s child is a Negate node, return the child’s child.
         if (child.type() == CalculationNode::Type::Negate)

@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2018-2020, Andreas Kling <andreas@ladybird.org>
  * Copyright (c) 2021, Tobias Christiansen <tobyase@serenityos.org>
- * Copyright (c) 2021-2023, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2021-2025, Sam Atkins <sam@ladybird.org>
  * Copyright (c) 2022-2023, MacDue <macdue@dueutil.tech>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -10,6 +10,7 @@
 #include "RadialGradientStyleValue.h"
 #include <LibWeb/CSS/StyleValues/PositionStyleValue.h>
 #include <LibWeb/Layout/Node.h>
+#include <LibWeb/Painting/DisplayListRecorder.h>
 
 namespace Web::CSS {
 
@@ -200,18 +201,24 @@ CSSPixelSize RadialGradientStyleValue::resolve_size(Layout::Node const& node, CS
     return resolved_size;
 }
 
-void RadialGradientStyleValue::resolve_for_size(Layout::NodeWithStyleAndBoxModelMetrics const& node, CSSPixelSize paint_size) const
+void RadialGradientStyleValue::resolve_for_size(Layout::NodeWithStyle const& node, CSSPixelSize paint_size) const
 {
     CSSPixelRect gradient_box { { 0, 0 }, paint_size };
     auto center = m_properties.position->resolved(node, gradient_box);
     auto gradient_size = resolve_size(node, center, gradient_box);
-    if (m_resolved.has_value() && m_resolved->gradient_size == gradient_size)
-        return;
-    m_resolved = ResolvedData {
-        Painting::resolve_radial_gradient_data(node, gradient_size, *this),
-        gradient_size,
-        center,
+
+    ResolvedDataCacheKey cache_key {
+        .length_resolution_context = Length::ResolutionContext::for_layout_node(node),
+        .size = paint_size,
     };
+    if (m_resolved_data_cache_key != cache_key) {
+        m_resolved_data_cache_key = move(cache_key);
+        m_resolved = ResolvedData {
+            Painting::resolve_radial_gradient_data(node, gradient_size, *this),
+            gradient_size,
+            center,
+        };
+    }
 }
 
 bool RadialGradientStyleValue::equals(CSSStyleValue const& other) const

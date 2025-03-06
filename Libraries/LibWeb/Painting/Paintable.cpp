@@ -1,11 +1,11 @@
 /*
  * Copyright (c) 2022-2023, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2025, Sam Atkins <sam@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include <LibWeb/DOM/Document.h>
-#include <LibWeb/Layout/BlockContainer.h>
 #include <LibWeb/Painting/Paintable.h>
 #include <LibWeb/Painting/PaintableBox.h>
 #include <LibWeb/Painting/StackingContext.h>
@@ -81,6 +81,17 @@ PaintableBox* Paintable::containing_block() const
 CSS::ImmutableComputedValues const& Paintable::computed_values() const
 {
     return m_layout_node->computed_values();
+}
+
+bool Paintable::visible_for_hit_testing() const
+{
+    // https://html.spec.whatwg.org/multipage/interaction.html#inert-subtrees
+    // When a node is inert:
+    // - Hit-testing must act as if the 'pointer-events' CSS property were set to 'none'.
+    if (auto dom_node = this->dom_node(); dom_node && dom_node->is_inert())
+        return false;
+
+    return computed_values().pointer_events() != CSS::PointerEvents::None;
 }
 
 void Paintable::set_dom_node(GC::Ptr<DOM::Node> dom_node)

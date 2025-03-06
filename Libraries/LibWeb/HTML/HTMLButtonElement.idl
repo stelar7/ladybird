@@ -1,6 +1,7 @@
 #import <HTML/HTMLElement.idl>
 #import <HTML/HTMLFormElement.idl>
 #import <HTML/PopoverInvokerElement.idl>
+#import <HTML/ValidityState.idl>
 
 [MissingValueDefault=submit, InvalidValueDefault=submit]
 enum ButtonTypeState {
@@ -22,15 +23,15 @@ interface HTMLButtonElement : HTMLElement {
     [CEReactions, Reflect=formnovalidate] attribute boolean formNoValidate;
     [CEReactions, Reflect=formtarget] attribute DOMString formTarget;
     [CEReactions, Reflect] attribute DOMString name;
-    [CEReactions, Reflect, Enumerated=ButtonTypeState] attribute DOMString type;
+    [CEReactions, ImplementedAs=type_for_bindings, Enumerated=ButtonTypeState] attribute DOMString type;
     [CEReactions, Reflect] attribute DOMString value;
 
-    [FIXME] readonly attribute boolean willValidate;
-    [FIXME] readonly attribute ValidityState validity;
+    readonly attribute boolean willValidate;
+    readonly attribute ValidityState validity;
     [FIXME] readonly attribute DOMString validationMessage;
     [FIXME] boolean checkValidity();
     [FIXME] boolean reportValidity();
-    [FIXME] undefined setCustomValidity(DOMString error);
+    undefined setCustomValidity(DOMString error);
 
     readonly attribute NodeList labels;
 };

@@ -46,16 +46,16 @@ void WebSocketImplSerenity::connect(ConnectionInfo const& connection_info)
         auto host = connection_info.url().serialized_host().to_byte_string();
         if (connection_info.is_secure()) {
             TLS::Options options;
-            options.set_alert_handler([this](auto) {
-                on_connection_error();
-            });
+            options.set_root_certificates_path(connection_info.root_certificates_path());
+            options.set_blocking(false);
 
             return TRY(Core::BufferedSocket<TLS::TLSv12>::create(
                 TRY(TLS::TLSv12::connect(host, connection_info.url().port_or_default(), move(options)))));
         }
 
-        return TRY(Core::BufferedTCPSocket::create(
-            TRY(Core::TCPSocket::connect(host, connection_info.url().port_or_default()))));
+        auto tcp_socket = TRY(Core::TCPSocket::connect(host, connection_info.url().port_or_default()));
+        TRY(tcp_socket->set_blocking(false));
+        return TRY(Core::BufferedTCPSocket::create(move(tcp_socket)));
     }();
 
     if (socket_result.is_error()) {
@@ -66,7 +66,6 @@ void WebSocketImplSerenity::connect(ConnectionInfo const& connection_info)
     }
 
     m_socket = socket_result.release_value();
-
     m_socket->on_ready_to_read = [this] {
         on_ready_to_read();
     };

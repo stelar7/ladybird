@@ -12,8 +12,11 @@
 #include <LibGC/DeferGC.h>
 #include <LibJS/Runtime/FunctionObject.h>
 #include <LibRegex/Regex.h>
+#include <LibWeb/Animations/Animation.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/Bindings/NodePrototype.h>
+#include <LibWeb/CSS/ComputedProperties.h>
+#include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/DOM/Attr.h>
 #include <LibWeb/DOM/CDATASection.h>
 #include <LibWeb/DOM/Comment.h>
@@ -48,6 +51,7 @@
 #include <LibWeb/HTML/Navigable.h>
 #include <LibWeb/HTML/NavigableContainer.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
+#include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
 #include <LibWeb/Infra/CharacterTypes.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Layout/TextNode.h>
@@ -397,34 +401,6 @@ GC::Ptr<HTML::Navigable> Node::navigable() const
     }
 }
 
-void Node::invalidate_ancestors_affected_by_has_in_subject_position()
-{
-    // This call only takes care of invalidating `:has()` in subject position (e.g., ".a:has(.b)").
-    // Non-subject position (e.g., ".a:has(.b) + .c") is still handled by another call that uses
-    // invalidation sets and requires whole document traversal.
-    // Here we assume that :has() invalidation scope is limited to ancestors and sibling ancestors.
-    for (auto* ancestor = this; ancestor; ancestor = ancestor->parent_or_shadow_host()) {
-        if (!ancestor->is_element())
-            continue;
-        auto& element = static_cast<Element&>(*ancestor);
-        if (element.affected_by_has_pseudo_class_in_subject_position()) {
-            element.set_needs_style_update(true);
-        }
-
-        auto* parent = ancestor->parent_or_shadow_host();
-        if (!parent)
-            return;
-
-        // If any ancestor's sibling was tested against selectors like ".a:has(+ .b)" or ".a:has(~ .b)"
-        // its style might be affected by the change in descendant node.
-        parent->for_each_child_of_type<Element>([&](auto& element) {
-            if (element.affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator())
-                element.set_needs_style_update(true);
-            return IterationDecision::Continue;
-        });
-    }
-}
-
 void Node::invalidate_style(StyleInvalidationReason reason)
 {
     if (is_character_data())
@@ -436,7 +412,7 @@ void Node::invalidate_style(StyleInvalidationReason reason)
                 document().schedule_ancestors_style_invalidation_due_to_presence_of_has(*parent);
                 parent->for_each_child_of_type<Element>([&](auto& element) {
                     if (element.affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator())
-                        element.set_needs_style_update(true);
+                        element.invalidate_style_if_affected_by_has();
                     return IterationDecision::Continue;
                 });
             }
@@ -494,7 +470,7 @@ void Node::invalidate_style(StyleInvalidationReason reason)
     document().schedule_style_update();
 }
 
-void Node::invalidate_style(StyleInvalidationReason, Vector<CSS::InvalidationSet::Property> const& properties, StyleInvalidationOptions options)
+void Node::invalidate_style(StyleInvalidationReason reason, Vector<CSS::InvalidationSet::Property> const& properties, StyleInvalidationOptions options)
 {
     if (is_character_data())
         return;
@@ -513,6 +489,11 @@ void Node::invalidate_style(StyleInvalidationReason, Vector<CSS::InvalidationSet
     if (invalidation_set.is_empty())
         return;
 
+    if (invalidation_set.needs_invalidate_whole_subtree()) {
+        invalidate_style(reason);
+        return;
+    }
+
     if (invalidation_set.needs_invalidate_self()) {
         set_needs_style_update(true);
     }
@@ -524,8 +505,10 @@ void Node::invalidate_style(StyleInvalidationReason, Vector<CSS::InvalidationSet
             auto& element = static_cast<Element&>(node);
             bool needs_style_recalculation = false;
             if (invalidation_set.needs_invalidate_whole_subtree()) {
-                needs_style_recalculation = true;
-            } else if (element.includes_properties_from_invalidation_set(invalidation_set)) {
+                VERIFY_NOT_REACHED();
+            }
+
+            if (element.includes_properties_from_invalidation_set(invalidation_set)) {
                 needs_style_recalculation = true;
             } else if (options.invalidate_elements_that_use_css_custom_properties && element.style_uses_css_custom_properties()) {
                 needs_style_recalculation = true;
@@ -1308,6 +1291,11 @@ void Node::set_document(Badge<Document>, Document& document)
     set_document(document);
 }
 
+void Node::set_document(Badge<NamedNodeMap>, Document& document)
+{
+    set_document(document);
+}
+
 void Node::set_document(Document& document)
 {
     if (m_document.ptr() == &document)
@@ -1337,6 +1325,12 @@ bool Node::is_editable() const
 
     // its parent is an editing host or editable;
     if (!parent() || !parent()->is_editable_or_editing_host())
+        return false;
+
+    // https://html.spec.whatwg.org/multipage/interaction.html#inert-subtrees
+    // When a node is inert:
+    // - If it is editable, the node behaves as if it were non-editable.
+    if (is_inert())
         return false;
 
     // and either it is an HTML element,
@@ -1434,12 +1428,16 @@ void Node::post_connection()
 void Node::inserted()
 {
     set_needs_style_update(true);
+
+    play_or_cancel_animations_after_display_property_change();
 }
 
 void Node::removed_from(Node*, Node&)
 {
     m_layout_node = nullptr;
     m_paintable = nullptr;
+
+    play_or_cancel_animations_after_display_property_change();
 }
 
 ParentNode* Node::parent_or_shadow_host()
@@ -1824,7 +1822,7 @@ void Node::string_replace_all(String const& string)
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#fragment-serializing-algorithm-steps
-WebIDL::ExceptionOr<String> Node::serialize_fragment(DOMParsing::RequireWellFormed require_well_formed, FragmentSerializationMode fragment_serialization_mode) const
+WebIDL::ExceptionOr<String> Node::serialize_fragment(HTML::RequireWellFormed require_well_formed, FragmentSerializationMode fragment_serialization_mode) const
 {
     // 1. Let context document be the value of node's node document.
     auto const& context_document = document();
@@ -1839,12 +1837,12 @@ WebIDL::ExceptionOr<String> Node::serialize_fragment(DOMParsing::RequireWellForm
     if (fragment_serialization_mode == FragmentSerializationMode::Inner) {
         StringBuilder markup;
         for (auto* child = first_child(); child; child = child->next_sibling()) {
-            auto child_markup = TRY(DOMParsing::serialize_node_to_xml_string(*child, require_well_formed));
+            auto child_markup = TRY(HTML::serialize_node_to_xml_string(*child, require_well_formed));
             markup.append(child_markup.bytes_as_string_view());
         }
         return MUST(markup.to_string());
     }
-    return DOMParsing::serialize_node_to_xml_string(*this, require_well_formed);
+    return HTML::serialize_node_to_xml_string(*this, require_well_formed);
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#unsafely-set-html
@@ -2136,6 +2134,17 @@ bool Node::is_default_namespace(Optional<String> namespace_) const
 
     // 3. Return true if defaultNamespace is the same as namespace; otherwise false.
     return default_namespace == namespace_;
+}
+
+bool Node::is_inert() const
+{
+    if (auto* html_element = as_if<HTML::HTMLElement>(*this))
+        return html_element->is_inert();
+
+    if (auto* enclosing_html_element = this->enclosing_html_element())
+        return enclosing_html_element->is_inert();
+
+    return false;
 }
 
 // https://dom.spec.whatwg.org/#in-a-document-tree
@@ -2866,6 +2875,53 @@ void Node::add_registered_observer(RegisteredObserver& registered_observer)
     if (!m_registered_observer_list)
         m_registered_observer_list = make<Vector<GC::Ref<RegisteredObserver>>>();
     m_registered_observer_list->append(registered_observer);
+}
+
+bool Node::has_inclusive_ancestor_with_display_none()
+{
+    for (auto* ancestor = this; ancestor; ancestor = ancestor->parent_or_shadow_host()) {
+        if (!ancestor->is_element())
+            continue;
+        auto const& ancestor_element = static_cast<Element&>(*ancestor);
+        if (ancestor_element.computed_properties() && ancestor_element.computed_properties()->display().is_none()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void Node::play_or_cancel_animations_after_display_property_change()
+{
+    // https://www.w3.org/TR/css-animations-1/#animations
+    // Setting the display property to none will terminate any running animation applied to the element and its descendants.
+    // If an element has a display of none, updating display to a value other than none will start all animations applied to
+    // the element by the animation-name property, as well as all animations applied to descendants with display other than none.
+
+    auto has_display_none_inclusive_ancestor = this->has_inclusive_ancestor_with_display_none();
+
+    auto play_or_cancel_depending_on_display = [&](Animations::Animation& animation) {
+        if (has_display_none_inclusive_ancestor) {
+            animation.cancel();
+        } else {
+            HTML::TemporaryExecutionContext context(realm());
+            animation.play().release_value_but_fixme_should_propagate_errors();
+        }
+    };
+
+    for_each_shadow_including_inclusive_descendant([&](auto& node) {
+        if (!node.is_element())
+            return TraversalDecision::Continue;
+
+        auto const& element = static_cast<Element const&>(node);
+        if (auto animation = element.cached_animation_name_animation({}))
+            play_or_cancel_depending_on_display(*animation);
+        for (auto i = 0; i < to_underlying(CSS::Selector::PseudoElement::Type::KnownPseudoElementCount); i++) {
+            auto pseudo_element = static_cast<CSS::Selector::PseudoElement::Type>(i);
+            if (auto animation = element.cached_animation_name_animation(pseudo_element))
+                play_or_cancel_depending_on_display(*animation);
+        }
+        return TraversalDecision::Continue;
+    });
 }
 
 }

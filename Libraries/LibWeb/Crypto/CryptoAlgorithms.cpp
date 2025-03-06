@@ -3,7 +3,7 @@
  * Copyright (c) 2024, stelar7 <dudedbz@gmail.com>
  * Copyright (c) 2024, Jelle Raaijmakers <jelle@ladybird.org>
  * Copyright (c) 2024, Andreas Kling <andreas@ladybird.org>
- * Copyright (c) 2024, Altomani Gianluca <altomanigianluca@gmail.com>
+ * Copyright (c) 2024-2025, Altomani Gianluca <altomanigianluca@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -17,14 +17,10 @@
 #include <LibCrypto/Authentication/HMAC.h>
 #include <LibCrypto/Certificate/Certificate.h>
 #include <LibCrypto/Cipher/AES.h>
-#include <LibCrypto/Curves/Ed25519.h>
-#include <LibCrypto/Curves/Ed448.h>
+#include <LibCrypto/Curves/EdwardsCurve.h>
 #include <LibCrypto/Curves/SECPxxxr1.h>
-#include <LibCrypto/Curves/X25519.h>
-#include <LibCrypto/Curves/X448.h>
 #include <LibCrypto/Hash/HKDF.h>
 #include <LibCrypto/Hash/HashManager.h>
-#include <LibCrypto/Hash/MGF.h>
 #include <LibCrypto/Hash/PBKDF2.h>
 #include <LibCrypto/Hash/SHA1.h>
 #include <LibCrypto/Hash/SHA2.h>
@@ -245,7 +241,7 @@ static WebIDL::ExceptionOr<::Crypto::PK::RSAPrivateKey<>> parse_jwk_rsa_private_
 
     // We know that if any of the extra parameters are provided, all of them must be
     if (!jwk.p.has_value())
-        return ::Crypto::PK::RSAPrivateKey<>(move(n), move(d), move(e), 0, 0);
+        return ::Crypto::PK::RSAPrivateKey<>(move(n), move(d), move(e));
 
     auto p = TRY(base64_url_uint_decode(realm, *jwk.p));
     auto q = TRY(base64_url_uint_decode(realm, *jwk.q));
@@ -2401,22 +2397,16 @@ WebIDL::ExceptionOr<GC::Ref<JS::ArrayBuffer>> AesCbc::encrypt(AlgorithmParams co
         return WebIDL::OperationError::create(m_realm, "IV to AES-CBC must be exactly 16 bytes"_string);
 
     // 2. Let paddedPlaintext be the result of adding padding octets to the contents of plaintext according to the procedure defined in Section 10.3 of [RFC2315], step 2, with a value of k of 16.
-    // Note: This is identical to RFC 5652 Cryptographic Message Syntax (CMS).
-    // We do this during encryption, which avoid reallocating a potentially-large buffer.
-    auto mode = ::Crypto::Cipher::PaddingMode::CMS;
-
     // 3. Let ciphertext be the result of performing the CBC Encryption operation described in Section 6.2 of [NIST-SP800-38A] using AES as the block cipher, the contents of the iv member of normalizedAlgorithm as the IV input parameter and paddedPlaintext as the input plaintext.
     auto key_bytes = key->handle().get<ByteBuffer>();
-    auto key_bits = key_bytes.size() * 8;
-    ::Crypto::Cipher::AESCipher::CBCMode cipher(key_bytes, key_bits, ::Crypto::Cipher::Intent::Encryption, mode);
-    auto iv = normalized_algorithm.iv;
-    auto ciphertext = TRY_OR_THROW_OOM(m_realm->vm(), cipher.create_aligned_buffer(plaintext.size() + 1));
-    auto ciphertext_view = ciphertext.bytes();
-    cipher.encrypt(plaintext, ciphertext_view, iv);
-    ciphertext.trim(ciphertext_view.size(), false);
+
+    ::Crypto::Cipher::AESCBCCipher cipher(key_bytes);
+    auto maybe_ciphertext = cipher.encrypt(plaintext, normalized_algorithm.iv);
+    if (maybe_ciphertext.is_error())
+        return WebIDL::OperationError::create(m_realm, "Failed to encrypt"_string);
 
     // 4. Return the result of creating an ArrayBuffer containing ciphertext.
-    return JS::ArrayBuffer::create(m_realm, move(ciphertext));
+    return JS::ArrayBuffer::create(m_realm, maybe_ciphertext.release_value());
 }
 
 WebIDL::ExceptionOr<GC::Ref<JS::ArrayBuffer>> AesCbc::decrypt(AlgorithmParams const& params, GC::Ref<CryptoKey> key, ByteBuffer const& ciphertext)
@@ -2433,29 +2423,16 @@ WebIDL::ExceptionOr<GC::Ref<JS::ArrayBuffer>> AesCbc::decrypt(AlgorithmParams co
         return WebIDL::OperationError::create(m_realm, "Ciphertext length must be a multiple of 16 bytes"_string);
 
     // 2. Let paddedPlaintext be the result of performing the CBC Decryption operation described in Section 6.2 of [NIST-SP800-38A] using AES as the block cipher, the contents of the iv member of normalizedAlgorithm as the IV input parameter and the contents of ciphertext as the input ciphertext.
-    auto mode = ::Crypto::Cipher::PaddingMode::CMS;
-    auto key_bytes = key->handle().get<ByteBuffer>();
-    auto key_bits = key_bytes.size() * 8;
-    ::Crypto::Cipher::AESCipher::CBCMode cipher(key_bytes, key_bits, ::Crypto::Cipher::Intent::Decryption, mode);
-    auto iv = normalized_algorithm.iv;
-    auto plaintext = TRY_OR_THROW_OOM(m_realm->vm(), cipher.create_aligned_buffer(ciphertext.size()));
-    auto plaintext_view = plaintext.bytes();
-    cipher.decrypt(ciphertext, plaintext_view, iv);
-    plaintext.trim(plaintext_view.size(), false);
-
     // 3. Let p be the value of the last octet of paddedPlaintext.
     // 4. If p is zero or greater than 16, or if any of the last p octets of paddedPlaintext have a value which is not p, then throw an OperationError.
     // 5. Let plaintext be the result of removing p octets from the end of paddedPlaintext.
-    // Note that LibCrypto already does the padding removal for us.
-    // In the case that any issues arise (e.g. inconsistent padding), the padding is instead not trimmed.
-    // This is *ONLY* meaningful for the specific case of PaddingMode::CMS, as this is the only padding mode that always appends a block.
-    if (plaintext.size() == ciphertext.size()) {
-        // Padding was not removed for an unknown reason. Apply Step 4:
-        return WebIDL::OperationError::create(m_realm, "Inconsistent padding"_string);
-    }
+    ::Crypto::Cipher::AESCBCCipher cipher(key->handle().get<ByteBuffer>());
+    auto maybe_plaintext = cipher.decrypt(ciphertext, normalized_algorithm.iv);
+    if (maybe_plaintext.is_error())
+        return WebIDL::OperationError::create(m_realm, "Failed to decrypt"_string);
 
     // 6. Return the result of creating an ArrayBuffer containing plaintext.
-    return JS::ArrayBuffer::create(m_realm, move(plaintext));
+    return JS::ArrayBuffer::create(m_realm, maybe_plaintext.release_value());
 }
 
 // https://w3c.github.io/webcrypto/#aes-cbc-operations
@@ -2963,17 +2940,13 @@ WebIDL::ExceptionOr<GC::Ref<JS::ArrayBuffer>> AesCtr::encrypt(AlgorithmParams co
     //    the contents of the counter member of normalizedAlgorithm as the initial value of the counter block,
     //    the length member of normalizedAlgorithm as the input parameter m to the standard counter block incrementing function defined in Appendix B.1 of [NIST-SP800-38A]
     //    and the contents of plaintext as the input plaintext.
-    auto& aes_algorithm = static_cast<AesKeyAlgorithm const&>(*key->algorithm());
-    auto key_length = aes_algorithm.length();
-    auto key_bytes = key->handle().get<ByteBuffer>();
-
-    ::Crypto::Cipher::AESCipher::CTRMode cipher(key_bytes, key_length, ::Crypto::Cipher::Intent::Encryption);
-    ByteBuffer ciphertext = TRY_OR_THROW_OOM(m_realm->vm(), ByteBuffer::create_zeroed(plaintext.size()));
-    Bytes ciphertext_span = ciphertext.bytes();
-    cipher.encrypt(plaintext, ciphertext_span, counter);
+    ::Crypto::Cipher::AESCTRCipher cipher(key->handle().get<ByteBuffer>());
+    auto maybe_ciphertext = cipher.encrypt(plaintext, counter);
+    if (maybe_ciphertext.is_error())
+        return WebIDL::OperationError::create(m_realm, "Encryption failed"_string);
 
     // 4. Return the result of creating an ArrayBuffer containing plaintext.
-    return JS::ArrayBuffer::create(m_realm, ciphertext);
+    return JS::ArrayBuffer::create(m_realm, maybe_ciphertext.release_value());
 }
 
 WebIDL::ExceptionOr<GC::Ref<JS::ArrayBuffer>> AesCtr::decrypt(AlgorithmParams const& params, GC::Ref<CryptoKey> key, ByteBuffer const& ciphertext)
@@ -2994,17 +2967,13 @@ WebIDL::ExceptionOr<GC::Ref<JS::ArrayBuffer>> AesCtr::decrypt(AlgorithmParams co
     //    the contents of the counter member of normalizedAlgorithm as the initial value of the counter block,
     //    the length member of normalizedAlgorithm as the input parameter m to the standard counter block incrementing function defined in Appendix B.1 of [NIST-SP800-38A]
     //    and the contents of ciphertext as the input ciphertext.
-    auto& aes_algorithm = static_cast<AesKeyAlgorithm const&>(*key->algorithm());
-    auto key_length = aes_algorithm.length();
-    auto key_bytes = key->handle().get<ByteBuffer>();
-
-    ::Crypto::Cipher::AESCipher::CTRMode cipher(key_bytes, key_length, ::Crypto::Cipher::Intent::Decryption);
-    ByteBuffer plaintext = TRY_OR_THROW_OOM(m_realm->vm(), ByteBuffer::create_zeroed(ciphertext.size()));
-    Bytes plaintext_span = plaintext.bytes();
-    cipher.decrypt(ciphertext, plaintext_span, counter);
+    ::Crypto::Cipher::AESCTRCipher cipher(key->handle().get<ByteBuffer>());
+    auto maybe_plaintext = cipher.decrypt(ciphertext, counter);
+    if (maybe_plaintext.is_error())
+        return WebIDL::OperationError::create(m_realm, "Decryption failed"_string);
 
     // 4. Return the result of creating an ArrayBuffer containing plaintext.
-    return JS::ArrayBuffer::create(m_realm, plaintext);
+    return JS::ArrayBuffer::create(m_realm, maybe_plaintext.release_value());
 }
 
 WebIDL::ExceptionOr<JS::Value> AesGcm::get_key_length(AlgorithmParams const& params)
@@ -3242,15 +3211,13 @@ WebIDL::ExceptionOr<GC::Ref<JS::ArrayBuffer>> AesGcm::encrypt(AlgorithmParams co
     //    the contents of additionalData as the A input parameter,
     //    tagLength as the t pre-requisite
     //    and the contents of plaintext as the input plaintext.
-    auto& aes_algorithm = static_cast<AesKeyAlgorithm const&>(*key->algorithm());
-    auto key_length = aes_algorithm.length();
-    auto key_bytes = key->handle().get<ByteBuffer>();
+    ::Crypto::Cipher::AESGCMCipher cipher(key->handle().get<ByteBuffer>());
+    auto maybe_encrypted = cipher.encrypt(plaintext, normalized_algorithm.iv, additional_data, tag_length / 8);
+    if (maybe_encrypted.is_error()) {
+        return WebIDL::OperationError::create(m_realm, "Encryption failed"_string);
+    }
 
-    ::Crypto::Cipher::AESCipher::GCMMode cipher(key_bytes, key_length, ::Crypto::Cipher::Intent::Encryption);
-    auto ciphertext = TRY_OR_THROW_OOM(m_realm->vm(), ByteBuffer::create_zeroed(plaintext.size()));
-    auto tag = TRY_OR_THROW_OOM(m_realm->vm(), ByteBuffer::create_zeroed(tag_length / 8));
-
-    cipher.encrypt(plaintext, ciphertext.bytes(), normalized_algorithm.iv, additional_data, tag.bytes());
+    auto [ciphertext, tag] = maybe_encrypted.release_value();
 
     // 7. Let ciphertext be equal to C | T, where '|' denotes concatenation.
     TRY_OR_THROW_OOM(m_realm->vm(), ciphertext.try_append(tag));
@@ -3304,23 +3271,17 @@ WebIDL::ExceptionOr<GC::Ref<JS::ArrayBuffer>> AesGcm::decrypt(AlgorithmParams co
     //    tagLength as the t pre-requisite,
     //    the contents of actualCiphertext as the input ciphertext, C
     //    and the contents of tag as the authentication tag, T.
-    auto& aes_algorithm = static_cast<AesKeyAlgorithm const&>(*key->algorithm());
-    auto key_length = aes_algorithm.length();
-    auto key_bytes = key->handle().get<ByteBuffer>();
-
-    ::Crypto::Cipher::AESCipher::GCMMode cipher(key_bytes, key_length, ::Crypto::Cipher::Intent::Decryption);
-    auto plaintext = TRY_OR_THROW_OOM(m_realm->vm(), ByteBuffer::create_zeroed(actual_ciphertext.size()));
-
-    auto result = cipher.decrypt(actual_ciphertext.bytes(), plaintext.bytes(), normalized_algorithm.iv, additional_data, tag.bytes());
-
     // If the result of the algorithm is the indication of inauthenticity, "FAIL": throw an OperationError
-    if (result == ::Crypto::VerificationConsistency::Inconsistent)
+    ::Crypto::Cipher::AESGCMCipher cipher(key->handle().get<ByteBuffer>());
+    auto maybe_plaintext = cipher.decrypt(actual_ciphertext.bytes(), normalized_algorithm.iv, additional_data, tag);
+    if (maybe_plaintext.is_error()) {
+        dbgln("FAILED: {}", maybe_plaintext.error());
         return WebIDL::OperationError::create(m_realm, "Decryption failed"_string);
+    }
 
     // Otherwise: Let plaintext be the output P of the Authenticated Decryption Function.
-
     // 9. Return the result of creating an ArrayBuffer containing plaintext.
-    return JS::ArrayBuffer::create(m_realm, plaintext);
+    return JS::ArrayBuffer::create(m_realm, maybe_plaintext.release_value());
 }
 
 WebIDL::ExceptionOr<Variant<GC::Ref<CryptoKey>, GC::Ref<CryptoKeyPair>>> AesGcm::generate_key(AlgorithmParams const& params, bool extractable, Vector<Bindings::KeyUsage> const& key_usages)
@@ -3628,19 +3589,13 @@ WebIDL::ExceptionOr<GC::Ref<JS::ArrayBuffer>> AesKw::wrap_key(AlgorithmParams co
 
     // 2. Let ciphertext be the result of performing the Key Wrap operation described in Section 2.2.1 of [RFC3394]
     //    with plaintext as the plaintext to be wrapped and using the default Initial Value defined in Section 2.2.3.1 of the same document.
-    ::Crypto::Cipher::AESCipher::KWMode cipher {
-        key->handle().get<ByteBuffer>(),
-        key->handle().get<ByteBuffer>().size() * 8,
-        ::Crypto::Cipher::Intent::Encryption,
-        ::Crypto::Cipher::PaddingMode::Null,
-    };
-
-    auto ciphertext = TRY_OR_THROW_OOM(m_realm->vm(), ByteBuffer::create_uninitialized(plaintext.size() + 8));
-    auto ciphertext_bytes = ciphertext.bytes();
-    cipher.wrap(plaintext.bytes(), ciphertext_bytes);
+    ::Crypto::Cipher::AESKWCipher cipher(key->handle().get<ByteBuffer>());
+    auto maybe_ciphertext = cipher.wrap(plaintext.bytes());
+    if (maybe_ciphertext.is_error())
+        return WebIDL::OperationError::create(m_realm, "Key wrap failed"_string);
 
     // 3. Return ciphertext.
-    return JS::ArrayBuffer::create(m_realm, ciphertext);
+    return JS::ArrayBuffer::create(m_realm, maybe_ciphertext.release_value());
 }
 
 // https://w3c.github.io/webcrypto/#aes-kw-registration
@@ -3652,21 +3607,14 @@ WebIDL::ExceptionOr<GC::Ref<JS::ArrayBuffer>> AesKw::unwrap_key(AlgorithmParams 
 
     // 1. Let plaintext be the result of performing the Key Unwrap operation described in Section 2.2.2 of [RFC3394]
     //     with ciphertext as the input ciphertext and using the default Initial Value defined in Section 2.2.3.1 of the same document
-    ::Crypto::Cipher::AESCipher::KWMode cipher {
-        key->handle().get<ByteBuffer>(),
-        key->handle().get<ByteBuffer>().size() * 8,
-        ::Crypto::Cipher::Intent::Decryption,
-        ::Crypto::Cipher::PaddingMode::Null,
-    };
-
     // 2. If the Key Unwrap operation returns an error, then throw an OperationError.
-    auto out = TRY_OR_THROW_OOM(m_realm->vm(), ByteBuffer::create_uninitialized(ciphertext.size() - 8));
-    auto out_bytes = out.bytes();
-    if (cipher.unwrap(ciphertext, out_bytes) != ::Crypto::VerificationConsistency::Consistent)
+    ::Crypto::Cipher::AESKWCipher cipher(key->handle().get<ByteBuffer>());
+    auto maybe_plaintext = cipher.unwrap(ciphertext.bytes());
+    if (maybe_plaintext.is_error())
         return WebIDL::OperationError::create(m_realm, "Key unwrap failed"_string);
 
     // 3. Return plaintext.
-    return JS::ArrayBuffer::create(m_realm, out);
+    return JS::ArrayBuffer::create(m_realm, maybe_plaintext.release_value());
 }
 
 // https://w3c.github.io/webcrypto/#hkdf-operations
@@ -3778,7 +3726,7 @@ WebIDL::ExceptionOr<Variant<GC::Ref<CryptoKey>, GC::Ref<CryptoKeyPair>>> ECDSA::
     // 6. If performing the key generation operation results in an error, then throw an OperationError.
     auto maybe_private_key_data = curve.visit(
         [](Empty const&) -> ErrorOr<::Crypto::UnsignedBigInteger> { return Error::from_string_literal("noop error"); },
-        [](auto instance) { return instance.generate_private_key_scalar(); });
+        [](auto instance) { return instance.generate_private_key(); });
 
     if (maybe_private_key_data.is_error())
         return WebIDL::OperationError::create(m_realm, "Failed to create valid crypto instance"_string);
@@ -3787,7 +3735,7 @@ WebIDL::ExceptionOr<Variant<GC::Ref<CryptoKey>, GC::Ref<CryptoKeyPair>>> ECDSA::
 
     auto maybe_public_key_data = curve.visit(
         [](Empty const&) -> ErrorOr<::Crypto::Curves::SECPxxxr1Point> { return Error::from_string_literal("noop error"); },
-        [&](auto instance) { return instance.generate_public_key_point(private_key_data); });
+        [&](auto instance) { return instance.generate_public_key(private_key_data); });
 
     if (maybe_public_key_data.is_error())
         return WebIDL::OperationError::create(m_realm, "Failed to create valid crypto instance"_string);
@@ -3907,7 +3855,7 @@ WebIDL::ExceptionOr<GC::Ref<JS::ArrayBuffer>> ECDSA::sign(AlgorithmParams const&
         // 2. Let r and s be the pair of integers resulting from performing the ECDSA signing process.
         auto maybe_signature = curve.visit(
             [](Empty const&) -> ErrorOr<::Crypto::Curves::SECPxxxr1Signature> { return Error::from_string_literal("Failed to create valid crypto instance"); },
-            [&](auto instance) { return instance.sign_scalar(M, d.d()); });
+            [&](auto instance) { return instance.sign(M, d.d()); });
 
         if (maybe_signature.is_error()) {
             auto error_message = MUST(String::from_utf8(maybe_signature.error().string_literal()));
@@ -4003,7 +3951,7 @@ WebIDL::ExceptionOr<JS::Value> ECDSA::verify(AlgorithmParams const& params, GC::
 
         auto maybe_result = curve.visit(
             [](Empty const&) -> ErrorOr<bool> { return Error::from_string_literal("Failed to create valid crypto instance"); },
-            [&](auto instance) { return instance.verify_point(M, Q.to_secpxxxr1_point(), ::Crypto::Curves::SECPxxxr1Signature { r, s, half_size }); });
+            [&](auto instance) { return instance.verify(M, Q.to_secpxxxr1_point(), ::Crypto::Curves::SECPxxxr1Signature { r, s, half_size }); });
 
         if (maybe_result.is_error()) {
             auto error_message = MUST(String::from_utf8(maybe_result.error().string_literal()));
@@ -4645,7 +4593,7 @@ WebIDL::ExceptionOr<GC::Ref<JS::Object>> ECDSA::export_key(Bindings::KeyFormat f
 
                     auto maybe_public_key = curve.visit(
                         [](Empty const&) -> ErrorOr<::Crypto::Curves::SECPxxxr1Point> { return Error::from_string_literal("noop error"); },
-                        [&](auto instance) { return instance.generate_public_key_point(private_key.d()); });
+                        [&](auto instance) { return instance.generate_public_key(private_key.d()); });
 
                     auto public_key = TRY(maybe_public_key);
                     auto x_bytes = TRY(public_key.x_bytes());
@@ -4790,7 +4738,7 @@ WebIDL::ExceptionOr<Variant<GC::Ref<CryptoKey>, GC::Ref<CryptoKeyPair>>> ECDH::g
     // 3. If performing the operation results in an error, then throw a OperationError.
     auto maybe_private_key_data = curve.visit(
         [](Empty const&) -> ErrorOr<::Crypto::UnsignedBigInteger> { return Error::from_string_literal("noop error"); },
-        [](auto instance) { return instance.generate_private_key_scalar(); });
+        [](auto instance) { return instance.generate_private_key(); });
 
     if (maybe_private_key_data.is_error())
         return WebIDL::OperationError::create(m_realm, "Failed to create valid crypto instance"_string);
@@ -4799,7 +4747,7 @@ WebIDL::ExceptionOr<Variant<GC::Ref<CryptoKey>, GC::Ref<CryptoKeyPair>>> ECDH::g
 
     auto maybe_public_key_data = curve.visit(
         [](Empty const&) -> ErrorOr<::Crypto::Curves::SECPxxxr1Point> { return Error::from_string_literal("noop error"); },
-        [&](auto instance) { return instance.generate_public_key_point(private_key_data); });
+        [&](auto instance) { return instance.generate_public_key(private_key_data); });
 
     if (maybe_public_key_data.is_error())
         return WebIDL::OperationError::create(m_realm, "Failed to create valid crypto instance"_string);
@@ -4909,7 +4857,7 @@ WebIDL::ExceptionOr<GC::Ref<JS::ArrayBuffer>> ECDH::derive_bits(AlgorithmParams 
 
         auto maybe_secret = curve.visit(
             [](Empty const&) -> ErrorOr<::Crypto::Curves::SECPxxxr1Point> { return Error::from_string_literal("noop error"); },
-            [&private_key_data, &public_key_data](auto instance) { return instance.compute_coordinate_point(private_key_data.d(), public_key_data.to_secpxxxr1_point()); });
+            [&private_key_data, &public_key_data](auto instance) { return instance.compute_coordinate(private_key_data.d(), public_key_data.to_secpxxxr1_point()); });
 
         if (maybe_secret.is_error()) {
             auto message = TRY_OR_THROW_OOM(realm.vm(), String::formatted("Failed to compute secret: {}", maybe_secret.error()));
@@ -5539,7 +5487,7 @@ WebIDL::ExceptionOr<GC::Ref<JS::Object>> ECDH::export_key(Bindings::KeyFormat fo
 
                     auto maybe_public_key = curve.visit(
                         [](Empty const&) -> ErrorOr<::Crypto::Curves::SECPxxxr1Point> { return Error::from_string_literal("noop error"); },
-                        [&](auto instance) { return instance.generate_public_key_point(private_key.d()); });
+                        [&](auto instance) { return instance.generate_public_key(private_key.d()); });
 
                     auto public_key = TRY(maybe_public_key);
                     auto x_bytes = TRY(public_key.x_bytes());
@@ -6092,7 +6040,7 @@ WebIDL::ExceptionOr<GC::Ref<JS::ArrayBuffer>> ED25519::sign([[maybe_unused]] Alg
         return WebIDL::OperationError::create(realm, "Failed to generate public key"_string);
     auto public_key = maybe_public_key.release_value();
 
-    auto maybe_signature = curve.sign(public_key, private_key, message);
+    auto maybe_signature = curve.sign(private_key, message);
     if (maybe_signature.is_error())
         return WebIDL::OperationError::create(realm, "Failed to sign message"_string);
     auto signature = maybe_signature.release_value();
@@ -6123,10 +6071,14 @@ WebIDL::ExceptionOr<JS::Value> ED25519::verify([[maybe_unused]] AlgorithmParams 
 
     // 9. Let result be a boolean with the value true if the signature is valid and the value false otherwise.
     ::Crypto::Curves::Ed25519 curve;
-    auto result = curve.verify(public_key, signature, message);
+    auto maybe_verified = curve.verify(key->handle().get<ByteBuffer>(), signature, message);
+    if (maybe_verified.is_error()) {
+        auto error_message = MUST(String::from_utf8(maybe_verified.error().string_literal()));
+        return WebIDL::OperationError::create(realm, error_message);
+    }
 
     // 10. Return result.
-    return JS::Value(result);
+    return maybe_verified.release_value();
 }
 
 // https://wicg.github.io/webcrypto-secure-curves/#ed448-operations
@@ -6657,26 +6609,34 @@ WebIDL::ExceptionOr<GC::Ref<JS::ArrayBuffer>> HKDF::derive_bits(AlgorithmParams 
     // all major browsers instead raise a TypeError, for example:
     //     "Failed to execute 'deriveBits' on 'SubtleCrypto': HkdfParams: salt: Not a BufferSource"
     // Because we are forced by neither peer pressure nor the spec, we don't support it either.
-    auto const& hash_algorithm = TRY(normalized_algorithm.hash.name(realm.vm()));
-    ErrorOr<ByteBuffer> result = Error::from_string_literal("noop error");
-    if (hash_algorithm == "SHA-1") {
-        result = ::Crypto::Hash::HKDF<::Crypto::Hash::SHA1>::derive_key(Optional<ReadonlyBytes>(normalized_algorithm.salt), key_derivation_key, normalized_algorithm.info, *length_optional / 8);
-    } else if (hash_algorithm == "SHA-256") {
-        result = ::Crypto::Hash::HKDF<::Crypto::Hash::SHA256>::derive_key(Optional<ReadonlyBytes>(normalized_algorithm.salt), key_derivation_key, normalized_algorithm.info, *length_optional / 8);
-    } else if (hash_algorithm == "SHA-384") {
-        result = ::Crypto::Hash::HKDF<::Crypto::Hash::SHA384>::derive_key(Optional<ReadonlyBytes>(normalized_algorithm.salt), key_derivation_key, normalized_algorithm.info, *length_optional / 8);
-    } else if (hash_algorithm == "SHA-512") {
-        result = ::Crypto::Hash::HKDF<::Crypto::Hash::SHA512>::derive_key(Optional<ReadonlyBytes>(normalized_algorithm.salt), key_derivation_key, normalized_algorithm.info, *length_optional / 8);
-    } else {
-        return WebIDL::NotSupportedError::create(m_realm, MUST(String::formatted("Invalid hash function '{}'", hash_algorithm)));
+
+    // Note: Check for zero length early because our implementation doesn't support it.
+    if (*length_optional == 0) {
+        return TRY(JS::ArrayBuffer::create(realm, static_cast<size_t>(0)));
     }
 
+    auto const& hash_algorithm = TRY(normalized_algorithm.hash.name(realm.vm()));
+    auto hash_kind = TRY([&] -> WebIDL::ExceptionOr<::Crypto::Hash::HashKind> {
+        if (hash_algorithm == "SHA-1")
+            return ::Crypto::Hash::HashKind::SHA1;
+        if (hash_algorithm == "SHA-256")
+            return ::Crypto::Hash::HashKind::SHA256;
+        if (hash_algorithm == "SHA-384")
+            return ::Crypto::Hash::HashKind::SHA384;
+        if (hash_algorithm == "SHA-512")
+            return ::Crypto::Hash::HashKind::SHA512;
+        return WebIDL::NotSupportedError::create(m_realm, MUST(String::formatted("Invalid hash function '{}'", hash_algorithm)));
+    }());
+
+    ::Crypto::Hash::HKDF hkdf(hash_kind);
+    auto maybe_result = hkdf.derive_key(Optional<ReadonlyBytes>(normalized_algorithm.salt), key_derivation_key, normalized_algorithm.info, *length_optional / 8);
+
     // 4. If the key derivation operation fails, then throw an OperationError.
-    if (result.is_error())
+    if (maybe_result.is_error())
         return WebIDL::OperationError::create(realm, "Failed to derive key"_string);
 
     // 5. Return result
-    return JS::ArrayBuffer::create(realm, result.release_value());
+    return JS::ArrayBuffer::create(realm, maybe_result.release_value());
 }
 
 WebIDL::ExceptionOr<JS::Value> HKDF::get_key_length(AlgorithmParams const&)
@@ -6708,32 +6668,32 @@ WebIDL::ExceptionOr<GC::Ref<JS::ArrayBuffer>> PBKDF2::derive_bits(AlgorithmParam
     // the contents of the salt attribute of normalizedAlgorithm as the salt, S,
     // the value of the iterations attribute of normalizedAlgorithm as the iteration count, c,
     // and length divided by 8 as the intended key length, dkLen.
-    ErrorOr<ByteBuffer> result = Error::from_string_literal("noop error");
-
     auto password = key->handle().get<ByteBuffer>();
-
     auto salt = normalized_algorithm.salt;
     auto iterations = normalized_algorithm.iterations;
     auto derived_key_length_bytes = *length_optional / 8;
 
-    if (hash_algorithm == "SHA-1") {
-        result = ::Crypto::Hash::PBKDF2::derive_key<::Crypto::Authentication::HMAC<::Crypto::Hash::SHA1>>(password, salt, iterations, derived_key_length_bytes);
-    } else if (hash_algorithm == "SHA-256") {
-        result = ::Crypto::Hash::PBKDF2::derive_key<::Crypto::Authentication::HMAC<::Crypto::Hash::SHA256>>(password, salt, iterations, derived_key_length_bytes);
-    } else if (hash_algorithm == "SHA-384") {
-        result = ::Crypto::Hash::PBKDF2::derive_key<::Crypto::Authentication::HMAC<::Crypto::Hash::SHA384>>(password, salt, iterations, derived_key_length_bytes);
-    } else if (hash_algorithm == "SHA-512") {
-        result = ::Crypto::Hash::PBKDF2::derive_key<::Crypto::Authentication::HMAC<::Crypto::Hash::SHA512>>(password, salt, iterations, derived_key_length_bytes);
-    } else {
+    auto hash_kind = TRY([&] -> WebIDL::ExceptionOr<::Crypto::Hash::HashKind> {
+        if (hash_algorithm == "SHA-1")
+            return ::Crypto::Hash::HashKind::SHA1;
+        if (hash_algorithm == "SHA-256")
+            return ::Crypto::Hash::HashKind::SHA256;
+        if (hash_algorithm == "SHA-384")
+            return ::Crypto::Hash::HashKind::SHA384;
+        if (hash_algorithm == "SHA-512")
+            return ::Crypto::Hash::HashKind::SHA512;
         return WebIDL::NotSupportedError::create(m_realm, MUST(String::formatted("Invalid hash function '{}'", hash_algorithm)));
-    }
+    }());
+
+    ::Crypto::Hash::PBKDF2 pbkdf2(hash_kind);
+    auto maybe_result = pbkdf2.derive_key(password, salt, iterations, derived_key_length_bytes);
 
     // 5. If the key derivation operation fails, then throw an OperationError.
-    if (result.is_error())
+    if (maybe_result.is_error())
         return WebIDL::OperationError::create(realm, "Failed to derive key"_string);
 
     // 6. Return result
-    return JS::ArrayBuffer::create(realm, result.release_value());
+    return JS::ArrayBuffer::create(realm, maybe_result.release_value());
 }
 
 // https://w3c.github.io/webcrypto/#pbkdf2-operations
@@ -7773,21 +7733,21 @@ WebIDL::ExceptionOr<GC::Ref<CryptoKey>> X448::import_key(
 
 static WebIDL::ExceptionOr<ByteBuffer> hmac_calculate_message_digest(JS::Realm& realm, GC::Ptr<KeyAlgorithm> hash, ReadonlyBytes key, ReadonlyBytes message)
 {
-    auto calculate_digest = [&]<typename T>() -> ByteBuffer {
-        ::Crypto::Authentication::HMAC<T> hmac(key);
-        auto digest = hmac.process(message);
-        return MUST(ByteBuffer::copy(digest.bytes()));
-    };
     auto hash_name = hash->name();
-    if (hash_name == "SHA-1")
-        return calculate_digest.operator()<::Crypto::Hash::SHA1>();
-    if (hash_name == "SHA-256")
-        return calculate_digest.operator()<::Crypto::Hash::SHA256>();
-    if (hash_name == "SHA-384")
-        return calculate_digest.operator()<::Crypto::Hash::SHA384>();
-    if (hash_name == "SHA-512")
-        return calculate_digest.operator()<::Crypto::Hash::SHA512>();
-    return WebIDL::NotSupportedError::create(realm, "Invalid algorithm"_string);
+    auto hash_kind = TRY([&] -> WebIDL::ExceptionOr<::Crypto::Hash::HashKind> {
+        if (hash_name == "SHA-1")
+            return ::Crypto::Hash::HashKind::SHA1;
+        if (hash_name == "SHA-256")
+            return ::Crypto::Hash::HashKind::SHA256;
+        if (hash_name == "SHA-384")
+            return ::Crypto::Hash::HashKind::SHA384;
+        if (hash_name == "SHA-512")
+            return ::Crypto::Hash::HashKind::SHA512;
+        return WebIDL::NotSupportedError::create(realm, MUST(String::formatted("Invalid hash function '{}'", hash_name)));
+    }());
+
+    ::Crypto::Authentication::HMAC hmac(hash_kind, key);
+    return hmac.process(message);
 }
 
 static WebIDL::ExceptionOr<WebIDL::UnsignedLong> hmac_hash_block_size(JS::Realm& realm, HashAlgorithmIdentifier hash)

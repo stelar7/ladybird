@@ -21,6 +21,7 @@
 #include <LibUnicode/TimeZone.h>
 #include <LibWeb/ARIA/RoleType.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
+#include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/DOM/Attr.h>
 #include <LibWeb/DOM/CharacterData.h>
@@ -60,7 +61,6 @@ ConnectionFromClient::ConnectionFromClient(GC::Heap& heap, IPC::Transport transp
     , m_heap(heap)
     , m_page_host(PageHost::create(*this))
 {
-    m_input_event_queue_timer = Web::Platform::Timer::create_single_shot(m_heap, 0, GC::create_function(heap, [this] { process_next_input_event(); }));
 }
 
 ConnectionFromClient::~ConnectionFromClient() = default;
@@ -68,6 +68,15 @@ ConnectionFromClient::~ConnectionFromClient() = default;
 void ConnectionFromClient::die()
 {
     Web::Platform::EventLoopPlugin::the().quit();
+}
+
+Messages::WebContentServer::InitTransportResponse ConnectionFromClient::init_transport([[maybe_unused]] int peer_pid)
+{
+#ifdef AK_OS_WINDOWS
+    m_transport.set_peer_pid(peer_pid);
+    return Core::System::getpid();
+#endif
+    VERIFY_NOT_REACHED();
 }
 
 Optional<PageClient&> ConnectionFromClient::page(u64 index, SourceLocation location)
@@ -177,55 +186,6 @@ void ConnectionFromClient::ready_to_paint(u64 page_id)
         page->ready_to_paint();
 }
 
-void ConnectionFromClient::process_next_input_event()
-{
-    if (m_input_event_queue.is_empty())
-        return;
-
-    auto event = m_input_event_queue.dequeue();
-
-    auto page = this->page(event.page_id);
-    if (!page.has_value())
-        return;
-
-    auto result = event.event.visit(
-        [&](Web::KeyEvent const& event) {
-            switch (event.type) {
-            case Web::KeyEvent::Type::KeyDown:
-                return page->page().handle_keydown(event.key, event.modifiers, event.code_point, event.repeat);
-            case Web::KeyEvent::Type::KeyUp:
-                return page->page().handle_keyup(event.key, event.modifiers, event.code_point, event.repeat);
-            }
-            VERIFY_NOT_REACHED();
-        },
-        [&](Web::MouseEvent const& event) {
-            switch (event.type) {
-            case Web::MouseEvent::Type::MouseDown:
-                return page->page().handle_mousedown(event.position, event.screen_position, event.button, event.buttons, event.modifiers);
-            case Web::MouseEvent::Type::MouseUp:
-                return page->page().handle_mouseup(event.position, event.screen_position, event.button, event.buttons, event.modifiers);
-            case Web::MouseEvent::Type::MouseMove:
-                return page->page().handle_mousemove(event.position, event.screen_position, event.buttons, event.modifiers);
-            case Web::MouseEvent::Type::MouseWheel:
-                return page->page().handle_mousewheel(event.position, event.screen_position, event.button, event.buttons, event.modifiers, event.wheel_delta_x, event.wheel_delta_y);
-            case Web::MouseEvent::Type::DoubleClick:
-                return page->page().handle_doubleclick(event.position, event.screen_position, event.button, event.buttons, event.modifiers);
-            }
-            VERIFY_NOT_REACHED();
-        },
-        [&](Web::DragEvent& event) {
-            return page->page().handle_drag_and_drop_event(event.type, event.position, event.screen_position, event.button, event.buttons, event.modifiers, move(event.files));
-        });
-
-    // We have to notify the client about coalesced events, so we do that by saying none of them were handled by the web page.
-    for (size_t i = 0; i < event.coalesced_event_count; ++i)
-        report_finished_handling_input_event(event.page_id, Web::EventResult::Dropped);
-    report_finished_handling_input_event(event.page_id, result);
-
-    if (!m_input_event_queue.is_empty())
-        m_input_event_queue_timer->start();
-}
-
 void ConnectionFromClient::key_event(u64 page_id, Web::KeyEvent const& event)
 {
     enqueue_input_event({ page_id, move(const_cast<Web::KeyEvent&>(event)), 0 });
@@ -270,15 +230,9 @@ void ConnectionFromClient::drag_event(u64 page_id, Web::DragEvent const& event)
     enqueue_input_event({ page_id, move(const_cast<Web::DragEvent&>(event)), 0 });
 }
 
-void ConnectionFromClient::enqueue_input_event(QueuedInputEvent event)
+void ConnectionFromClient::enqueue_input_event(Web::QueuedInputEvent event)
 {
     m_input_event_queue.enqueue(move(event));
-    m_input_event_queue_timer->start();
-}
-
-void ConnectionFromClient::report_finished_handling_input_event(u64 page_id, Web::EventResult event_result)
-{
-    async_did_finish_handling_input_event(page_id, event_result);
 }
 
 void ConnectionFromClient::debug_request(u64 page_id, ByteString const& request, ByteString const& argument)
@@ -476,7 +430,7 @@ void ConnectionFromClient::inspect_dom_tree(u64 page_id)
 {
     if (auto page = this->page(page_id); page.has_value()) {
         if (auto* doc = page->page().top_level_browsing_context().active_document())
-            async_did_inspect_dom_tree(page_id, doc->dump_dom_tree_as_json().to_byte_string());
+            async_did_inspect_dom_tree(page_id, doc->dump_dom_tree_as_json());
     }
 }
 
@@ -486,14 +440,11 @@ void ConnectionFromClient::inspect_dom_node(u64 page_id, Web::UniqueNodeID const
     if (!page.has_value())
         return;
 
-    auto& top_context = page->page().top_level_browsing_context();
-
-    top_context.for_each_in_inclusive_subtree([&](auto& ctx) {
-        if (ctx.active_document() != nullptr) {
-            ctx.active_document()->set_inspected_node(nullptr, {});
+    for (auto& navigable : Web::HTML::all_navigables()) {
+        if (navigable->active_document() != nullptr) {
+            navigable->active_document()->set_inspected_node(nullptr);
         }
-        return Web::TraversalDecision::Continue;
-    });
+    }
 
     auto* node = Web::DOM::Node::from_unique_id(node_id);
     // Note: Nodes without layout (aka non-visible nodes, don't have style computed)
@@ -502,7 +453,7 @@ void ConnectionFromClient::inspect_dom_node(u64 page_id, Web::UniqueNodeID const
         return;
     }
 
-    node->document().set_inspected_node(node, pseudo_element);
+    node->document().set_inspected_node(node);
 
     if (node->is_element()) {
         auto& element = as<Web::DOM::Element>(*node);
@@ -511,7 +462,7 @@ void ConnectionFromClient::inspect_dom_node(u64 page_id, Web::UniqueNodeID const
             return;
         }
 
-        auto serialize_json = [](Web::CSS::ComputedProperties const& properties) -> ByteString {
+        auto serialize_json = [](Web::CSS::ComputedProperties const& properties) {
             StringBuilder builder;
 
             auto serializer = MUST(JsonObjectSerializer<>::try_create(builder));
@@ -520,10 +471,10 @@ void ConnectionFromClient::inspect_dom_node(u64 page_id, Web::UniqueNodeID const
             });
             MUST(serializer.finish());
 
-            return builder.to_byte_string();
+            return MUST(builder.to_string());
         };
 
-        auto serialize_custom_properties_json = [](Web::DOM::Element const& element, Optional<Web::CSS::Selector::PseudoElement::Type> pseudo_element) -> ByteString {
+        auto serialize_custom_properties_json = [](Web::DOM::Element const& element, Optional<Web::CSS::Selector::PseudoElement::Type> pseudo_element) {
             StringBuilder builder;
             auto serializer = MUST(JsonObjectSerializer<>::try_create(builder));
             HashTable<FlyString> seen_properties;
@@ -547,14 +498,14 @@ void ConnectionFromClient::inspect_dom_node(u64 page_id, Web::UniqueNodeID const
 
             MUST(serializer.finish());
 
-            return builder.to_byte_string();
+            return MUST(builder.to_string());
         };
-        auto serialize_node_box_sizing_json = [](Web::Layout::Node const* layout_node) -> ByteString {
-            if (!layout_node || !layout_node->is_box()) {
-                return "{}";
+        auto serialize_node_box_sizing_json = [](Web::Layout::Node const* layout_node) {
+            if (!layout_node || !layout_node->is_box() || !layout_node->first_paintable() || !layout_node->first_paintable()->is_paintable_box()) {
+                return "{}"_string;
             }
-            auto* box = static_cast<Web::Layout::Box const*>(layout_node);
-            auto box_model = box->box_model();
+            auto const& paintable_box = as<Web::Painting::PaintableBox>(*layout_node->first_paintable());
+            auto const& box_model = paintable_box.box_model();
             StringBuilder builder;
             auto serializer = MUST(JsonObjectSerializer<>::try_create(builder));
             MUST(serializer.add("padding_top"sv, box_model.padding.top.to_double()));
@@ -569,22 +520,17 @@ void ConnectionFromClient::inspect_dom_node(u64 page_id, Web::UniqueNodeID const
             MUST(serializer.add("border_right"sv, box_model.border.right.to_double()));
             MUST(serializer.add("border_bottom"sv, box_model.border.bottom.to_double()));
             MUST(serializer.add("border_left"sv, box_model.border.left.to_double()));
-            if (auto* paintable_box = box->paintable_box()) {
-                MUST(serializer.add("content_width"sv, paintable_box->content_width().to_double()));
-                MUST(serializer.add("content_height"sv, paintable_box->content_height().to_double()));
-            } else {
-                MUST(serializer.add("content_width"sv, 0));
-                MUST(serializer.add("content_height"sv, 0));
-            }
+            MUST(serializer.add("content_width"sv, paintable_box.content_width().to_double()));
+            MUST(serializer.add("content_height"sv, paintable_box.content_height().to_double()));
 
             MUST(serializer.finish());
-            return builder.to_byte_string();
+            return MUST(builder.to_string());
         };
 
-        auto serialize_aria_properties_state_json = [](Web::DOM::Element const& element) -> ByteString {
+        auto serialize_aria_properties_state_json = [](Web::DOM::Element const& element) {
             auto role_name = element.role_or_default();
             if (!role_name.has_value()) {
-                return "";
+                return "{}"_string;
             }
             auto aria_data = MUST(Web::ARIA::AriaData::build_data(element));
             auto role = MUST(Web::ARIA::RoleType::build_role_object(role_name.value(), element.is_focusable(), *aria_data));
@@ -593,10 +539,10 @@ void ConnectionFromClient::inspect_dom_node(u64 page_id, Web::UniqueNodeID const
             auto serializer = MUST(JsonObjectSerializer<>::try_create(builder));
             MUST(role->serialize_as_json(serializer));
             MUST(serializer.finish());
-            return builder.to_byte_string();
+            return MUST(builder.to_string());
         };
 
-        auto serialize_fonts_json = [](Web::CSS::ComputedProperties const& properties) -> ByteString {
+        auto serialize_fonts_json = [](Web::CSS::ComputedProperties const& properties) {
             StringBuilder builder;
             auto serializer = MUST(JsonArraySerializer<>::try_create(builder));
 
@@ -610,7 +556,7 @@ void ConnectionFromClient::inspect_dom_node(u64 page_id, Web::UniqueNodeID const
                 MUST(font_json_object.finish());
             });
             MUST(serializer.finish());
-            return builder.to_byte_string();
+            return MUST(builder.to_string());
         };
 
         if (pseudo_element.has_value()) {
@@ -622,9 +568,9 @@ void ConnectionFromClient::inspect_dom_node(u64 page_id, Web::UniqueNodeID const
 
             auto pseudo_element_style = element.pseudo_element_computed_properties(pseudo_element.value());
 
-            ByteString computed_values;
-            ByteString fonts_json;
-            ByteString resolved_values;
+            String computed_values;
+            String fonts_json;
+            String resolved_values;
             if (pseudo_element_style) {
                 computed_values = serialize_json(*pseudo_element_style);
                 fonts_json = serialize_fonts_json(*pseudo_element_style);
@@ -633,18 +579,18 @@ void ConnectionFromClient::inspect_dom_node(u64 page_id, Web::UniqueNodeID const
                 dbgln("Inspected pseudo-element has no computed style.");
             }
 
-            ByteString custom_properties_json = serialize_custom_properties_json(element, pseudo_element);
-            ByteString node_box_sizing_json = serialize_node_box_sizing_json(pseudo_element_node.ptr());
-            async_did_inspect_dom_node(page_id, true, move(computed_values), move(resolved_values), move(custom_properties_json), move(node_box_sizing_json), {}, move(fonts_json));
+            auto custom_properties_json = serialize_custom_properties_json(element, pseudo_element);
+            auto node_box_sizing_json = serialize_node_box_sizing_json(pseudo_element_node.ptr());
+            async_did_inspect_dom_node(page_id, true, move(computed_values), move(resolved_values), move(custom_properties_json), move(node_box_sizing_json), "{}"_string, move(fonts_json));
             return;
         }
 
-        ByteString computed_values = serialize_json(*element.computed_properties());
-        ByteString resolved_values = serialize_json(element.resolved_css_values());
-        ByteString custom_properties_json = serialize_custom_properties_json(element, {});
-        ByteString node_box_sizing_json = serialize_node_box_sizing_json(element.layout_node());
-        ByteString aria_properties_state_json = serialize_aria_properties_state_json(element);
-        ByteString fonts_json = serialize_fonts_json(*element.computed_properties());
+        auto computed_values = serialize_json(*element.computed_properties());
+        auto resolved_values = serialize_json(element.resolved_css_values());
+        auto custom_properties_json = serialize_custom_properties_json(element, {});
+        auto node_box_sizing_json = serialize_node_box_sizing_json(element.layout_node());
+        auto aria_properties_state_json = serialize_aria_properties_state_json(element);
+        auto fonts_json = serialize_fonts_json(*element.computed_properties());
 
         async_did_inspect_dom_node(page_id, true, move(computed_values), move(resolved_values), move(custom_properties_json), move(node_box_sizing_json), move(aria_properties_state_json), move(fonts_json));
         return;
@@ -653,11 +599,30 @@ void ConnectionFromClient::inspect_dom_node(u64 page_id, Web::UniqueNodeID const
     async_did_inspect_dom_node(page_id, false, {}, {}, {}, {}, {}, {});
 }
 
+void ConnectionFromClient::highlight_dom_node(u64 page_id, Web::UniqueNodeID const& node_id, Optional<Web::CSS::Selector::PseudoElement::Type> const& pseudo_element)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    for (auto& navigable : Web::HTML::all_navigables()) {
+        if (navigable->active_document() != nullptr) {
+            navigable->active_document()->set_highlighted_node(nullptr, {});
+        }
+    }
+
+    auto* node = Web::DOM::Node::from_unique_id(node_id);
+    if (!node || !node->layout_node())
+        return;
+
+    node->document().set_highlighted_node(node, pseudo_element);
+}
+
 void ConnectionFromClient::inspect_accessibility_tree(u64 page_id)
 {
     if (auto page = this->page(page_id); page.has_value()) {
         if (auto* doc = page->page().top_level_browsing_context().active_document())
-            async_did_inspect_accessibility_tree(page_id, doc->dump_accessibility_tree_as_json().to_byte_string());
+            async_did_inspect_accessibility_tree(page_id, doc->dump_accessibility_tree_as_json());
     }
 }
 
@@ -1185,7 +1150,7 @@ void ConnectionFromClient::set_system_visibility_state(u64 page_id, Web::HTML::V
         page->page().top_level_traversable()->set_system_visibility_state(visibility_state);
 }
 
-void ConnectionFromClient::js_console_input(u64 page_id, ByteString const& js_source)
+void ConnectionFromClient::js_console_input(u64 page_id, String const& js_source)
 {
     auto page = this->page(page_id);
     if (!page.has_value())
@@ -1194,7 +1159,7 @@ void ConnectionFromClient::js_console_input(u64 page_id, ByteString const& js_so
     page->js_console_input(js_source);
 }
 
-void ConnectionFromClient::run_javascript(u64 page_id, ByteString const& js_source)
+void ConnectionFromClient::run_javascript(u64 page_id, String const& js_source)
 {
     if (auto page = this->page(page_id); page.has_value())
         page->run_javascript(js_source);

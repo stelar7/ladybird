@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2018-2020, Andreas Kling <andreas@ladybird.org>
  * Copyright (c) 2021, Max Wipfli <mail@maxwipfli.ch>
- * Copyright (c) 2023-2024, Shannon Booth <shannon@serenityos.org>
+ * Copyright (c) 2023-2025, Shannon Booth <shannon@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -77,15 +77,6 @@ class URL {
 
 public:
     URL() = default;
-    URL(StringView);
-    URL(ByteString const& string)
-        : URL(string.view())
-    {
-    }
-    URL(String const& string)
-        : URL(string.bytes_as_string_view())
-    {
-    }
 
     bool is_valid() const { return m_data->valid; }
 
@@ -135,7 +126,7 @@ public:
 
     bool equals(URL const& other, ExcludeFragment = ExcludeFragment::No) const;
 
-    URL complete_url(StringView) const;
+    Optional<URL> complete_url(StringView) const;
 
     [[nodiscard]] bool operator==(URL const& other) const
     {
@@ -146,6 +137,8 @@ public:
 
     Optional<BlobURLEntry> const& blob_url_entry() const { return m_data->blob_url_entry; }
     void set_blob_url_entry(Optional<BlobURLEntry> entry) { m_data->blob_url_entry = move(entry); }
+
+    static URL about(String path);
 
 private:
     bool compute_validity() const;
@@ -210,6 +203,12 @@ URL create_with_data(StringView mime_type, StringView payload, bool is_base64 = 
 
 bool is_public_suffix(StringView host);
 Optional<String> get_public_suffix(StringView host);
+
+inline URL about_blank() { return URL::about("blank"_string); }
+inline URL about_srcdoc() { return URL::about("srcdoc"_string); }
+inline URL about_error() { return URL::about("error"_string); }
+inline URL about_version() { return URL::about("version"_string); }
+inline URL about_newtab() { return URL::about("newtab"_string); }
 
 }
 

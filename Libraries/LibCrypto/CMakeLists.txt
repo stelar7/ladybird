@@ -2,12 +2,10 @@ add_cxx_compile_options(-Wvla)
 
 set(SOURCES
     OpenSSL.cpp
-    AEAD/ChaCha20Poly1305.cpp
     ASN1/ASN1.cpp
     ASN1/DER.cpp
     ASN1/PEM.cpp
-    Authentication/GHash.cpp
-    Authentication/Poly1305.cpp
+    Authentication/HMAC.cpp
     BigFraction/BigFraction.cpp
     BigInt/Algorithms/BitwiseOperations.cpp
     BigInt/Algorithms/Division.cpp
@@ -23,16 +21,12 @@ set(SOURCES
     Checksum/cksum.cpp
     Checksum/CRC32.cpp
     Cipher/AES.cpp
-    Cipher/Cipher.cpp
-    Cipher/ChaCha20.cpp
-    Curves/Curve25519.cpp
-    Curves/Ed25519.cpp
-    Curves/Ed448.cpp
+    Curves/EdwardsCurve.cpp
     Curves/SECPxxxr1.cpp
-    Curves/X25519.cpp
-    Curves/X448.cpp
     Hash/BLAKE2b.cpp
+    Hash/HKDF.cpp
     Hash/MD5.cpp
+    Hash/PBKDF2.cpp
     Hash/SHA1.cpp
     Hash/SHA2.cpp
     NumberTheory/ModularFunctions.cpp

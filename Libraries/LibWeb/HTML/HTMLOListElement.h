@@ -28,10 +28,15 @@ public:
         MUST(set_attribute(AttributeNames::start, String::number(start)));
     }
 
+    size_t starting_value() const;
+
 private:
     HTMLOListElement(DOM::Document&, DOM::QualifiedName);
 
     virtual void initialize(JS::Realm&) override;
+
+    virtual bool is_presentational_hint(FlyString const&) const override;
+    virtual void apply_presentational_hints(GC::Ref<CSS::CascadedProperties>) const override;
 };
 
 }

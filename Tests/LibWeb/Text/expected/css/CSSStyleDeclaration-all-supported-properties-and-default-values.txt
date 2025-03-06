@@ -589,6 +589,8 @@ All supported properties and their default values exposed from CSSStyleDeclarati
 'user-select': 'auto'
 'verticalAlign': 'baseline'
 'vertical-align': 'baseline'
+'viewTransitionName': 'none'
+'view-transition-name': 'none'
 'visibility': 'visible'
 'whiteSpace': 'normal'
 'white-space': 'normal'

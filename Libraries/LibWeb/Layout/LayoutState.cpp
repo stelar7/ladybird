@@ -141,7 +141,7 @@ static CSSPixelRect measure_scrollable_overflow(Box const& box)
     //   to enable a scroll position that satisfies the requirements of place-content: end alignment.
     auto has_scrollable_overflow = !paintable_box.absolute_padding_box_rect().contains(scrollable_overflow_rect);
     if (has_scrollable_overflow) {
-        scrollable_overflow_rect.set_height(max(scrollable_overflow_rect.height(), content_overflow_rect.height() + box.box_model().padding.bottom));
+        scrollable_overflow_rect.set_height(max(scrollable_overflow_rect.height(), content_overflow_rect.height() + paintable_box.box_model().padding.bottom));
     }
 
     paintable_box.set_overflow_data(Painting::PaintableBox::OverflowData {
@@ -177,7 +177,8 @@ void LayoutState::resolve_relative_positions()
                     if (!ancestor->display().is_inline_outside() || !ancestor->display().is_flow_inside())
                         break;
                     if (ancestor->computed_values().position() == CSS::Positioning::Relative) {
-                        auto const& ancestor_node = static_cast<Layout::NodeWithStyleAndBoxModelMetrics const&>(*ancestor);
+                        VERIFY(ancestor->first_paintable());
+                        auto const& ancestor_node = as<Painting::PaintableBox>(*ancestor->first_paintable());
                         auto const& inset = ancestor_node.box_model().inset;
                         offset.translate_by(inset.left, inset.top);
                     }
@@ -235,12 +236,21 @@ void LayoutState::commit(Box& root)
     HashTable<Layout::TextNode*> text_nodes;
     HashTable<Painting::PaintableWithLines*> inline_node_paintables;
 
+    auto transfer_box_model_metrics = [&](Painting::BoxModelMetrics& box_model, UsedValues const& used_values) {
+        box_model.inset = { used_values.inset_top, used_values.inset_right, used_values.inset_bottom, used_values.inset_left };
+        box_model.padding = { used_values.padding_top, used_values.padding_right, used_values.padding_bottom, used_values.padding_left };
+        box_model.border = { used_values.border_top, used_values.border_right, used_values.border_bottom, used_values.border_left };
+        box_model.margin = { used_values.margin_top, used_values.margin_right, used_values.margin_bottom, used_values.margin_left };
+    };
+
     auto try_to_relocate_fragment_in_inline_node = [&](auto& fragment, size_t line_index) -> bool {
         for (auto const* parent = fragment.layout_node().parent(); parent; parent = parent->parent()) {
             if (is<InlineNode>(*parent)) {
                 auto& inline_node = const_cast<InlineNode&>(static_cast<InlineNode const&>(*parent));
                 auto line_paintable = inline_node.create_paintable_for_line_with_index(line_index);
                 line_paintable->add_fragment(fragment);
+                if (auto const* used_values = used_values_per_layout_node.get(inline_node).value_or(nullptr))
+                    transfer_box_model_metrics(line_paintable->box_model(), *used_values);
                 if (!inline_node_paintables.contains(line_paintable.ptr())) {
                     inline_node_paintables.set(line_paintable.ptr());
                     inline_node.add_paintable(line_paintable);
@@ -255,21 +265,15 @@ void LayoutState::commit(Box& root)
         auto& used_values = *it.value;
         auto& node = const_cast<NodeWithStyle&>(used_values.node());
 
-        if (is<NodeWithStyleAndBoxModelMetrics>(node)) {
-            // Transfer box model metrics.
-            auto& box_model = static_cast<NodeWithStyleAndBoxModelMetrics&>(node).box_model();
-            box_model.inset = { used_values.inset_top, used_values.inset_right, used_values.inset_bottom, used_values.inset_left };
-            box_model.padding = { used_values.padding_top, used_values.padding_right, used_values.padding_bottom, used_values.padding_left };
-            box_model.border = { used_values.border_top, used_values.border_right, used_values.border_bottom, used_values.border_left };
-            box_model.margin = { used_values.margin_top, used_values.margin_right, used_values.margin_bottom, used_values.margin_left };
-        }
-
         auto paintable = node.create_paintable();
         node.add_paintable(paintable);
 
         // For boxes, transfer all the state needed for painting.
         if (paintable && is<Painting::PaintableBox>(*paintable)) {
             auto& paintable_box = static_cast<Painting::PaintableBox&>(*paintable);
+
+            transfer_box_model_metrics(paintable_box.box_model(), used_values);
+
             paintable_box.set_offset(used_values.offset);
             paintable_box.set_content_size(used_values.content_width(), used_values.content_height());
             if (used_values.override_borders_data().has_value()) {
@@ -319,6 +323,8 @@ void LayoutState::commit(Box& root)
         auto line_paintable = inline_node->create_paintable_for_line_with_index(0);
         inline_node->add_paintable(line_paintable);
         inline_node_paintables.set(line_paintable.ptr());
+        if (auto const* used_values = used_values_per_layout_node.get(*inline_node).value_or(nullptr))
+            transfer_box_model_metrics(line_paintable->box_model(), *used_values);
     }
 
     // Resolve relative positions for regular boxes (not line box fragments):
@@ -331,7 +337,7 @@ void LayoutState::commit(Box& root)
         if (!node.is_box())
             continue;
 
-        auto& paintable = static_cast<Painting::PaintableBox&>(*node.first_paintable());
+        auto& paintable = as<Painting::PaintableBox>(*node.first_paintable());
         CSSPixelPoint offset;
 
         if (used_values.containing_line_box_fragment.has_value()) {
@@ -351,7 +357,7 @@ void LayoutState::commit(Box& root)
         }
         // Apply relative position inset if appropriate.
         if (node.computed_values().position() == CSS::Positioning::Relative && is<NodeWithStyleAndBoxModelMetrics>(node)) {
-            auto const& inset = static_cast<NodeWithStyleAndBoxModelMetrics const&>(node).box_model().inset;
+            auto const& inset = paintable.box_model().inset;
             offset.translate_by(inset.left, inset.top);
         }
         paintable.set_offset(offset);
@@ -439,38 +445,42 @@ void LayoutState::commit(Box& root)
 
     for (auto& it : used_values_per_layout_node) {
         auto& used_values = *it.value;
-        if (!used_values.node().is_box())
-            continue;
-        auto const& box = static_cast<Layout::Box const&>(used_values.node());
+        auto& node = used_values.node();
+        for (auto& paintable : node.paintables()) {
+            Painting::PaintableBox* paintable_box = nullptr;
+            if (is<Painting::PaintableBox>(paintable))
+                paintable_box = &static_cast<Painting::PaintableBox&>(paintable);
 
-        auto& paintable_box = const_cast<Painting::PaintableBox&>(*box.paintable_box());
+            if (!paintable_box)
+                continue;
 
-        if (box.is_sticky_position()) {
-            // https://drafts.csswg.org/css-position/#insets
-            // For sticky positioned boxes, the inset is instead relative to the relevant scrollport’s size. Negative values are allowed.
+            if (node.is_sticky_position()) {
+                // https://drafts.csswg.org/css-position/#insets
+                // For sticky positioned boxes, the inset is instead relative to the relevant scrollport’s size. Negative values are allowed.
 
-            auto sticky_insets = make<Painting::PaintableBox::StickyInsets>();
-            auto const& inset = box.computed_values().inset();
+                auto sticky_insets = make<Painting::PaintableBox::StickyInsets>();
+                auto const& inset = node.computed_values().inset();
 
-            auto const* nearest_scrollable_ancestor = paintable_box.nearest_scrollable_ancestor();
-            CSSPixelSize scrollport_size;
-            if (nearest_scrollable_ancestor) {
-                scrollport_size = nearest_scrollable_ancestor->absolute_rect().size();
-            }
+                auto const* nearest_scrollable_ancestor = paintable_box->nearest_scrollable_ancestor();
+                CSSPixelSize scrollport_size;
+                if (nearest_scrollable_ancestor) {
+                    scrollport_size = nearest_scrollable_ancestor->absolute_rect().size();
+                }
 
-            if (!inset.top().is_auto()) {
-                sticky_insets->top = inset.top().to_px(box, scrollport_size.height());
+                if (!inset.top().is_auto()) {
+                    sticky_insets->top = inset.top().to_px(node, scrollport_size.height());
+                }
+                if (!inset.right().is_auto()) {
+                    sticky_insets->right = inset.right().to_px(node, scrollport_size.width());
+                }
+                if (!inset.bottom().is_auto()) {
+                    sticky_insets->bottom = inset.bottom().to_px(node, scrollport_size.height());
+                }
+                if (!inset.left().is_auto()) {
+                    sticky_insets->left = inset.left().to_px(node, scrollport_size.width());
+                }
+                paintable_box->set_sticky_insets(move(sticky_insets));
             }
-            if (!inset.right().is_auto()) {
-                sticky_insets->right = inset.right().to_px(box, scrollport_size.width());
-            }
-            if (!inset.bottom().is_auto()) {
-                sticky_insets->bottom = inset.bottom().to_px(box, scrollport_size.height());
-            }
-            if (!inset.left().is_auto()) {
-                sticky_insets->left = inset.left().to_px(box, scrollport_size.width());
-            }
-            paintable_box.set_sticky_insets(move(sticky_insets));
         }
     }
 }

@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2022-2024, Andreas Kling <andreas@ladybird.org>
  * Copyright (c) 2023, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+ * Copyright (c) 2025, Luke Wilde <luke@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -133,6 +134,17 @@ void Navigable::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_container);
     visitor.visit(m_navigation_observers);
     m_event_handler.visit_edges(visitor);
+
+    for (auto& navigation_params : m_pending_navigations) {
+        navigation_params.visit_edges(visitor);
+    }
+}
+
+void Navigable::NavigateParams::visit_edges(Cell::Visitor& visitor)
+{
+    visitor.visit(response);
+    visitor.visit(source_document);
+    visitor.visit(source_element);
 }
 
 // https://html.spec.whatwg.org/multipage/nav-history-apis.html#script-closable
@@ -518,7 +530,7 @@ GC::Ptr<Navigable> Navigable::find_a_navigable_by_target_name(StringView name)
     auto subtrees_to_search = current_document.inclusive_ancestor_navigables();
 
     // 4. For each subtreeToSearch of subtreesToSearch, in reverse order:
-    for (auto const& subtree_to_search : subtrees_to_search) {
+    for (auto const& subtree_to_search : subtrees_to_search.in_reverse()) {
         // 1. Let documentToSearch be subtreeToSearch's active document.
         auto& document_to_search = *subtree_to_search->active_document();
 
@@ -608,42 +620,41 @@ Vector<GC::Ref<SessionHistoryEntry>>& Navigable::get_session_history_entries() c
 }
 
 // https://html.spec.whatwg.org/multipage/browsers.html#determining-navigation-params-policy-container
-static PolicyContainer determine_navigation_params_policy_container(URL::URL const& response_url,
-    Optional<PolicyContainer> history_policy_container,
-    Optional<PolicyContainer> initiator_policy_container,
-    Optional<PolicyContainer> parent_policy_container,
-    Optional<PolicyContainer> response_policy_container)
+static GC::Ref<PolicyContainer> determine_navigation_params_policy_container(URL::URL const& response_url,
+    JS::Realm& realm,
+    GC::Ptr<PolicyContainer> history_policy_container,
+    GC::Ptr<PolicyContainer> initiator_policy_container,
+    GC::Ptr<PolicyContainer> parent_policy_container,
+    GC::Ptr<PolicyContainer> response_policy_container)
 {
-    // NOTE: The clone a policy container AO is just a C++ copy
-
     // 1. If historyPolicyContainer is not null, then:
-    if (history_policy_container.has_value()) {
+    if (history_policy_container) {
         // FIXME: 1. Assert: responseURL requires storing the policy container in history.
 
         // 2. Return a clone of historyPolicyContainer.
-        return *history_policy_container;
+        return history_policy_container->clone(realm);
     }
 
     // 2. If responseURL is about:srcdoc, then:
-    if (response_url == "about:srcdoc"sv) {
+    if (response_url == URL::about_srcdoc()) {
         // 1. Assert: parentPolicyContainer is not null.
-        VERIFY(parent_policy_container.has_value());
+        VERIFY(parent_policy_container);
 
         // 2. Return a clone of parentPolicyContainer.
-        return *parent_policy_container;
+        return parent_policy_container->clone(realm);
     }
 
     // 3. If responseURL is local and initiatorPolicyContainer is not null, then return a clone of initiatorPolicyContainer.
-    if (Fetch::Infrastructure::is_local_url(response_url) && initiator_policy_container.has_value())
-        return *initiator_policy_container;
+    if (Fetch::Infrastructure::is_local_url(response_url) && initiator_policy_container)
+        return initiator_policy_container->clone(realm);
 
     // 4. If responsePolicyContainer is not null, then return responsePolicyContainer.
     // FIXME: File a spec issue to say "a clone of" here for consistency
-    if (response_policy_container.has_value())
-        return *response_policy_container;
+    if (response_policy_container)
+        return response_policy_container->clone(realm);
 
     // 5. Return a new policy container.
-    return {};
+    return realm.create<PolicyContainer>(realm);
 }
 
 // https://html.spec.whatwg.org/multipage/browsers.html#obtain-coop
@@ -699,7 +710,7 @@ static GC::Ref<NavigationParams> create_navigation_params_from_a_srcdoc_resource
     //    header list: (`Content-Type`, `text/html`)
     //    body: the UTF-8 encoding of documentResource, as a body
     auto response = Fetch::Infrastructure::Response::create(vm);
-    response->url_list().append(URL::URL("about:srcdoc"));
+    response->url_list().append(URL::about_srcdoc());
 
     auto header = Fetch::Infrastructure::Header::from_string_pair("Content-Type"sv, "text/html"sv);
     response->header_list()->append(move(header));
@@ -724,15 +735,17 @@ static GC::Ref<NavigationParams> create_navigation_params_from_a_srcdoc_resource
 
     // 6. Let policyContainer be the result of determining navigation params policy container given response's URL,
     //    entry's document state's history policy container, null, navigable's container document's policy container, and null.
-    Optional<PolicyContainer> history_policy_container = entry->document_state()->history_policy_container().visit(
-        [](PolicyContainer const& c) -> Optional<PolicyContainer> { return c; },
-        [](DocumentState::Client) -> Optional<PolicyContainer> { return {}; });
-    PolicyContainer policy_container;
+    GC::Ptr<PolicyContainer> history_policy_container = entry->document_state()->history_policy_container().visit(
+        [](GC::Ref<PolicyContainer> const& c) -> GC::Ptr<PolicyContainer> { return c; },
+        [](DocumentState::Client) -> GC::Ptr<PolicyContainer> { return {}; });
+    GC::Ptr<PolicyContainer> policy_container;
     if (navigable->container()) {
         // NOTE: Specification assumes that only navigables corresponding to iframes can be navigated to about:srcdoc.
         //       We also use srcdoc to implement load_html() for top level navigables so we need to null check container
         //       because it might be null.
-        policy_container = determine_navigation_params_policy_container(*response->url(), history_policy_container, {}, navigable->container_document()->policy_container(), {});
+        policy_container = determine_navigation_params_policy_container(*response->url(), realm, history_policy_container, {}, navigable->container_document()->policy_container(), {});
+    } else {
+        policy_container = realm.create<PolicyContainer>(realm);
     }
 
     // 7. Return a new navigation params, with
@@ -757,7 +770,7 @@ static GC::Ref<NavigationParams> create_navigation_params_from_a_srcdoc_resource
     navigation_params->response = response;
     navigation_params->coop_enforcement_result = move(coop_enforcement_result);
     navigation_params->origin = move(response_origin);
-    navigation_params->policy_container = policy_container;
+    navigation_params->policy_container = *policy_container;
     navigation_params->final_sandboxing_flag_set = target_snapshot_params.sandboxing_flags;
     navigation_params->opener_policy = move(coop);
     navigation_params->about_base_url = entry->document_state()->about_base_url();
@@ -904,7 +917,7 @@ static WebIDL::ExceptionOr<Navigable::NavigationParamsVariant> create_navigation
     SandboxingFlagSet final_sandbox_flags = {};
 
     // 14. Let responsePolicyContainer be null.
-    Optional<PolicyContainer> response_policy_container = {};
+    GC::Ptr<PolicyContainer> response_policy_container = {};
 
     // 15. Let responseCOOP be a new opener policy.
     OpenerPolicy response_coop = {};
@@ -1015,8 +1028,6 @@ static WebIDL::ExceptionOr<Navigable::NavigationParamsVariant> create_navigation
         }
 
         // 16. Assert: locationURL is a URL.
-        VERIFY(location_url.value()->is_valid());
-
         // 17. Set entry's classic history API state to StructuredSerializeForStorage(null).
         entry->set_classic_history_api_state(MUST(structured_serialize_for_storage(vm, JS::js_null())));
 
@@ -1098,10 +1109,10 @@ static WebIDL::ExceptionOr<Navigable::NavigationParamsVariant> create_navigation
 
     // 23. Let resultPolicyContainer be the result of determining navigation params policy container given response's URL,
     //     entry's document state's history policy container, sourceSnapshotParams's source policy container, null, and responsePolicyContainer.
-    Optional<PolicyContainer> history_policy_container = entry->document_state()->history_policy_container().visit(
-        [](PolicyContainer const& c) -> Optional<PolicyContainer> { return c; },
-        [](DocumentState::Client) -> Optional<PolicyContainer> { return {}; });
-    auto result_policy_container = determine_navigation_params_policy_container(*response_holder->response()->url(), history_policy_container, source_snapshot_params.source_policy_container, {}, response_policy_container);
+    GC::Ptr<PolicyContainer> history_policy_container = entry->document_state()->history_policy_container().visit(
+        [](GC::Ref<PolicyContainer> const& c) -> GC::Ptr<PolicyContainer> { return c; },
+        [](DocumentState::Client) -> GC::Ptr<PolicyContainer> { return {}; });
+    auto result_policy_container = determine_navigation_params_policy_container(*response_holder->response()->url(), realm, history_policy_container, source_snapshot_params.source_policy_container, {}, response_policy_container);
 
     // 24. If navigable's container is an iframe, and response's timing allow passed flag is set, then set container's pending resource-timing start time to null.
     if (navigable->container() && is<HTML::HTMLIFrameElement>(*navigable->container()) && response_holder->response()->timing_allow_passed())
@@ -1254,7 +1265,7 @@ WebIDL::ExceptionOr<void> Navigable::populate_session_history_entry_document(
             auto error_html = load_error_page(entry->url(), error_message).release_value_but_fixme_should_propagate_errors();
             entry->document_state()->set_document(create_document_for_inline_content(this, navigation_id, user_involvement, [this, error_html](auto& document) {
                 auto parser = HTML::HTMLParser::create(document, error_html, "utf-8"sv);
-                document.set_url(URL::URL("about:error"));
+                document.set_url(URL::about_error());
                 parser->run();
 
                 // NOTE: Once the page has been set up, the user agent must act as if it had stopped parsing.
@@ -1300,7 +1311,14 @@ WebIDL::ExceptionOr<void> Navigable::populate_session_history_entry_document(
                 // 2. Set entry's document state's origin to document's origin.
                 entry->document_state()->set_origin(document->origin());
 
-                // FIXME: 3. If document's URL requires storing the policy container in history, then:
+                // 3. If document's URL requires storing the policy container in history, then:
+                if (url_requires_storing_the_policy_container_in_history(document->url())) {
+                    // 1. Assert: navigationParams is a navigation params (i.e., neither null nor a non-fetch scheme navigation params).
+                    VERIFY(navigation_params.has<GC::Ref<NavigationParams>>());
+
+                    // 2. Set entry's document state's history policy container to navigationParams's policy container.
+                    entry->document_state()->set_history_policy_container(GC::Ref { *navigation_params.get<GC::Ref<NavigationParams>>()->policy_container });
+                }
             }
 
             // 3. If entry's document state's request referrer is "client", and navigationParams is a navigation params (i.e., neither null nor a non-fetch scheme navigation params), then:
@@ -1322,40 +1340,16 @@ WebIDL::ExceptionOr<void> Navigable::populate_session_history_entry_document(
     return {};
 }
 
-// To navigate a navigable navigable to a URL url using a Document sourceDocument,
-// with an optional POST resource, string, or null documentResource (default null),
-// an optional response-or-null response (default null), an optional boolean exceptionsEnabled (default false),
-// an optional NavigationHistoryBehavior historyHandling (default "auto"),
-// an optional serialized state-or-null navigationAPIState (default null),
-// an optional entry list or null formDataEntryList (default null),
-// an optional referrer policy referrerPolicy (default the empty string),
-// an optional user navigation involvement userInvolvement (default "none"),
-// and an optional Element sourceElement (default null):
-
-// https://html.spec.whatwg.org/multipage/browsing-the-web.html#navigate
 WebIDL::ExceptionOr<void> Navigable::navigate(NavigateParams params)
 {
     // AD-HOC: Not in the spec but subsequent steps will fail if the navigable doesn't have an active window.
     if (!active_window())
         return {};
 
-    auto const& url = params.url;
     auto source_document = params.source_document;
-    auto const& document_resource = params.document_resource;
-    auto response = params.response;
     auto exceptions_enabled = params.exceptions_enabled;
-    auto history_handling = params.history_handling;
-    auto const& navigation_api_state = params.navigation_api_state;
-    auto const& form_data_entry_list = params.form_data_entry_list;
-    auto referrer_policy = params.referrer_policy;
-    auto user_involvement = params.user_involvement;
-    auto source_element = params.source_element;
     auto& active_document = *this->active_document();
     auto& realm = active_document.realm();
-    auto& vm = this->vm();
-
-    // 1. Let cspNavigationType be "form-submission" if formDataEntryList is non-null; otherwise "other".
-    auto csp_navigation_type = form_data_entry_list.has_value() ? CSPNavigationType::FormSubmission : CSPNavigationType::Other;
 
     // 2. Let sourceSnapshotParams be the result of snapshotting source snapshot params given sourceDocument.
     auto source_snapshot_params = source_document->snapshot_source_snapshot_params();
@@ -1377,8 +1371,67 @@ WebIDL::ExceptionOr<void> Navigable::navigate(NavigateParams params)
         return {};
     }
 
+    if (m_pending_navigations.size() == 0 && params.url.equals(URL::about_blank())) {
+        begin_navigation(move(params));
+        return {};
+    }
+
+    if (!m_has_session_history_entry_and_ready_for_navigation) {
+        m_pending_navigations.append(move(params));
+        return {};
+    }
+
+    begin_navigation(move(params));
+    return {};
+}
+
+// To navigate a navigable navigable to a URL url using a Document sourceDocument,
+// with an optional POST resource, string, or null documentResource (default null),
+// an optional response-or-null response (default null), an optional boolean exceptionsEnabled (default false),
+// an optional NavigationHistoryBehavior historyHandling (default "auto"),
+// an optional serialized state-or-null navigationAPIState (default null),
+// an optional entry list or null formDataEntryList (default null),
+// an optional referrer policy referrerPolicy (default the empty string),
+// an optional user navigation involvement userInvolvement (default "none"),
+// and an optional Element sourceElement (default null):
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#navigate
+void Navigable::begin_navigation(NavigateParams params)
+{
+    // AD-HOC: Not in the spec but subsequent steps will fail if the navigable doesn't have an active window.
+    if (!active_window())
+        return;
+
+    auto const& url = params.url;
+    auto source_document = params.source_document;
+    auto const& document_resource = params.document_resource;
+    auto response = params.response;
+    auto history_handling = params.history_handling;
+    auto const& navigation_api_state = params.navigation_api_state;
+    auto const& form_data_entry_list = params.form_data_entry_list;
+    auto referrer_policy = params.referrer_policy;
+    auto user_involvement = params.user_involvement;
+    auto source_element = params.source_element;
+    auto& active_document = *this->active_document();
+    auto& vm = this->vm();
+
+    // 1. Let cspNavigationType be "form-submission" if formDataEntryList is non-null; otherwise "other".
+    auto csp_navigation_type = form_data_entry_list.has_value() ? CSPNavigationType::FormSubmission : CSPNavigationType::Other;
+
+    // 2. Let sourceSnapshotParams be the result of snapshotting source snapshot params given sourceDocument.
+    auto source_snapshot_params = source_document->snapshot_source_snapshot_params();
+
+    // 3. Let initiatorOriginSnapshot be sourceDocument's origin.
+    auto initiator_origin_snapshot = source_document->origin();
+
+    // 4. Let initiatorBaseURLSnapshot be sourceDocument's document base URL.
+    auto initiator_base_url_snapshot = source_document->base_url();
+
+    // 5. If sourceDocument's node navigable is not allowed by sandboxing to navigate navigable given sourceSnapshotParams, then:
+    // NOTE: This step is handled in Navigable::navigate()
+
     // 6. Let navigationId be the result of generating a random UUID.
-    String navigation_id = TRY_OR_THROW_OOM(vm, Crypto::generate_random_uuid());
+    String navigation_id = MUST(Crypto::generate_random_uuid());
 
     // FIXME: 7. If the surrounding agent is equal to navigable's active document's relevant agent, then continue these steps.
     //           Otherwise, queue a global task on the navigation and traversal task source given navigable's active window to continue these steps.
@@ -1389,7 +1442,7 @@ WebIDL::ExceptionOr<void> Navigable::navigate(NavigateParams params)
     if (active_document.unload_counter() > 0) {
         // FIXME: invoke WebDriver BiDi navigation failed with navigable and a WebDriver BiDi navigation status whose id
         //        is navigationId, status is "canceled", and url is url
-        return {};
+        return;
     }
 
     // 9. Let container be navigable's container.
@@ -1434,10 +1487,10 @@ WebIDL::ExceptionOr<void> Navigable::navigate(NavigateParams params)
         && url.equals(active_session_history_entry()->url(), URL::ExcludeFragment::Yes)
         && url.fragment().has_value()) {
         // 1. Navigate to a fragment given navigable, url, historyHandling, userInvolvement, sourceElement, navigationAPIState, and navigationId.
-        TRY(navigate_to_a_fragment(url, to_history_handling_behavior(history_handling), user_involvement, source_element, navigation_api_state, navigation_id));
+        navigate_to_a_fragment(url, to_history_handling_behavior(history_handling), user_involvement, source_element, navigation_api_state, navigation_id);
 
         // 2. Return.
-        return {};
+        return;
     }
 
     // 14. If navigable's parent is non-null, then set navigable's is delaying load events to true.
@@ -1454,7 +1507,7 @@ WebIDL::ExceptionOr<void> Navigable::navigate(NavigateParams params)
         // FIXME: 1. Invoke WebDriver BiDi navigation failed with navigable and a new WebDriver BiDi navigation status whose id is navigationId, status is "canceled", and url is url.
 
         // 2. Return.
-        return {};
+        return;
     }
 
     // 18. Set the ongoing navigation for navigable to navigationId.
@@ -1469,7 +1522,7 @@ WebIDL::ExceptionOr<void> Navigable::navigate(NavigateParams params)
         }));
 
         // 2. Return.
-        return {};
+        return;
     }
 
     // 20. If all of the following are true:
@@ -1484,7 +1537,7 @@ WebIDL::ExceptionOr<void> Navigable::navigate(NavigateParams params)
         auto navigation = active_window()->navigation();
 
         // 2. Let entryListForFiring be formDataEntryList if documentResource is a POST resource; otherwise, null.
-        auto entry_list_for_firing = [&]() -> Optional<Vector<XHR::FormDataEntry>&> {
+        auto entry_list_for_firing = [&]() -> Optional<Vector<XHR::FormDataEntry>> {
             if (document_resource.has<POSTResource>())
                 return form_data_entry_list;
             return {};
@@ -1513,7 +1566,7 @@ WebIDL::ExceptionOr<void> Navigable::navigate(NavigateParams params)
 
         // 5. If continue is false, then return.
         if (!continue_)
-            return {};
+            return;
     }
 
     // AD-HOC: Tell the UI that we started loading.
@@ -1612,14 +1665,12 @@ WebIDL::ExceptionOr<void> Navigable::navigate(NavigateParams params)
         })).release_value_but_fixme_should_propagate_errors();
     }));
 
-    return {};
+    return;
 }
 
 // https://html.spec.whatwg.org/multipage/browsing-the-web.html#navigate-fragid
-WebIDL::ExceptionOr<void> Navigable::navigate_to_a_fragment(URL::URL const& url, HistoryHandlingBehavior history_handling, UserNavigationInvolvement user_involvement, GC::Ptr<DOM::Element> source_element, Optional<SerializationRecord> navigation_api_state, String navigation_id)
+void Navigable::navigate_to_a_fragment(URL::URL const& url, HistoryHandlingBehavior history_handling, UserNavigationInvolvement user_involvement, GC::Ptr<DOM::Element> source_element, Optional<SerializationRecord> navigation_api_state, String navigation_id)
 {
-    (void)navigation_id;
-
     // 1. Let navigation be navigable's active window's navigation API.
     VERIFY(active_window());
     auto navigation = active_window()->navigation();
@@ -1636,7 +1687,7 @@ WebIDL::ExceptionOr<void> Navigable::navigate_to_a_fragment(URL::URL const& url,
 
     // 5. If continue is false, then return.
     if (!continue_)
-        return {};
+        return;
 
     // 6. Let historyEntry be a new session history entry, with
     //      URL: url
@@ -1700,8 +1751,6 @@ WebIDL::ExceptionOr<void> Navigable::navigate_to_a_fragment(URL::URL const& url,
         //            navigation status whose id is navigationId, url is url, and status is "complete".
         (void)navigation_id;
     }));
-
-    return {};
 }
 
 // https://html.spec.whatwg.org/multipage/browsing-the-web.html#evaluate-a-javascript:-url
@@ -1812,7 +1861,7 @@ GC::Ptr<DOM::Document> Navigable::evaluate_javascript_url(URL::URL const& url, U
 }
 
 // https://html.spec.whatwg.org/multipage/browsing-the-web.html#navigate-to-a-javascript:-url
-void Navigable::navigate_to_a_javascript_url(URL::URL const& url, HistoryHandlingBehavior history_handling, SourceSnapshotParams, URL::Origin const& initiator_origin, UserNavigationInvolvement user_involvement, CSPNavigationType csp_navigation_type, String navigation_id)
+void Navigable::navigate_to_a_javascript_url(URL::URL const& url, HistoryHandlingBehavior history_handling, GC::Ref<SourceSnapshotParams>, URL::Origin const& initiator_origin, UserNavigationInvolvement user_involvement, CSPNavigationType csp_navigation_type, String navigation_id)
 {
     // 1. Assert: historyHandling is "replace".
     VERIFY(history_handling == HistoryHandlingBehavior::Replace);
@@ -2357,6 +2406,15 @@ void Navigable::stop_loading()
 
     // 3. Abort a document and its descendants given document.
     document->abort_a_document_and_its_descendants();
+}
+
+void Navigable::set_has_session_history_entry_and_ready_for_navigation()
+{
+    m_has_session_history_entry_and_ready_for_navigation = true;
+    while (!m_pending_navigations.is_empty()) {
+        auto navigation_params = m_pending_navigations.take_first();
+        begin_navigation(navigation_params);
+    }
 }
 
 }

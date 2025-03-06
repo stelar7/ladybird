@@ -1,7 +1,7 @@
 /*
- * Copyright (c) 2018-2024, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2018-2025, Andreas Kling <andreas@ladybird.org>
  * Copyright (c) 2021-2023, Linus Groh <linusg@serenityos.org>
- * Copyright (c) 2021-2023, Luke Wilde <lukew@serenityos.org>
+ * Copyright (c) 2021-2025, Luke Wilde <luke@ladybird.org>
  * Copyright (c) 2021-2024, Sam Atkins <sam@ladybird.org>
  * Copyright (c) 2024, Matthew Olsson <mattco@serenityos.org>
  * Copyright (c) 2025, Jelle Raaijmakers <jelle@ladybird.org>
@@ -9,7 +9,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/Bitmap.h>
 #include <AK/CharacterTypes.h>
 #include <AK/Debug.h>
 #include <AK/GenericLexer.h>
@@ -36,6 +35,7 @@
 #include <LibWeb/CSS/CSSAnimation.h>
 #include <LibWeb/CSS/CSSImportRule.h>
 #include <LibWeb/CSS/CSSTransition.h>
+#include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/FontFaceSet.h>
 #include <LibWeb/CSS/MediaQueryList.h>
 #include <LibWeb/CSS/MediaQueryListEvent.h>
@@ -119,6 +119,7 @@
 #include <LibWeb/HTML/NavigationParams.h>
 #include <LibWeb/HTML/Numbers.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
+#include <LibWeb/HTML/PolicyContainers.h>
 #include <LibWeb/HTML/PopStateEvent.h>
 #include <LibWeb/HTML/Scripting/Agent.h>
 #include <LibWeb/HTML/Scripting/ClassicScript.h>
@@ -369,6 +370,12 @@ WebIDL::ExceptionOr<GC::Ref<Document>> Document::create_and_initialize(Type type
     if (auto maybe_last_modified = navigation_params.response->header_list()->get("Last-Modified"sv.bytes()); maybe_last_modified.has_value())
         document->m_last_modified = Core::DateTime::parse("%a, %d %b %Y %H:%M:%S %Z"sv, maybe_last_modified.value());
 
+    // NOTE: Non-standard: Pull out the Content-Language header to determine the document's language.
+    if (auto maybe_http_content_language = navigation_params.response->header_list()->get("Content-Language"sv.bytes()); maybe_http_content_language.has_value()) {
+        if (auto maybe_content_language = String::from_utf8(maybe_http_content_language.value()); !maybe_content_language.is_error())
+            document->m_http_content_language = maybe_content_language.release_value();
+    }
+
     // 10. Set window's associated Document to document.
     window->set_associated_document(*document);
 
@@ -422,7 +429,7 @@ GC::Ref<Document> Document::create(JS::Realm& realm, URL::URL const& url)
 
 GC::Ref<Document> Document::create_for_fragment_parsing(JS::Realm& realm)
 {
-    return realm.create<Document>(realm, "about:blank"sv, TemporaryDocumentForFragmentParsing::Yes);
+    return realm.create<Document>(realm, URL::about_blank(), TemporaryDocumentForFragmentParsing::Yes);
 }
 
 Document::Document(JS::Realm& realm, const URL::URL& url, TemporaryDocumentForFragmentParsing temporary_document_for_fragment_parsing)
@@ -512,6 +519,7 @@ void Document::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_style_sheets);
     visitor.visit(m_hovered_node);
     visitor.visit(m_inspected_node);
+    visitor.visit(m_highlighted_node);
     visitor.visit(m_active_favicon);
     visitor.visit(m_focused_element);
     visitor.visit(m_active_element);
@@ -536,6 +544,7 @@ void Document::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_fonts);
     visitor.visit(m_selection);
     visitor.visit(m_first_base_element_with_href_in_tree_order);
+    visitor.visit(m_first_base_element_with_target_in_tree_order);
     visitor.visit(m_parser);
     visitor.visit(m_lazy_load_intersection_observer);
     visitor.visit(m_visual_viewport);
@@ -573,11 +582,14 @@ void Document::visit_edges(Cell::Visitor& visitor)
 
     visitor.visit(m_top_layer_elements);
     visitor.visit(m_top_layer_pending_removals);
+    visitor.visit(m_showing_auto_popover_list);
+    visitor.visit(m_showing_hint_popover_list);
     visitor.visit(m_console_client);
     visitor.visit(m_editing_host_manager);
     visitor.visit(m_local_storage_holder);
     visitor.visit(m_session_storage_holder);
     visitor.visit(m_render_blocking_elements);
+    visitor.visit(m_policy_container);
 }
 
 // https://w3c.github.io/selection-api/#dom-document-getselection
@@ -591,40 +603,59 @@ GC::Ptr<Selection::Selection> Document::get_selection() const
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-document-write
-WebIDL::ExceptionOr<void> Document::write(Vector<String> const& strings)
+WebIDL::ExceptionOr<void> Document::write(Vector<String> const& text)
 {
-    StringBuilder builder;
-    builder.join(""sv, strings);
-
-    return run_the_document_write_steps(builder.string_view());
+    // The document.write(...text) method steps are to run the document write steps with this, text, false, and "Document write".
+    return run_the_document_write_steps(text, AddLineFeed::No, TrustedTypes::InjectionSink::DocumentWrite);
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-document-writeln
-WebIDL::ExceptionOr<void> Document::writeln(Vector<String> const& strings)
+WebIDL::ExceptionOr<void> Document::writeln(Vector<String> const& text)
 {
-    StringBuilder builder;
-    builder.join(""sv, strings);
-    builder.append("\n"sv);
-
-    return run_the_document_write_steps(builder.string_view());
+    // The document.writeln(...text) method steps are to run the document write steps with this, text, true, and "Document writeln".
+    return run_the_document_write_steps(text, AddLineFeed::Yes, TrustedTypes::InjectionSink::DocumentWriteln);
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#document-write-steps
-WebIDL::ExceptionOr<void> Document::run_the_document_write_steps(StringView input)
+WebIDL::ExceptionOr<void> Document::run_the_document_write_steps(Vector<String> const& text, AddLineFeed line_feed, TrustedTypes::InjectionSink sink)
 {
-    // 1. If document is an XML document, then throw an "InvalidStateError" DOMException.
+    // 1. Let string be the empty string.
+    StringBuilder string;
+
+    // 2. Let isTrusted be false if text contains a string; otherwise true.
+    // FIXME: We currently only accept strings. Revisit this once we support the TrustedHTML type.
+    auto is_trusted = true;
+
+    // 3. For each value of text:
+    for (auto const& value : text) {
+        // FIXME: 1. If value is a TrustedHTML object, then append value's associated data to string.
+
+        // 2. Otherwise, append value to string.
+        string.append(value);
+    }
+
+    // FIXME: 4. If isTrusted is false, set string to the result of invoking the Get Trusted Type compliant string algorithm
+    //    with TrustedHTML, this's relevant global object, string, sink, and "script".
+    (void)is_trusted;
+    (void)sink;
+
+    // 5. If lineFeed is true, append U+000A LINE FEED to string.
+    if (line_feed == AddLineFeed::Yes)
+        string.append('\n');
+
+    // 6. If document is an XML document, then throw an "InvalidStateError" DOMException.
     if (m_type == Type::XML)
         return WebIDL::InvalidStateError::create(realm(), "write() called on XML document."_string);
 
-    // 2. If document's throw-on-dynamic-markup-insertion counter is greater than 0, then throw an "InvalidStateError" DOMException.
+    // 7. If document's throw-on-dynamic-markup-insertion counter is greater than 0, then throw an "InvalidStateError" DOMException.
     if (m_throw_on_dynamic_markup_insertion_counter > 0)
         return WebIDL::InvalidStateError::create(realm(), "throw-on-dynamic-markup-insertion-counter greater than zero."_string);
 
-    // 3. If document's active parser was aborted is true, then return.
+    // 8. If document's active parser was aborted is true, then return.
     if (m_active_parser_was_aborted)
         return {};
 
-    // 4. If the insertion point is undefined, then:
+    // 9. If the insertion point is undefined, then:
     if (!(m_parser && m_parser->tokenizer().is_insertion_point_defined())) {
         // 1. If document's unload counter is greater than 0 or document's ignore-destructive-writes counter is greater than 0, then return.
         if (m_unload_counter > 0 || m_ignore_destructive_writes_counter > 0)
@@ -634,13 +665,13 @@ WebIDL::ExceptionOr<void> Document::run_the_document_write_steps(StringView inpu
         TRY(open());
     }
 
-    // 5. Insert input into the input stream just before the insertion point.
-    m_parser->tokenizer().insert_input_at_insertion_point(input);
+    // 10. Insert string into the input stream just before the insertion point.
+    m_parser->tokenizer().insert_input_at_insertion_point(string.string_view());
 
-    // 6. If there is no pending parsing-blocking script, have the HTML parser process input, one code point at a time,
-    //    processing resulting tokens as they are emitted, and stopping when the tokenizer reaches the insertion point
-    //    or when the processing of the tokenizer is aborted by the tree construction stage (this can happen if a script
-    //    end tag token is emitted by the tokenizer).
+    // 11. If document's pending parsing-blocking script is null, then have the HTML parser process string, one code
+    //     point at a time, processing resulting tokens as they are emitted, and stopping when the tokenizer reaches
+    //     the insertion point or when the processing of the tokenizer is aborted by the tree construction stage (this
+    //     can happen if a script end tag token is emitted by the tokenizer).
     if (!pending_parsing_blocking_script())
         m_parser->run(HTML::HTMLTokenizer::StopAtInsertionPoint::Yes);
 
@@ -653,9 +684,9 @@ WebIDL::ExceptionOr<Document*> Document::open(Optional<String> const&, Optional<
     // If document belongs to a child navigable, we need to make sure its initial navigation is done,
     // because subsequent steps will modify "initial about:blank" to false, which would cause
     // initial navigation to fail in case it was "about:blank".
-    if (auto navigable = this->navigable(); navigable && navigable->container() && !navigable->container()->content_navigable_initialized()) {
+    if (auto navigable = this->navigable(); navigable && navigable->container() && !navigable->container()->content_navigable_has_session_history_entry_and_ready_for_navigation()) {
         HTML::main_thread_event_loop().spin_processing_tasks_with_source_until(HTML::Task::Source::NavigationAndTraversal, GC::create_function(heap(), [navigable_container = navigable->container()] {
-            return navigable_container->content_navigable_initialized();
+            return navigable_container->content_navigable_has_session_history_entry_and_ready_for_navigation();
         }));
     }
 
@@ -1075,23 +1106,36 @@ Vector<CSS::BackgroundLayerData> const* Document::background_layers() const
 
 void Document::update_base_element(Badge<HTML::HTMLBaseElement>)
 {
-    GC::Ptr<HTML::HTMLBaseElement const> base_element;
+    GC::Ptr<HTML::HTMLBaseElement const> base_element_with_href = nullptr;
+    GC::Ptr<HTML::HTMLBaseElement const> base_element_with_target = nullptr;
 
-    for_each_in_subtree_of_type<HTML::HTMLBaseElement>([&base_element](HTML::HTMLBaseElement const& base_element_in_tree) {
-        if (base_element_in_tree.has_attribute(HTML::AttributeNames::href)) {
-            base_element = &base_element_in_tree;
-            return TraversalDecision::Break;
+    for_each_in_subtree_of_type<HTML::HTMLBaseElement>([&base_element_with_href, &base_element_with_target](HTML::HTMLBaseElement const& base_element_in_tree) {
+        if (!base_element_with_href && base_element_in_tree.has_attribute(HTML::AttributeNames::href)) {
+            base_element_with_href = &base_element_in_tree;
+            if (base_element_with_target)
+                return TraversalDecision::Break;
+        }
+        if (!base_element_with_target && base_element_in_tree.has_attribute(HTML::AttributeNames::target)) {
+            base_element_with_target = &base_element_in_tree;
+            if (base_element_with_href)
+                return TraversalDecision::Break;
         }
 
         return TraversalDecision::Continue;
     });
 
-    m_first_base_element_with_href_in_tree_order = base_element;
+    m_first_base_element_with_href_in_tree_order = base_element_with_href;
+    m_first_base_element_with_target_in_tree_order = base_element_with_target;
 }
 
 GC::Ptr<HTML::HTMLBaseElement const> Document::first_base_element_with_href_in_tree_order() const
 {
     return m_first_base_element_with_href_in_tree_order;
+}
+
+GC::Ptr<HTML::HTMLBaseElement const> Document::first_base_element_with_target_in_tree_order() const
+{
+    return m_first_base_element_with_target_in_tree_order;
 }
 
 // https://html.spec.whatwg.org/multipage/urls-and-fetching.html#fallback-base-url
@@ -1476,17 +1520,15 @@ void Document::update_animated_style_if_needed()
     if (!m_needs_animated_style_update)
         return;
 
-    invalidate_display_list();
-
     for (auto& timeline : m_associated_animation_timelines) {
         for (auto& animation : timeline->associated_animations()) {
-            if (auto effect = animation->effect(); effect && effect->target())
-                effect->target()->reset_animated_css_properties();
-        }
-
-        for (auto& animation : timeline->associated_animations()) {
-            if (auto effect = animation->effect())
+            if (animation->is_idle() || animation->is_finished())
+                continue;
+            if (auto effect = animation->effect()) {
+                if (auto* target = effect->target())
+                    target->reset_animated_css_properties();
                 effect->update_computed_properties();
+            }
         }
     }
     m_needs_animated_style_update = false;
@@ -1614,29 +1656,36 @@ Layout::Viewport* Document::layout_node()
     return static_cast<Layout::Viewport*>(Node::layout_node());
 }
 
-void Document::set_inspected_node(Node* node, Optional<CSS::Selector::PseudoElement::Type> pseudo_element)
+void Document::set_inspected_node(GC::Ptr<Node> node)
 {
-    if (m_inspected_node.ptr() == node && m_inspected_pseudo_element == pseudo_element)
+    m_inspected_node = node;
+}
+
+void Document::set_highlighted_node(GC::Ptr<Node> node, Optional<CSS::Selector::PseudoElement::Type> pseudo_element)
+{
+    if (m_highlighted_node == node && m_highlighted_pseudo_element == pseudo_element)
         return;
 
-    if (auto layout_node = inspected_layout_node(); layout_node && layout_node->first_paintable())
+    if (auto layout_node = highlighted_layout_node(); layout_node && layout_node->first_paintable())
         layout_node->first_paintable()->set_needs_display();
 
-    m_inspected_node = node;
-    m_inspected_pseudo_element = pseudo_element;
+    m_highlighted_node = node;
+    m_highlighted_pseudo_element = pseudo_element;
 
-    if (auto layout_node = inspected_layout_node(); layout_node && layout_node->first_paintable())
+    if (auto layout_node = highlighted_layout_node(); layout_node && layout_node->first_paintable())
         layout_node->first_paintable()->set_needs_display();
 }
 
-Layout::Node* Document::inspected_layout_node()
+GC::Ptr<Layout::Node> Document::highlighted_layout_node()
 {
-    if (!m_inspected_node)
+    if (!m_highlighted_node)
         return nullptr;
-    if (!m_inspected_pseudo_element.has_value() || !m_inspected_node->is_element())
-        return m_inspected_node->layout_node();
-    auto& element = static_cast<Element&>(*m_inspected_node);
-    return element.get_pseudo_element_node(m_inspected_pseudo_element.value());
+
+    if (!m_highlighted_pseudo_element.has_value() || !m_highlighted_node->is_element())
+        return m_highlighted_node->layout_node();
+
+    auto const& element = static_cast<Element const&>(*m_highlighted_node);
+    return element.get_pseudo_element_node(m_highlighted_pseudo_element.value());
 }
 
 static Node* find_common_ancestor(Node* a, Node* b)
@@ -1679,86 +1728,85 @@ void Document::invalidate_style_of_elements_affected_by_has()
     for (auto const& node : m_pending_nodes_for_style_invalidation_due_to_presence_of_has) {
         if (node.is_null())
             continue;
-        node->invalidate_ancestors_affected_by_has_in_subject_position();
-    }
+        for (auto* ancestor = node.ptr(); ancestor; ancestor = ancestor->parent_or_shadow_host()) {
+            if (!ancestor->is_element())
+                continue;
+            auto& element = static_cast<Element&>(*ancestor);
+            element.invalidate_style_if_affected_by_has();
 
-    // Take care of elements that affected by :has() in non-subject position, i.e., ".a:has(.b) > .c".
-    // Elements affected by :has() in subject position, i.e., ".a:has(.b)", are handled by
-    // Node::invalidate_style() and should already be marked for style update by now.
-    Vector<CSS::InvalidationSet::Property, 1> changed_properties;
-    changed_properties.append({ .type = CSS::InvalidationSet::Property::Type::PseudoClass, .value = CSS::PseudoClass::Has });
-    auto invalidation_set = style_computer().invalidation_set_for_properties(changed_properties);
-    for_each_shadow_including_inclusive_descendant([&](Node& node) {
-        if (!node.is_element())
-            return TraversalDecision::Continue;
-        auto& element = static_cast<Element&>(node);
-        bool needs_style_recalculation = false;
-        if (invalidation_set.needs_invalidate_whole_subtree()) {
-            needs_style_recalculation = true;
-        } else if (element.includes_properties_from_invalidation_set(invalidation_set)) {
-            needs_style_recalculation = true;
+            auto* parent = ancestor->parent_or_shadow_host();
+            if (!parent)
+                return;
+
+            // If any ancestor's sibling was tested against selectors like ".a:has(+ .b)" or ".a:has(~ .b)"
+            // its style might be affected by the change in descendant node.
+            parent->for_each_child_of_type<Element>([&](auto& ancestor_sibling_element) {
+                if (ancestor_sibling_element.affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator())
+                    ancestor_sibling_element.invalidate_style_if_affected_by_has();
+                return IterationDecision::Continue;
+            });
         }
-
-        if (needs_style_recalculation)
-            element.set_needs_style_update(true);
-        return TraversalDecision::Continue;
-    });
+    }
 }
 
 void Document::invalidate_style_for_elements_affected_by_hover_change(Node& old_new_hovered_common_ancestor, GC::Ptr<Node> hovered_node)
 {
     auto const& hover_rules = style_computer().get_hover_rules();
-    if (hover_rules.is_empty())
-        return;
 
     auto& root = old_new_hovered_common_ancestor.root();
     auto shadow_root = is<ShadowRoot>(root) ? static_cast<ShadowRoot const*>(&root) : nullptr;
 
     auto& style_computer = this->style_computer();
-    auto compute_hover_selectors_match_state = [&](Element const& element) {
-        auto state = MUST(AK::Bitmap::create(hover_rules.size(), 0));
-        for (size_t rule_index = 0; rule_index < hover_rules.size(); ++rule_index) {
-            auto const& rule = hover_rules[rule_index];
+    auto does_rule_match_on_element = [&](Element const& element, CSS::MatchingRule const& rule) {
+        auto rule_root = rule.shadow_root;
+        auto from_user_agent_or_user_stylesheet = rule.cascade_origin == CSS::CascadeOrigin::UserAgent || rule.cascade_origin == CSS::CascadeOrigin::User;
+        bool rule_is_relevant_for_current_scope = rule_root == shadow_root
+            || (element.is_shadow_host() && rule_root == element.shadow_root())
+            || from_user_agent_or_user_stylesheet;
+        if (!rule_is_relevant_for_current_scope)
+            return false;
 
-            auto rule_root = rule.shadow_root;
-            auto from_user_agent_or_user_stylesheet = rule.cascade_origin == CSS::CascadeOrigin::UserAgent || rule.cascade_origin == CSS::CascadeOrigin::User;
-            bool rule_is_relevant_for_current_scope = rule_root == shadow_root
-                || (element.is_shadow_host() && rule_root == element.shadow_root())
-                || from_user_agent_or_user_stylesheet;
-            if (!rule_is_relevant_for_current_scope)
-                continue;
+        auto const& selector = rule.selector;
+        if (selector.can_use_ancestor_filter() && style_computer.should_reject_with_ancestor_filter(selector))
+            return false;
 
-            auto const& selector = rule.selector;
-            if (style_computer.should_reject_with_ancestor_filter(selector))
-                continue;
-
-            SelectorEngine::MatchContext context;
-            bool selector_matched = false;
-            if (SelectorEngine::matches(selector, element, {}, context, {}))
-                selector_matched = true;
-            if (element.has_pseudo_elements()) {
-                if (SelectorEngine::matches(selector, element, {}, context, CSS::Selector::PseudoElement::Type::Before))
-                    selector_matched = true;
-                if (SelectorEngine::matches(selector, element, {}, context, CSS::Selector::PseudoElement::Type::After))
-                    selector_matched = true;
-            }
-            if (selector_matched)
-                state.set(rule_index, true);
+        SelectorEngine::MatchContext context;
+        if (SelectorEngine::matches(selector, element, {}, context, {}))
+            return true;
+        if (element.has_pseudo_element(CSS::Selector::PseudoElement::Type::Before)) {
+            if (SelectorEngine::matches(selector, element, {}, context, CSS::Selector::PseudoElement::Type::Before))
+                return true;
         }
-        return state;
+        if (element.has_pseudo_element(CSS::Selector::PseudoElement::Type::After)) {
+            if (SelectorEngine::matches(selector, element, {}, context, CSS::Selector::PseudoElement::Type::After))
+                return true;
+        }
+        return false;
+    };
+
+    auto matches_different_set_of_hover_rules_after_hovered_element_change = [&](Element const& element) {
+        bool result = false;
+        hover_rules.for_each_matching_rules(element, {}, [&](auto& rules) {
+            for (auto& rule : rules) {
+                bool before = does_rule_match_on_element(element, rule);
+                TemporaryChange change { m_hovered_node, hovered_node };
+                bool after = does_rule_match_on_element(element, rule);
+                if (before != after) {
+                    result = true;
+                    return IterationDecision::Break;
+                }
+            }
+            return IterationDecision::Continue;
+        });
+        return result;
     };
 
     Function<void(Node&)> invalidate_hovered_elements_recursively = [&](Node& node) -> void {
         if (node.is_element()) {
             auto& element = static_cast<Element&>(node);
             style_computer.push_ancestor(element);
-            if (element.affected_by_hover()) {
-                auto selectors_match_state_before = compute_hover_selectors_match_state(element);
-                TemporaryChange change { m_hovered_node, hovered_node };
-                auto selectors_match_state_after = compute_hover_selectors_match_state(element);
-                if (selectors_match_state_before.view() != selectors_match_state_after.view()) {
-                    element.set_needs_style_update(true);
-                }
+            if (element.affected_by_hover() && matches_different_set_of_hover_rules_after_hovered_element_change(element)) {
+                element.set_needs_style_update(true);
             }
         }
 
@@ -2253,7 +2301,7 @@ void Document::adopt_node(Node& node)
         // 1. For each inclusiveDescendant in node’s shadow-including inclusive descendants:
         node.for_each_shadow_including_inclusive_descendant([&](DOM::Node& inclusive_descendant) {
             // 1. Set inclusiveDescendant’s node document to document.
-            inclusive_descendant.set_document({}, *this);
+            inclusive_descendant.set_document(Badge<Document> {}, *this);
 
             // FIXME: 2. If inclusiveDescendant is an element, then set the node document of each attribute in inclusiveDescendant’s
             //           attribute list to document.
@@ -3298,7 +3346,10 @@ void Document::evaluate_media_queries_and_report_changes()
         bool did_match = media_query_list->matches();
         bool now_matches = media_query_list->evaluate();
 
-        if (did_match != now_matches) {
+        auto did_change_internally = media_query_list->has_changed_state();
+        media_query_list->set_has_changed_state(false);
+
+        if (did_change_internally == true || did_match != now_matches) {
             CSS::MediaQueryListEventInit init;
             init.media = media_query_list->media();
             init.matches = now_matches;
@@ -3686,39 +3737,46 @@ void Document::set_active_sandboxing_flag_set(HTML::SandboxingFlagSet sandboxing
     m_active_sandboxing_flag_set = sandboxing_flag_set;
 }
 
-HTML::PolicyContainer Document::policy_container() const
+GC::Ref<HTML::PolicyContainer> Document::policy_container() const
 {
-    return m_policy_container;
+    auto& realm = this->realm();
+    if (!m_policy_container) {
+        m_policy_container = realm.create<HTML::PolicyContainer>(realm);
+    }
+    return *m_policy_container;
 }
 
-void Document::set_policy_container(HTML::PolicyContainer policy_container)
+void Document::set_policy_container(GC::Ref<HTML::PolicyContainer> policy_container)
 {
-    m_policy_container = move(policy_container);
+    m_policy_container = policy_container;
 }
 
 // https://html.spec.whatwg.org/multipage/browsing-the-web.html#snapshotting-source-snapshot-params
-HTML::SourceSnapshotParams Document::snapshot_source_snapshot_params() const
+GC::Ref<HTML::SourceSnapshotParams> Document::snapshot_source_snapshot_params() const
 {
+    auto& realm = this->realm();
+
     // To snapshot source snapshot params given a Document sourceDocument, return a new source snapshot params with
+    return realm.create<HTML::SourceSnapshotParams>(
+        // has transient activation
+        //    true if sourceDocument's relevant global object has transient activation; otherwise false
+        as<HTML::Window>(HTML::relevant_global_object(*this)).has_transient_activation(),
 
-    // has transient activation
-    //    true if sourceDocument's relevant global object has transient activation; otherwise false
-    // sandboxing flags
-    //     sourceDocument's active sandboxing flag set
-    // allows downloading
-    //     false if sourceDocument's active sandboxing flag set has the sandboxed downloads browsing context flag set; otherwise true
-    // fetch client
-    //     sourceDocument's relevant settings object
-    // source policy container
-    //     a clone of sourceDocument's policy container
+        // sandboxing flags
+        //     sourceDocument's active sandboxing flag set
+        m_active_sandboxing_flag_set,
 
-    return HTML::SourceSnapshotParams {
-        .has_transient_activation = as<HTML::Window>(HTML::relevant_global_object(*this)).has_transient_activation(),
-        .sandboxing_flags = m_active_sandboxing_flag_set,
-        .allows_downloading = !has_flag(m_active_sandboxing_flag_set, HTML::SandboxingFlagSet::SandboxedDownloads),
-        .fetch_client = relevant_settings_object(),
-        .source_policy_container = m_policy_container
-    };
+        // allows downloading
+        //     false if sourceDocument's active sandboxing flag set has the sandboxed downloads browsing context flag set; otherwise true
+        !has_flag(m_active_sandboxing_flag_set, HTML::SandboxingFlagSet::SandboxedDownloads),
+
+        // fetch client
+        //     sourceDocument's relevant settings object
+        relevant_settings_object(),
+
+        // source policy container
+        //     a clone of sourceDocument's policy container
+        policy_container()->clone(realm));
 }
 
 // https://html.spec.whatwg.org/multipage/document-sequences.html#descendant-navigables
@@ -3845,8 +3903,11 @@ void Document::run_unloading_cleanup_steps()
     // 1. Let window be document's relevant global object.
     auto& window = as<HTML::WindowOrWorkerGlobalScopeMixin>(HTML::relevant_global_object(*this));
 
-    // FIXME: 2. For each WebSocket object webSocket whose relevant global object is window, make disappear webSocket.
-    //            If this affected any WebSocket objects, then set document's salvageable state to false.
+    // 2. For each WebSocket object webSocket whose relevant global object is window, make disappear webSocket.
+    //    If this affected any WebSocket objects, then set document's salvageable state to false.
+    auto affected_any_web_sockets = window.make_disappear_all_web_sockets();
+    if (affected_any_web_sockets == HTML::WindowOrWorkerGlobalScopeMixin::AffectedAnyWebSockets::Yes)
+        m_salvageable = false;
 
     // FIXME: 3. For each WebTransport object transport whose relevant global object is window, run the context cleanup steps given transport.
 
@@ -3908,8 +3969,13 @@ void Document::destroy()
     }
 
     // 9. Set document's node navigable's active session history entry's document state's document to null.
-    if (auto navigable = this->navigable())
+    if (auto navigable = this->navigable()) {
         navigable->active_session_history_entry()->document_state()->set_document(nullptr);
+
+        // AD-HOC: We set the page's focused navigable during mouse-down events. If that navigable is this document's
+        //         navigable, we must be sure to reset the page's focused navigable.
+        page().navigable_document_destroyed({}, *navigable);
+    }
 
     // FIXME: 10. Remove document from the owner set of each WorkerGlobalScope object whose set contains document.
     // FIXME: 11. For each workletGlobalScope in document's worklet global scopes, terminate workletGlobalScope.
@@ -4571,7 +4637,7 @@ void Document::run_the_update_intersection_observations_steps(HighResolutionTime
                 // 8. Let isIntersecting be true if targetRect and rootBounds intersect or are edge-adjacent, even if the
                 //    intersection has zero area (because rootBounds or targetRect have zero area).
                 CSSPixelRect target_rect_as_pixel_rect(target_rect->x(), target_rect->y(), target_rect->width(), target_rect->height());
-                is_intersecting = target_rect_as_pixel_rect.intersects(root_bounds);
+                is_intersecting = target_rect_as_pixel_rect.edge_adjacent_intersects(root_bounds);
 
                 // 9. If targetArea is non-zero, let intersectionRatio be intersectionArea divided by targetArea.
                 //    Otherwise, let intersectionRatio be 1 if isIntersecting is true, or 0 if isIntersecting is false.
@@ -5980,12 +6046,26 @@ bool Document::allow_declarative_shadow_roots() const
     return m_allow_declarative_shadow_roots;
 }
 
+bool Document::is_render_blocking_element(GC::Ref<Element> element) const
+{
+    return m_render_blocking_elements.contains(element);
+}
+
 // https://html.spec.whatwg.org/multipage/dom.html#render-blocked
 bool Document::is_render_blocked() const
 {
     // A Document document is render-blocked if both of the following are true:
     // - document's render-blocking element set is non-empty, or document allows adding render-blocking elements.
-    // - FIXME: The current high resolution time given document's relevant global object has not exceeded an implementation-defined timeout value.
+    // - The current high resolution time given document's relevant global object has not exceeded an implementation-defined timeout value.
+
+    // NOTE: This timeout is implementation-defined.
+    //       Other browsers are willing to wait longer, but let's start with 30 seconds.
+    static constexpr auto max_time_to_block_rendering_in_ms = 30000.0;
+
+    auto now = HighResolutionTime::current_high_resolution_time(relevant_global_object(*this));
+    if (now > max_time_to_block_rendering_in_ms)
+        return false;
+
     return !m_render_blocking_elements.is_empty() || allows_adding_render_blocking_elements();
 }
 

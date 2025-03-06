@@ -237,11 +237,17 @@ u32 HTMLTextAreaElement::text_length() const
     return AK::utf16_code_unit_length_from_utf8(api_value());
 }
 
+// https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#dom-cva-willvalidate
+bool HTMLTextAreaElement::will_validate()
+{
+    // The willValidate attribute's getter must return true, if this element is a candidate for constraint validation
+    return is_candidate_for_constraint_validation();
+}
+
 // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#dom-cva-checkvalidity
 bool HTMLTextAreaElement::check_validity()
 {
-    dbgln("(STUBBED) HTMLTextAreaElement::check_validity(). Called on: {}", debug_description());
-    return true;
+    return check_validity_steps();
 }
 
 // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#dom-cva-reportvalidity
@@ -249,12 +255,6 @@ bool HTMLTextAreaElement::report_validity()
 {
     dbgln("(STUBBED) HTMLTextAreaElement::report_validity(). Called on: {}", debug_description());
     return true;
-}
-
-// https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#dom-cva-setcustomvalidity
-void HTMLTextAreaElement::set_custom_validity(String const& error)
-{
-    dbgln("(STUBBED) HTMLTextAreaElement::set_custom_validity(\"{}\"). Called on: {}", error, debug_description());
 }
 
 // https://html.spec.whatwg.org/multipage/form-elements.html#dom-textarea-maxlength

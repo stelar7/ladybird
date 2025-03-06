@@ -8,8 +8,8 @@
 
 #include <AK/Concepts.h>
 #include <AK/Error.h>
-#include <AK/JsonArraySerializer.h>
 #include <AK/JsonValue.h>
+#include <AK/String.h>
 #include <AK/Vector.h>
 
 namespace AK {
@@ -38,10 +38,17 @@ public:
     }
 
     template<IterableContainerOf<JsonValue> ContainerT>
-    JsonArray(ContainerT const& source)
+    JsonArray(ContainerT&& source)
     {
         for (auto& value : source)
             m_values.append(move(value));
+    }
+
+    template<IterableContainerOf<JsonValue> ContainerT>
+    JsonArray(ContainerT const& source)
+    {
+        for (auto const& value : source)
+            m_values.append(value);
     }
 
     JsonArray& operator=(JsonArray const& other)
@@ -72,19 +79,29 @@ public:
     ErrorOr<void> append(JsonValue value) { return m_values.try_append(move(value)); }
     void set(size_t index, JsonValue value) { m_values.at(index) = move(value); }
 
-    template<typename Builder>
-    typename Builder::OutputType serialized() const;
+    String serialized() const;
+    void serialize(StringBuilder&) const;
 
-    template<typename Builder>
-    void serialize(Builder&) const;
-
-    [[nodiscard]] ByteString to_byte_string() const { return serialized<StringBuilder>(); }
+    template<typename Callback>
+    void for_each(Callback callback)
+    {
+        for (auto& value : m_values)
+            callback(value);
+    }
 
     template<typename Callback>
     void for_each(Callback callback) const
     {
         for (auto const& value : m_values)
             callback(value);
+    }
+
+    template<FallibleFunction<JsonValue&> Callback>
+    ErrorOr<void, CallbackErrorType<Callback>> try_for_each(Callback&& callback)
+    {
+        for (auto& value : m_values)
+            TRY(callback(value));
+        return {};
     }
 
     template<FallibleFunction<JsonValue const&> Callback>
@@ -95,6 +112,7 @@ public:
         return {};
     }
 
+    [[nodiscard]] Vector<JsonValue>& values() { return m_values; }
     [[nodiscard]] Vector<JsonValue> const& values() const { return m_values; }
 
     void ensure_capacity(size_t capacity) { m_values.ensure_capacity(capacity); }
@@ -103,22 +121,6 @@ public:
 private:
     Vector<JsonValue> m_values;
 };
-
-template<typename Builder>
-inline void JsonArray::serialize(Builder& builder) const
-{
-    auto serializer = MUST(JsonArraySerializer<>::try_create(builder));
-    for_each([&](auto& value) { MUST(serializer.add(value)); });
-    MUST(serializer.finish());
-}
-
-template<typename Builder>
-inline typename Builder::OutputType JsonArray::serialized() const
-{
-    Builder builder;
-    serialize(builder);
-    return builder.to_byte_string();
-}
 
 }
 

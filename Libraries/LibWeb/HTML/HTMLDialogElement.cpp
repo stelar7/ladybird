@@ -135,11 +135,23 @@ WebIDL::ExceptionOr<void> HTMLDialogElement::show()
     // 9. Set the dialog close watcher with this.
     set_close_watcher();
     // FIXME: 10. Set this's previously focused element to the focused element.
-    // FIXME: 11. Let document be this's node document.
-    // FIXME: 12. Let hideUntil be the result of running topmost popover ancestor given this, document's showing hint popover list, null, and false.
-    // FIXME: 13. If hideUntil is null, then set hideUntil to the result of running topmost popover ancestor given this, document's showing auto popover list, null, and false.
-    // FIXME: 14. If hideUntil is null, then set hideUntil to document.
-    // FIXME: 15. Run hide all popovers until given hideUntil, false, and true.
+
+    // 11. Let document be this's node document.
+    auto document = m_document;
+
+    // 12. Let hideUntil be the result of running topmost popover ancestor given this, document's showing hint popover list, null, and false.
+    Variant<GC::Ptr<HTMLElement>, GC::Ptr<DOM::Document>> hide_until = topmost_popover_ancestor(this, document->showing_hint_popover_list(), nullptr, IsPopover::No);
+
+    // 13. If hideUntil is null, then set hideUntil to the result of running topmost popover ancestor given this, document's showing auto popover list, null, and false.
+    if (!hide_until.get<GC::Ptr<HTMLElement>>())
+        hide_until = topmost_popover_ancestor(this, document->showing_auto_popover_list(), nullptr, IsPopover::No);
+
+    // 14. If hideUntil is null, then set hideUntil to document.
+    if (!hide_until.get<GC::Ptr<HTMLElement>>())
+        hide_until = document;
+
+    // 15. Run hide all popovers until given hideUntil, false, and true.
+    hide_all_popovers_until(hide_until, FocusPreviousElement::No, FireEvents::Yes);
 
     // 16. Run the dialog focusing steps given this.
     run_dialog_focusing_steps();
@@ -224,11 +236,23 @@ WebIDL::ExceptionOr<void> HTMLDialogElement::show_a_modal_dialog(HTMLDialogEleme
     subject.set_close_watcher();
 
     // FIXME: 18. Set subject's previously focused element to the focused element.
-    // FIXME: 19. Let document be subject's node document.
-    // FIXME: 20. Let hideUntil be the result of running topmost popover ancestor given subject, document's showing hint popover list, null, and false.
-    // FIXME: 21. If hideUntil is null, then set hideUntil to the result of running topmost popover ancestor given subject, document's showing auto popover list, null, and false.
-    // FIXME: 22. If hideUntil is null, then set hideUntil to document.
-    // FIXME: 23. Run hide all popovers until given hideUntil, false, and true.
+
+    // 19. Let document be subject's node document.
+    auto& document = subject.document();
+
+    // 20. Let hideUntil be the result of running topmost popover ancestor given subject, document's showing hint popover list, null, and false.
+    Variant<GC::Ptr<HTMLElement>, GC::Ptr<DOM::Document>> hide_until = topmost_popover_ancestor(subject, document.showing_hint_popover_list(), nullptr, IsPopover::No);
+
+    // 21. If hideUntil is null, then set hideUntil to the result of running topmost popover ancestor given subject, document's showing auto popover list, null, and false.
+    if (!hide_until.get<GC::Ptr<HTMLElement>>())
+        hide_until = topmost_popover_ancestor(subject, document.showing_auto_popover_list(), nullptr, IsPopover::No);
+
+    // 22. If hideUntil is null, then set hideUntil to document.
+    if (!hide_until.get<GC::Ptr<HTMLElement>>())
+        hide_until = GC::Ptr(document);
+
+    // 23. Run hide all popovers until given hideUntil, false, and true.
+    hide_all_popovers_until(hide_until, FocusPreviousElement::No, FireEvents::Yes);
 
     // 24. Run the dialog focusing steps given subject.
     subject.run_dialog_focusing_steps();
@@ -327,7 +351,7 @@ void HTMLDialogElement::close_the_dialog(Optional<String> result)
     // FIXME: 12. If subject's previously focused element is not null, then:
     //           1. Let element be subject's previously focused element.
     //           2. Set subject's previously focused element to null.
-    //           3. If subject's node document's focused area of the document's DOM anchor is a shadow-including inclusive descendant of element,
+    //           3. If subject's node document's focused area of the document's DOM anchor is a shadow-including inclusive descendant of subject,
     //              or wasModal is true, then run the focusing steps for element; the viewport should not be scrolled by doing this step.
 
     // 13. Queue an element task on the user interaction task source given the subject element to fire an event named close at subject.

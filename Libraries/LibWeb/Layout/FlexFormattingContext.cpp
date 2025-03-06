@@ -153,7 +153,7 @@ void FlexFormattingContext::run(AvailableSpace const& available_space)
     // 16. Align all flex lines (per align-content)
     align_all_flex_lines();
 
-    if (available_space.width.is_intrinsic_sizing_constraint() || available_space.height.is_intrinsic_sizing_constraint()) {
+    if (m_layout_mode == LayoutMode::IntrinsicSizing) {
         // We're computing intrinsic size for the flex container.
         determine_intrinsic_size_of_flex_container();
     } else {
@@ -1476,7 +1476,9 @@ void FlexFormattingContext::align_all_flex_items_along_the_cross_axis()
                 item.cross_offset = half_line_size - item.cross_size.value() - item.margins.cross_after - item.borders.cross_after - item.padding.cross_after;
                 break;
             case CSS::AlignItems::Center:
-                item.cross_offset = -(item.cross_size.value() / 2);
+                // https://drafts.csswg.org/css-flexbox/#align-items-property
+                // The flex item’s margin box is centered in the cross axis within the line
+                item.cross_offset = (-item.cross_size.value() + item.margins.cross_before + item.borders.cross_before + item.padding.cross_before - item.margins.cross_after - item.borders.cross_after - item.padding.cross_after) / 2;
                 break;
             default:
                 break;

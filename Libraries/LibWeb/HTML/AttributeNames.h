@@ -33,6 +33,7 @@ namespace AttributeNames {
     __ENUMERATE_HTML_ATTRIBUTE(behavior, "behavior")                                     \
     __ENUMERATE_HTML_ATTRIBUTE(bgcolor, "bgcolor")                                       \
     __ENUMERATE_HTML_ATTRIBUTE(border, "border")                                         \
+    __ENUMERATE_HTML_ATTRIBUTE(bordercolor, "bordercolor")                               \
     __ENUMERATE_HTML_ATTRIBUTE(bottommargin, "bottommargin")                             \
     __ENUMERATE_HTML_ATTRIBUTE(cellpadding, "cellpadding")                               \
     __ENUMERATE_HTML_ATTRIBUTE(cellspacing, "cellspacing")                               \
@@ -50,6 +51,8 @@ namespace AttributeNames {
     __ENUMERATE_HTML_ATTRIBUTE(color, "color")                                           \
     __ENUMERATE_HTML_ATTRIBUTE(cols, "cols")                                             \
     __ENUMERATE_HTML_ATTRIBUTE(colspan, "colspan")                                       \
+    __ENUMERATE_HTML_ATTRIBUTE(command, "command")                                       \
+    __ENUMERATE_HTML_ATTRIBUTE(commandfor, "commandfor")                                 \
     __ENUMERATE_HTML_ATTRIBUTE(compact, "compact")                                       \
     __ENUMERATE_HTML_ATTRIBUTE(content, "content")                                       \
     __ENUMERATE_HTML_ATTRIBUTE(contenteditable, "contenteditable")                       \

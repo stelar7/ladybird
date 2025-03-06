@@ -11,10 +11,14 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibCore/DateTime.h>
 #include <LibJS/Runtime/Date.h>
 #include <LibJS/Runtime/NativeFunction.h>
+#include <LibJS/Runtime/RegExpObject.h>
+#include <LibURL/Parser.h>
 #include <LibWeb/Bindings/HTMLInputElementPrototype.h>
 #include <LibWeb/Bindings/PrincipalHostDefined.h>
+#include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/StyleValues/CSSKeywordValue.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
@@ -36,7 +40,6 @@
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/SelectedFile.h>
 #include <LibWeb/HTML/SharedResourceRequest.h>
-#include <LibWeb/HTML/ValidityState.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/Infra/CharacterTypes.h>
 #include <LibWeb/Infra/Strings.h>
@@ -88,16 +91,6 @@ void HTMLInputElement::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_slider_progress_element);
     visitor.visit(m_slider_thumb);
     visitor.visit(m_resource_request);
-}
-
-// https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#dom-cva-validity
-GC::Ref<ValidityState const> HTMLInputElement::validity() const
-{
-    auto& realm = this->realm();
-
-    dbgln("FIXME: Implement validity attribute getter");
-
-    return realm.create<ValidityState>(realm);
 }
 
 GC::Ptr<Layout::Node> HTMLInputElement::create_layout_node(GC::Ref<CSS::ComputedProperties> style)
@@ -195,6 +188,31 @@ void HTMLInputElement::set_indeterminate(bool value)
 {
     // On setting, it must be set to the new value. It has no effect except for changing the appearance of checkbox controls.
     m_indeterminate = value;
+}
+
+// https://html.spec.whatwg.org/multipage/input.html#compiled-pattern-regular-expression
+Optional<Regex<ECMA262>> HTMLInputElement::compiled_pattern_regular_expression() const
+{
+    // 1. If the element does not have a pattern attribute specified, then return nothing. The element has no compiled pattern regular expression.
+    auto maybe_pattern = get_attribute(HTML::AttributeNames::pattern);
+    if (!maybe_pattern.has_value())
+        return {};
+
+    // 2. Let pattern be the value of the pattern attribute of the element.
+    auto pattern = maybe_pattern.release_value().to_byte_string();
+
+    // 3. Let regexpCompletion be RegExpCreate(pattern, "v").
+    Regex<ECMA262> regexp_completion(pattern, JS::RegExpObject::default_flags | ECMAScriptFlags::UnicodeSets);
+
+    // 4. If regexpCompletion is an abrupt completion, then return nothing. The element has no compiled pattern regular expression.
+    if (regexp_completion.parser_result.error != regex::Error::NoError)
+        return {};
+
+    // 5. Let anchoredPattern be the string "^(?:", followed by pattern, followed by ")$".
+    auto anchored_pattern = ByteString::formatted("^(?:{})$", pattern);
+
+    // 6. Return ! RegExpCreate(anchoredPattern, "v").
+    return Regex<ECMA262>(anchored_pattern, JS::RegExpObject::default_flags | ECMAScriptFlags::UnicodeSets);
 }
 
 // https://html.spec.whatwg.org/multipage/input.html#dom-input-files
@@ -1680,6 +1698,21 @@ void HTMLInputElement::clear_algorithm()
 void HTMLInputElement::form_associated_element_was_inserted()
 {
     create_shadow_tree_if_needed();
+
+    if (is_connected()) {
+        // https://html.spec.whatwg.org/multipage/input.html#radio-button-state-(type=radio)
+        // When any of the following phenomena occur, if the element's checkedness state is true after the occurrence,
+        // the checkedness state of all the other elements in the same radio button group must be set to false:
+        // ...
+        // - The element becomes connected.
+        if (type_state() == TypeAttributeState::RadioButton && checked()) {
+            root().for_each_in_inclusive_subtree_of_type<HTMLInputElement>([&](auto& element) {
+                if (element.checked() && &element != this && is_in_same_radio_button_group(*this, element))
+                    element.set_checked(false);
+                return TraversalDecision::Continue;
+            });
+        }
+    }
 }
 
 void HTMLInputElement::form_associated_element_was_removed(DOM::Node*)
@@ -2063,6 +2096,60 @@ WebIDL::ExceptionOr<void> HTMLInputElement::set_width(WebIDL::UnsignedLong value
     return set_attribute(HTML::AttributeNames::width, String::number(value));
 }
 
+// https://html.spec.whatwg.org/multipage/input.html#month-state-(type=month):concept-input-value-string-number
+static Optional<double> convert_month_string_to_number(StringView input)
+{
+    // The algorithm to convert a string to a number, given a string input, is as follows: If parsing a month from input
+    // results in an error, then return an error; otherwise, return the number of months between January 1970 and the
+    // parsed month.
+    auto maybe_year_and_month = parse_a_month_string(input);
+    if (!maybe_year_and_month.has_value())
+        return {};
+    return number_of_months_since_unix_epoch(maybe_year_and_month.value());
+}
+
+// https://html.spec.whatwg.org/multipage/input.html#week-state-(type=week):concept-input-value-string-number
+static Optional<double> convert_week_string_to_number(StringView input)
+{
+    // The algorithm to convert a string to a number, given a string input, is as follows: If parsing a week
+    // string from input results in an error, then return an error; otherwise, return the number of
+    // milliseconds elapsed from midnight UTC on the morning of 1970-01-01 (the time represented by the value
+    // "1970-01-01T00:00:00.0Z") to midnight UTC on the morning of the Monday of the parsed week, ignoring
+    // leap seconds.
+    auto parsed_week = parse_a_week_string(input);
+    if (!parsed_week.has_value())
+        return {};
+    return UnixDateTime::from_iso8601_week(parsed_week->week_year, parsed_week->week).milliseconds_since_epoch();
+}
+
+// https://html.spec.whatwg.org/multipage/input.html#date-state-(type=date):concept-input-value-number-string
+static Optional<double> convert_date_string_to_number(StringView input)
+{
+    // The algorithm to convert a string to a number, given a string input, is as follows: If parsing a date
+    // from input results in an error, then return an error; otherwise, return the number of milliseconds
+    // elapsed from midnight UTC on the morning of 1970-01-01 (the time represented by the value
+    // "1970-01-01T00:00:00.0Z") to midnight UTC on the morning of the parsed date, ignoring leap seconds.
+    auto maybe_date = parse_a_date_string(input);
+    if (!maybe_date.has_value())
+        return {};
+    auto date = maybe_date.value();
+
+    auto date_time = UnixDateTime::from_unix_time_parts(date.year, date.month, date.day, 0, 0, 0, 0);
+    return date_time.milliseconds_since_epoch();
+}
+
+// https://html.spec.whatwg.org/multipage/input.html#time-state-(type=time):concept-input-value-string-number
+Optional<double> HTMLInputElement::convert_time_string_to_number(StringView input) const
+{
+    // The algorithm to convert a string to a number, given a string input, is as follows: If parsing a time from input
+    // results in an error, then return an error; otherwise, return the number of milliseconds elapsed from midnight to
+    // the parsed time on a day with no time changes.
+    auto maybe_time = parse_time_string(realm(), input);
+    if (maybe_time.is_exception())
+        return {};
+    return maybe_time.value()->date_value();
+}
+
 // https://html.spec.whatwg.org/multipage/input.html#concept-input-value-string-number
 Optional<double> HTMLInputElement::convert_string_to_number(StringView input) const
 {
@@ -2074,8 +2161,71 @@ Optional<double> HTMLInputElement::convert_string_to_number(StringView input) co
     if (type_state() == TypeAttributeState::Range)
         return parse_floating_point_number(input);
 
+    if (type_state() == TypeAttributeState::Month)
+        return convert_month_string_to_number(input);
+
+    if (type_state() == TypeAttributeState::Week)
+        return convert_week_string_to_number(input);
+
+    if (type_state() == TypeAttributeState::Date)
+        return convert_date_string_to_number(input);
+
+    if (type_state() == TypeAttributeState::Time)
+        return convert_time_string_to_number(input);
+
     dbgln("HTMLInputElement::convert_string_to_number() not implemented for input type {}", type());
     return {};
+}
+
+// https://html.spec.whatwg.org/multipage/input.html#month-state-(type=month):concept-input-value-number-string
+static String convert_number_to_month_string(double input)
+{
+    // The algorithm to convert a number to a string, given a number input, is as follows: Return a valid month
+    // string that represents the month that has input months between it and January 1970.
+    auto months = JS::modulo(input, 12);
+    auto year = 1970 + (input - months) / 12;
+
+    return MUST(String::formatted("{:04d}-{:02d}", static_cast<int>(year), static_cast<int>(months) + 1));
+}
+
+// https://html.spec.whatwg.org/multipage/input.html#week-state-(type=week):concept-input-value-string-number
+static String convert_number_to_week_string(double input)
+{
+    // The algorithm to convert a number to a string, given a number input, is as follows: Return a valid week string that
+    // that represents the week that, in UTC, is current input milliseconds after midnight UTC on the morning of 1970-01-01
+    // (the time represented by the value "1970-01-01T00:00:00.0Z").
+
+    int days_since_epoch = static_cast<int>(input / AK::ms_per_day);
+    int year = 1970;
+
+    while (true) {
+        auto days = days_in_year(year);
+        if (days_since_epoch < days)
+            break;
+        days_since_epoch -= days;
+        ++year;
+    }
+
+    auto january_1_weekday = day_of_week(year, 1, 1);
+    int offset_to_week_start = (january_1_weekday <= 3) ? january_1_weekday : january_1_weekday - 7;
+    int week = (days_since_epoch + offset_to_week_start) / 7 + 1;
+
+    if (week < 0) {
+        --year;
+        week = weeks_in_year(year) + week;
+    }
+
+    return MUST(String::formatted("{:04d}-W{:02d}", year, week));
+}
+
+// https://html.spec.whatwg.org/multipage/input.html#date-state-(type=date):concept-input-value-number-string
+static String convert_number_to_date_string(double input)
+{
+    // The algorithm to convert a number to a string, given a number input, is as follows: Return a valid
+    // date string that represents the date that, in UTC, is current input milliseconds after midnight UTC
+    // on the morning of 1970-01-01 (the time represented by the value "1970-01-01T00:00:00.0Z").
+    auto date = Core::DateTime::from_timestamp(input / 1000.);
+    return MUST(date.to_string("%Y-%m-%d"sv, Core::DateTime::LocalTime::No));
 }
 
 // https://html.spec.whatwg.org/multipage/input.html#concept-input-value-string-number
@@ -2089,6 +2239,15 @@ String HTMLInputElement::convert_number_to_string(double input) const
     if (type_state() == TypeAttributeState::Range)
         return String::number(input);
 
+    if (type_state() == TypeAttributeState::Month)
+        return convert_number_to_month_string(input);
+
+    if (type_state() == TypeAttributeState::Week)
+        return convert_number_to_week_string(input);
+
+    if (type_state() == TypeAttributeState::Date)
+        return convert_number_to_date_string(input);
+
     dbgln("HTMLInputElement::convert_number_to_string() not implemented for input type {}", type());
     return {};
 }
@@ -2099,12 +2258,13 @@ WebIDL::ExceptionOr<GC::Ptr<JS::Date>> HTMLInputElement::convert_string_to_date(
     // https://html.spec.whatwg.org/multipage/input.html#date-state-(type=date):concept-input-value-string-date
     if (type_state() == TypeAttributeState::Date) {
         // If parsing a date from input results in an error, then return an error;
-        auto maybe_date = parse_date_string(realm(), input);
-        if (maybe_date.is_exception())
-            return maybe_date.exception();
+        auto maybe_date = parse_a_date_string(input);
+        if (!maybe_date.has_value())
+            return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Can't parse date string"sv };
+        auto date = maybe_date.value();
 
         // otherwise, return a new Date object representing midnight UTC on the morning of the parsed date.
-        return maybe_date.value();
+        return JS::Date::create(realm(), JS::make_date(JS::make_day(date.year, date.month - 1, date.day), 0));
     }
 
     // https://html.spec.whatwg.org/multipage/input.html#time-state-(type=time):concept-input-value-string-date
@@ -2197,6 +2357,10 @@ double HTMLInputElement::default_step() const
     if (type_state() == TypeAttributeState::Range)
         return 1;
 
+    // https://html.spec.whatwg.org/multipage/input.html#time-state-(type=time):concept-input-step-default
+    if (type_state() == TypeAttributeState::Time)
+        return 60;
+
     dbgln("HTMLInputElement::default_step() not implemented for input type {}", type());
     return 0;
 }
@@ -2211,6 +2375,10 @@ double HTMLInputElement::step_scale_factor() const
     // https://html.spec.whatwg.org/multipage/input.html#range-state-(type=range):concept-input-step-scale
     if (type_state() == TypeAttributeState::Range)
         return 1;
+
+    // https://html.spec.whatwg.org/multipage/input.html#time-state-(type=time):concept-input-step-scale
+    if (type_state() == TypeAttributeState::Time)
+        return 1000;
 
     dbgln("HTMLInputElement::step_scale_factor() not implemented for input type {}", type());
     return 0;
@@ -2254,8 +2422,10 @@ double HTMLInputElement::step_base() const
 
     // 2. If the element has a value content attribute, and the result of applying the algorithm to convert a string to a number to the value of
     // the value content attribute is not an error, then return that result.
-    if (auto value = convert_string_to_number(this->value()); value.has_value())
-        return *value;
+    // AD-HOC: https://github.com/whatwg/html/issues/11097 Skipping this step seems to be necessary in order to get the
+    //         behavior that's actually expected — and necessary in order get the tests to pass (they otherwise fail).
+    // if (auto value = convert_string_to_number(this->value()); value.has_value())
+    // return *value;
 
     // 3. If a default step base is defined for this element given its type attribute's state, then return it.
     if (type_state() == TypeAttributeState::Week) {
@@ -2439,11 +2609,17 @@ WebIDL::ExceptionOr<void> HTMLInputElement::step_up_or_down(bool is_down, WebIDL
     return {};
 }
 
+// https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#dom-cva-willvalidate
+bool HTMLInputElement::will_validate()
+{
+    // The willValidate attribute's getter must return true, if this element is a candidate for constraint validation
+    return is_candidate_for_constraint_validation();
+}
+
 // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#dom-cva-checkvalidity
 WebIDL::ExceptionOr<bool> HTMLInputElement::check_validity()
 {
-    dbgln("(STUBBED) HTMLInputElement::check_validity(). Called on: {}", debug_description());
-    return true;
+    return check_validity_steps();
 }
 
 // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#dom-cva-reportvalidity
@@ -2451,13 +2627,6 @@ WebIDL::ExceptionOr<bool> HTMLInputElement::report_validity()
 {
     dbgln("(STUBBED) HTMLInputElement::report_validity(). Called on: {}", debug_description());
     return true;
-}
-
-// https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#dom-cva-setcustomvalidity
-void HTMLInputElement::set_custom_validity(String const& error)
-{
-    dbgln("(STUBBED) HTMLInputElement::set_custom_validity(error={}). Called on: {}", error, debug_description());
-    return;
 }
 
 Optional<ARIA::Role> HTMLInputElement::default_role() const
@@ -2579,7 +2748,11 @@ void HTMLInputElement::activation_behavior(DOM::Event const& event)
     // 2. Run this element's input activation behavior, if any, and do nothing otherwise.
     run_input_activation_behavior(event).release_value_but_fixme_should_propagate_errors();
 
-    // 3. Run the popover target attribute activation behavior given element and event's target.
+    // 3. If element has a form owner and element's type attribute is not in the Button state, then return.
+    if (form() != nullptr && type_state() != TypeAttributeState::Button)
+        return;
+
+    // 4. Run the popover target attribute activation behavior given element and event's target.
     if (event.target() && event.target()->is_dom_node())
         PopoverInvokerElement::popover_target_activation_behaviour(*this, as<DOM::Node>(*event.target()));
 }
@@ -2633,6 +2806,34 @@ bool HTMLInputElement::selection_direction_applies() const
     case TypeAttributeState::Telephone:
     case TypeAttributeState::URL:
     case TypeAttributeState::Password:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// https://html.spec.whatwg.org/multipage/input.html#do-not-apply
+bool HTMLInputElement::pattern_applies() const
+{
+    switch (type_state()) {
+    case TypeAttributeState::Text:
+    case TypeAttributeState::Search:
+    case TypeAttributeState::Telephone:
+    case TypeAttributeState::URL:
+    case TypeAttributeState::Email:
+    case TypeAttributeState::Password:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// https://html.spec.whatwg.org/multipage/input.html#do-not-apply
+bool HTMLInputElement::multiple_applies() const
+{
+    switch (type_state()) {
+    case TypeAttributeState::Email:
+    case TypeAttributeState::FileUpload:
         return true;
     default:
         return false;
@@ -2797,6 +2998,8 @@ bool HTMLInputElement::is_focusable() const
 // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#suffering-from-being-missing
 bool HTMLInputElement::suffering_from_being_missing() const
 {
+    bool has_checkedness_false_for_all_elements_in_group = true;
+    bool has_required_element_in_group = false;
     switch (type_state()) {
     case TypeAttributeState::Checkbox:
         // https://html.spec.whatwg.org/multipage/input.html#checkbox-state-(type%3Dcheckbox)%3Asuffering-from-being-missing
@@ -2806,14 +3009,25 @@ bool HTMLInputElement::suffering_from_being_missing() const
         break;
     case TypeAttributeState::RadioButton:
         // https://html.spec.whatwg.org/multipage/input.html#radio-button-state-(type%3Dradio)%3Asuffering-from-being-missing
-        // If an element in the radio button group is required, and all of the input elements in the radio button group have a checkedness that is false, then the element
-        // is suffering from being missing.
-        // FIXME: Implement this.
+        // If an element in the radio button group is required, and all of the input elements in the radio button group
+        // have a checkedness that is false, then the element is suffering from being missing.
+        root().for_each_in_inclusive_subtree_of_type<HTML::HTMLInputElement>([&](auto& element) {
+            if (is_in_same_radio_button_group(*this, element)) {
+                if (element.checked())
+                    has_checkedness_false_for_all_elements_in_group = false;
+                if (has_attribute(HTML::AttributeNames::required))
+                    has_required_element_in_group = true;
+            }
+            return TraversalDecision::Continue;
+        });
+        if (has_checkedness_false_for_all_elements_in_group && has_required_element_in_group)
+            return true;
         break;
     case TypeAttributeState::FileUpload:
         // https://html.spec.whatwg.org/multipage/input.html#file-upload-state-(type%3Dfile)%3Asuffering-from-being-missing
         // If the element is required and the list of selected files is empty, then the element is suffering from being missing.
-        // FIXME: Implement this.
+        if (has_attribute(HTML::AttributeNames::required) && const_cast<HTMLInputElement&>(*this).files()->length() == 0)
+            return true;
         break;
     default:
         break;
@@ -2828,19 +3042,37 @@ bool HTMLInputElement::suffering_from_being_missing() const
     return false;
 }
 
+// https://html.spec.whatwg.org/multipage/input.html#valid-e-mail-address
+static Regex<ECMA262> const valid_email_address_regex = Regex<ECMA262>("^[a-zA-Z0-9.!#$%&'*+\\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$");
+
 // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#suffering-from-a-type-mismatch
 bool HTMLInputElement::suffering_from_a_type_mismatch() const
 {
+    auto input = value();
     switch (type_state()) {
     case TypeAttributeState::URL:
         // https://html.spec.whatwg.org/multipage/input.html#url-state-(type%3Durl)%3Asuffering-from-a-type-mismatch
         // While the value of the element is neither the empty string nor a valid absolute URL, the element is suffering from a type mismatch.
-        // FIXME: Implement this.
-        break;
+        // AD-HOC: https://github.com/whatwg/html/issues/11083 and https://github.com/web-platform-tests/wpt/pull/51011
+        //         We intentionally don't check if the value is a "valid absolute URL", because that's not what other
+        //         engines actually do. So we instead just implement what matches the behavior in existing engines.
+        return !input.is_empty() && !URL::Parser::basic_parse(input).has_value();
     case TypeAttributeState::Email:
         // https://html.spec.whatwg.org/multipage/input.html#email-state-(type%3Demail)%3Asuffering-from-a-type-mismatch
-        // While the value of the element is neither the empty string nor a single valid email address, the element is suffering from a type mismatch.
-        // FIXME: Implement this.
+        // When the multiple attribute is not specified on the element: While the value of the element is neither the
+        // empty string nor a single valid email address, the element is suffering from a type mismatch.
+        if (!has_attribute(HTML::AttributeNames::multiple))
+            return !input.is_empty() && !valid_email_address_regex.match(input).success;
+        // When the multiple attribute is specified on the element: While the value of the element is not a valid email
+        // address list, the element is suffering from a type mismatch.
+        // https://html.spec.whatwg.org/multipage/input.html#valid-e-mail-address-list
+        // A valid email address list is a set of comma-separated tokens, where each token is itself a valid email
+        // address. To obtain the list of tokens from a valid email address list, an implementation must split the
+        // string on commas.
+        for (auto& address : MUST(input.split(','))) {
+            if (!valid_email_address_regex.match(address).success)
+                return true;
+        }
         break;
     default:
         break;
@@ -2854,8 +3086,26 @@ bool HTMLInputElement::suffering_from_a_pattern_mismatch() const
     // If the element's value is not the empty string, and either the element's multiple attribute is not specified or it does not apply to the input element given its
     // type attribute's current state, and the element has a compiled pattern regular expression but that regular expression does not match the element's value, then the element is
     // suffering from a pattern mismatch.
-    // FIXME: Implement this.
-    return false;
+
+    // FIXME: If the element's value is not the empty string, and the element's multiple attribute is specified and applies to the input element,
+    //        and the element has a compiled pattern regular expression but that regular expression does not match each of the element's values,
+    //        then the element is suffering from a pattern mismatch.
+
+    if (!pattern_applies())
+        return false;
+
+    auto value = this->value();
+    if (value.is_empty())
+        return false;
+
+    if (has_attribute(HTML::AttributeNames::multiple) && multiple_applies())
+        return false;
+
+    auto regexp_object = compiled_pattern_regular_expression();
+    if (!regexp_object.has_value())
+        return false;
+
+    return !regexp_object->match(value).success;
 }
 
 // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#suffering-from-an-underflow
@@ -2892,10 +3142,20 @@ bool HTMLInputElement::suffering_from_an_overflow() const
 // https://html.spec.whatwg.org/multipage/input.html#the-step-attribute%3Asuffering-from-a-step-mismatch
 bool HTMLInputElement::suffering_from_a_step_mismatch() const
 {
-    // When the element has an allowed value step, and the result of applying the algorithm to convert a string to a number to the string given by the element's
-    // value is a number, and that number subtracted from the step base is not an integral multiple of the allowed value step, the element is suffering from a step mismatch.
-    // FIXME: Implement this.
-    return false;
+    // When the element has an allowed value step,
+    auto maybe_allowed_value_step = allowed_value_step();
+    if (!maybe_allowed_value_step.has_value())
+        return false;
+    double allowed_value_step = *maybe_allowed_value_step;
+    // and the result of applying the algorithm to convert a string to a number to the string given by the element's
+    // value is a number,
+    auto maybe_number = convert_string_to_number(value());
+    if (!maybe_number.has_value())
+        return false;
+    double number = maybe_number.value();
+    // and that number subtracted from the step base is not an integral multiple of the allowed value step, the element
+    // is suffering from a step mismatch.
+    return fmod(step_base() - number, allowed_value_step) != 0;
 }
 
 // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#suffering-from-bad-input

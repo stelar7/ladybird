@@ -413,6 +413,7 @@ set(lagom_standard_libraries
 
 if (ENABLE_GUI_TARGETS)
     list(APPEND lagom_standard_libraries
+        DevTools
         Gfx
         ImageDecoderClient
         Media
@@ -512,6 +513,7 @@ if (BUILD_TESTING)
         AK
         LibCrypto
         LibCompress
+        LibDNS
         LibGC
         LibTest
         LibTextCodec

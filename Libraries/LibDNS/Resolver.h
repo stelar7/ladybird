@@ -15,7 +15,7 @@
 #include <AK/TemporaryChange.h>
 #include <LibCore/DateTime.h>
 #include <LibCore/Promise.h>
-#include <LibCore/SocketAddress.h>
+#include <LibCore/Socket.h>
 #include <LibCore/Timer.h>
 #include <LibDNS/Message.h>
 #include <LibThreading/MutexProtected.h>
@@ -267,14 +267,17 @@ public:
                 return promise;
             }
             auto result = make_ref_counted<LookupResult>(domain_name);
-            auto record = record_or_error.release_value();
-            record.visit(
-                [&](IPv4Address const& address) {
-                    result->add_record({ .name = {}, .type = Messages::ResourceType::A, .class_ = Messages::Class::IN, .ttl = 0, .record = Messages::Records::A { address }, .raw = {} });
-                },
-                [&](IPv6Address const& address) {
-                    result->add_record({ .name = {}, .type = Messages::ResourceType::AAAA, .class_ = Messages::Class::IN, .ttl = 0, .record = Messages::Records::AAAA { address }, .raw = {} });
-                });
+            auto records = record_or_error.release_value();
+
+            for (auto const& record : records) {
+                record.visit(
+                    [&](IPv4Address const& address) {
+                        result->add_record({ .name = {}, .type = Messages::ResourceType::A, .class_ = Messages::Class::IN, .ttl = 0, .record = Messages::Records::A { address }, .raw = {} });
+                    },
+                    [&](IPv6Address const& address) {
+                        result->add_record({ .name = {}, .type = Messages::ResourceType::AAAA, .class_ = Messages::Class::IN, .ttl = 0, .record = Messages::Records::AAAA { address }, .raw = {} });
+                    });
+            }
             result->finished_request();
             promise->resolve(result);
             return promise;

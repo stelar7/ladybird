@@ -59,27 +59,33 @@ namespace Web::Bindings {
 class Intrinsics;
 class OptionConstructor;
 
-enum class AudioContextLatencyCategory;
-enum class CanPlayTypeResult;
-enum class CanvasFillRule;
-enum class CanvasTextAlign;
-enum class CanvasTextBaseline;
-enum class DOMParserSupportedType;
-enum class EndingType;
-enum class ImageSmoothingQuality;
-enum class ReadableStreamReaderMode;
-enum class ReferrerPolicy;
-enum class RequestCache;
-enum class RequestCredentials;
-enum class RequestDestination;
-enum class RequestDuplex;
-enum class RequestMode;
-enum class RequestPriority;
-enum class RequestRedirect;
-enum class ResizeObserverBoxOptions;
-enum class ResponseType;
-enum class TextTrackKind;
-enum class XMLHttpRequestResponseType;
+enum class AudioContextLatencyCategory : u8;
+enum class CanPlayTypeResult : u8;
+enum class CanvasFillRule : u8;
+enum class CanvasTextAlign : u8;
+enum class CanvasTextBaseline : u8;
+enum class ColorGamut : u8;
+enum class DOMParserSupportedType : u8;
+enum class EndingType : u8;
+enum class HdrMetadataType : u8;
+enum class ImageSmoothingQuality : u8;
+enum class MediaDecodingType : u8;
+enum class MediaEncodingType : u8;
+enum class MediaKeysRequirement : u8;
+enum class ReadableStreamReaderMode : u8;
+enum class ReferrerPolicy : u8;
+enum class RequestCache : u8;
+enum class RequestCredentials : u8;
+enum class RequestDestination : u8;
+enum class RequestDuplex : u8;
+enum class RequestMode : u8;
+enum class RequestPriority : u8;
+enum class RequestRedirect : u8;
+enum class ResizeObserverBoxOptions : u8;
+enum class ResponseType : u8;
+enum class TextTrackKind : u8;
+enum class TransferFunction : u8;
+enum class XMLHttpRequestResponseType : u8;
 }
 
 namespace Web::Clipboard {
@@ -90,6 +96,17 @@ class ClipboardItem;
 namespace Web::Compression {
 class CompressionStream;
 class DecompressionStream;
+}
+
+namespace Web::ContentSecurityPolicy {
+class Policy;
+class PolicyList;
+struct SerializedPolicy;
+}
+
+namespace Web::ContentSecurityPolicy::Directives {
+class Directive;
+struct SerializedDirective;
 }
 
 namespace Web::Cookie {
@@ -162,6 +179,7 @@ class CSSStyleRule;
 class CSSStyleSheet;
 class CSSStyleValue;
 class CSSSupportsRule;
+class CursorStyleValue;
 class CustomIdentStyleValue;
 class Display;
 class DisplayStyleValue;
@@ -170,6 +188,7 @@ class EdgeStyleValue;
 class ElementInlineCSSStyleDeclaration;
 class ExplicitGridTrack;
 class FilterValueListStyleValue;
+class FitContentStyleValue;
 class Flex;
 class FlexOrCalculated;
 class FlexStyleValue;
@@ -320,10 +339,6 @@ struct AddEventListenerOptions;
 struct EventListenerOptions;
 }
 
-namespace Web::DOMParsing {
-class XMLSerializer;
-}
-
 namespace Web::Encoding {
 class TextDecoder;
 class TextEncoder;
@@ -357,7 +372,6 @@ class RefCountedFlag;
 
 namespace Web::Fetch::Infrastructure {
 class Body;
-class ConnectionTimingInfo;
 class FetchAlgorithms;
 class FetchController;
 class FetchParams;
@@ -369,6 +383,7 @@ class Request;
 class Response;
 
 struct BodyWithType;
+struct ConnectionTimingInfo;
 struct Header;
 }
 
@@ -560,6 +575,7 @@ class WorkerEnvironmentSettingsObject;
 class WorkerGlobalScope;
 class WorkerLocation;
 class WorkerNavigator;
+class XMLSerializer;
 
 enum class AllowMultipleFiles;
 enum class MediaSeekMode;
@@ -577,6 +593,7 @@ struct POSTResource;
 struct ScrollOptions;
 struct ScrollToOptions;
 struct SerializedFormData;
+struct SerializedPolicyContainer;
 struct StructuredSerializeOptions;
 struct SyntheticRealmSettings;
 struct ToggleTaskTracker;
@@ -658,6 +675,17 @@ class MathMLElement;
 
 namespace Web::MediaCapabilitiesAPI {
 class MediaCapabilities;
+
+struct AudioConfiguration;
+struct KeySystemTrackConfiguration;
+struct MediaCapabilitiesDecodingInfo;
+struct MediaCapabilitiesEncodingInfo;
+struct MediaCapabilitiesInfo;
+struct MediaCapabilitiesKeySystemConfiguration;
+struct MediaConfiguration;
+struct MediaDecodingConfiguration;
+struct MediaEncodingConfiguration;
+struct VideoConfiguration;
 }
 
 namespace Web::MediaSourceExtensions {
@@ -779,6 +807,7 @@ struct StorageShelf;
 }
 
 namespace Web::SVG {
+class SVGAnimatedEnumeration;
 class SVGAnimatedLength;
 class SVGAnimatedRect;
 class SVGCircleElement;
@@ -787,6 +816,7 @@ class SVGDefsElement;
 class SVGDescElement;
 class SVGElement;
 class SVGEllipseElement;
+class SVGFilterElement;
 class SVGForeignObjectElement;
 class SVGGeometryElement;
 class SVGGraphicsElement;

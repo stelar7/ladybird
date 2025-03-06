@@ -15,6 +15,7 @@
 #include <LibCore/File.h>
 #include <LibCore/Resource.h>
 #include <LibJS/MarkupGenerator.h>
+#include <LibURL/Parser.h>
 #include <LibWeb/Infra/Strings.h>
 #include <LibWeb/Namespace.h>
 #include <LibWebView/Application.h>
@@ -27,15 +28,6 @@ namespace WebView {
 static constexpr auto INSPECTOR_HTML = "resource://ladybird/inspector.html"sv;
 static constexpr auto INSPECTOR_CSS = "resource://ladybird/inspector.css"sv;
 static constexpr auto INSPECTOR_JS = "resource://ladybird/inspector.js"sv;
-
-static ErrorOr<JsonValue> parse_json_tree(StringView json)
-{
-    auto parsed_tree = TRY(JsonValue::from_string(json));
-    if (!parsed_tree.is_object())
-        return Error::from_string_literal("Expected tree to be a JSON object");
-
-    return parsed_tree;
-}
 
 static String style_sheet_identifier_to_json(Web::CSS::StyleSheetIdentifier const& identifier)
 {
@@ -50,13 +42,7 @@ InspectorClient::InspectorClient(ViewImplementation& content_web_view, ViewImple
     , m_inspector_web_view(inspector_web_view)
 {
     m_content_web_view.on_received_dom_tree = [this](auto const& dom_tree) {
-        auto result = parse_json_tree(dom_tree);
-        if (result.is_error()) {
-            dbgln("Failed to load DOM tree: {}", result.error());
-            return;
-        }
-
-        auto dom_tree_html = generate_dom_tree(result.value().as_object());
+        auto dom_tree_html = generate_dom_tree(dom_tree);
         auto dom_tree_base64 = MUST(encode_base64(dom_tree_html.bytes()));
 
         auto script = MUST(String::formatted("inspector.loadDOMTree(\"{}\");", dom_tree_base64));
@@ -70,44 +56,27 @@ InspectorClient::InspectorClient(ViewImplementation& content_web_view, ViewImple
             select_default_node();
     };
 
-    m_content_web_view.on_received_dom_node_properties = [this](auto const& inspected_node_properties) {
+    m_content_web_view.on_received_dom_node_properties = [this](auto const& properties) {
         StringBuilder builder;
 
         // FIXME: Support box model metrics and ARIA properties.
-        auto generate_property_script = [&](auto const& computed_style, auto const& resolved_style, auto const& custom_properties, auto const& fonts) {
-            builder.append("inspector.createPropertyTables(\""sv);
-            builder.append_escaped_for_json(computed_style);
-            builder.append("\", \""sv);
-            builder.append_escaped_for_json(resolved_style);
-            builder.append("\", \""sv);
-            builder.append_escaped_for_json(custom_properties);
-            builder.append("\");"sv);
-            builder.append("inspector.createFontList(\""sv);
-            builder.append_escaped_for_json(fonts);
-            builder.append("\");"sv);
-        };
+        builder.append("inspector.createPropertyTables(\""sv);
+        builder.append_escaped_for_json(properties.computed_style.serialized());
+        builder.append("\", \""sv);
+        builder.append_escaped_for_json(properties.resolved_style.serialized());
+        builder.append("\", \""sv);
+        builder.append_escaped_for_json(properties.custom_properties.serialized());
+        builder.append("\");"sv);
 
-        if (inspected_node_properties.has_value()) {
-            generate_property_script(
-                inspected_node_properties->computed_style_json,
-                inspected_node_properties->resolved_style_json,
-                inspected_node_properties->custom_properties_json,
-                inspected_node_properties->fonts_json);
-        } else {
-            generate_property_script("{}"sv, "{}"sv, "{}"sv, "{}"sv);
-        }
+        builder.append("inspector.createFontList(\""sv);
+        builder.append_escaped_for_json(properties.fonts.serialized());
+        builder.append("\");"sv);
 
-        m_inspector_web_view.run_javascript(builder.string_view());
+        m_inspector_web_view.run_javascript(MUST(builder.to_string()));
     };
 
     m_content_web_view.on_received_accessibility_tree = [this](auto const& accessibility_tree) {
-        auto result = parse_json_tree(accessibility_tree);
-        if (result.is_error()) {
-            dbgln("Failed to load accessibility tree: {}", result.error());
-            return;
-        }
-
-        auto accessibility_tree_html = generate_accessibility_tree(result.value().as_object());
+        auto accessibility_tree_html = generate_accessibility_tree(accessibility_tree);
         auto accessibility_tree_base64 = MUST(encode_base64(accessibility_tree_html.bytes()));
 
         auto script = MUST(String::formatted("inspector.loadAccessibilityTree(\"{}\");", accessibility_tree_base64));
@@ -126,11 +95,11 @@ InspectorClient::InspectorClient(ViewImplementation& content_web_view, ViewImple
         }
         builder.append("]);"sv);
 
-        m_inspector_web_view.run_javascript(builder.string_view());
+        m_inspector_web_view.run_javascript(MUST(builder.to_string()));
     };
 
-    m_content_web_view.on_received_style_sheet_source = [this](Web::CSS::StyleSheetIdentifier const& identifier, auto const& base_url, String const& source) {
-        auto html = highlight_source(identifier.url.value_or({}), base_url, source, Syntax::Language::CSS, HighlightOutputMode::SourceOnly);
+    m_content_web_view.on_received_style_sheet_source = [this](Web::CSS::StyleSheetIdentifier const& identifier, URL::URL const& base_url, String const& source) {
+        auto html = highlight_source(URL::Parser::basic_parse(identifier.url.value_or({})), base_url, source, Syntax::Language::CSS, HighlightOutputMode::SourceOnly);
         auto script = MUST(String::formatted("inspector.setStyleSheetSource({}, \"{}\");",
             style_sheet_identifier_to_json(identifier),
             MUST(encode_base64(html.bytes()))));
@@ -150,12 +119,12 @@ InspectorClient::InspectorClient(ViewImplementation& content_web_view, ViewImple
             m_content_web_view.on_insert_clipboard_entry(html, "unspecified"_string, "text/plain"_string);
     };
 
-    m_content_web_view.on_received_console_message = [this](auto message_index) {
-        handle_console_message(message_index);
+    m_content_web_view.on_console_message_available = [this](auto message_index) {
+        console_message_available(message_index);
     };
 
-    m_content_web_view.on_received_console_messages = [this](auto start_index, auto const& message_types, auto const& messages) {
-        handle_console_messages(start_index, message_types, messages);
+    m_content_web_view.on_received_styled_console_messages = [this](auto start_index, auto const& message_types, auto const& messages) {
+        console_messages_received(start_index, message_types, messages);
     };
 
     m_inspector_web_view.enable_inspector_prototype();
@@ -193,6 +162,7 @@ InspectorClient::InspectorClient(ViewImplementation& content_web_view, ViewImple
     };
 
     m_inspector_web_view.on_inspector_selected_dom_node = [this](auto node_id, auto const& pseudo_element) {
+        m_content_web_view.highlight_dom_node(node_id, pseudo_element);
         m_content_web_view.inspect_dom_node(node_id, pseudo_element);
     };
 
@@ -230,7 +200,7 @@ InspectorClient::InspectorClient(ViewImplementation& content_web_view, ViewImple
     m_inspector_web_view.on_inspector_executed_console_script = [this](auto const& script) {
         append_console_source(script);
 
-        m_content_web_view.js_console_input(script.to_byte_string());
+        m_content_web_view.js_console_input(script);
     };
 
     m_inspector_web_view.on_inspector_exported_inspector_html = [this](String const& html) {
@@ -288,8 +258,8 @@ InspectorClient::~InspectorClient()
 {
     m_content_web_view.on_finshed_editing_dom_node = nullptr;
     m_content_web_view.on_received_accessibility_tree = nullptr;
-    m_content_web_view.on_received_console_message = nullptr;
-    m_content_web_view.on_received_console_messages = nullptr;
+    m_content_web_view.on_console_message_available = nullptr;
+    m_content_web_view.on_received_styled_console_messages = nullptr;
     m_content_web_view.on_received_dom_node_html = nullptr;
     m_content_web_view.on_received_dom_node_properties = nullptr;
     m_content_web_view.on_received_dom_tree = nullptr;
@@ -311,7 +281,7 @@ void InspectorClient::inspect()
 
 void InspectorClient::reset()
 {
-    static constexpr auto script = "inspector.reset();"sv;
+    static auto script = "inspector.reset();"_string;
     m_inspector_web_view.run_javascript(script);
 
     m_body_or_frameset_node_id.clear();
@@ -338,9 +308,10 @@ void InspectorClient::select_default_node()
 
 void InspectorClient::clear_selection()
 {
+    m_content_web_view.clear_highlighted_dom_node();
     m_content_web_view.clear_inspected_dom_node();
 
-    static constexpr auto script = "inspector.clearInspectedDOMNode();"sv;
+    static auto script = "inspector.clearInspectedDOMNode();"_string;
     m_inspector_web_view.run_javascript(script);
 }
 
@@ -380,7 +351,7 @@ void InspectorClient::load_cookies()
     json_cookies.serialize(builder);
     builder.append(");"sv);
 
-    m_inspector_web_view.run_javascript(builder.string_view());
+    m_inspector_web_view.run_javascript(MUST(builder.to_string()));
 }
 
 void InspectorClient::context_menu_edit_dom_node()
@@ -512,6 +483,7 @@ void InspectorClient::load_inspector()
     auto generate_property_table = [&](auto name) {
         return MUST(String::formatted(R"~~~(
             <div id="{0}" class="tab-content">
+                <input class="property-filter" id="{0}-filter" placeholder="Filter properties" />
                 <table class="property-table">
                     <thead>
                         <tr>
@@ -545,7 +517,7 @@ template<typename Generator>
 static void generate_tree(StringBuilder& builder, JsonObject const& node, Generator&& generator)
 {
     if (auto children = node.get_array("children"sv); children.has_value() && !children->is_empty()) {
-        auto name = node.get_byte_string("name"sv).value_or({});
+        auto name = node.get_string("name"sv).value_or({});
         builder.append("<details>"sv);
 
         builder.append("<summary>"sv);
@@ -569,8 +541,8 @@ String InspectorClient::generate_dom_tree(JsonObject const& dom_tree)
     StringBuilder builder;
 
     generate_tree(builder, dom_tree, [&](JsonObject const& node) {
-        auto type = node.get_byte_string("type"sv).value_or("unknown"sv);
-        auto name = node.get_byte_string("name"sv).value_or({});
+        auto type = node.get_string("type"sv).value_or("unknown"_string);
+        auto name = node.get_string("name"sv).value_or({});
 
         StringBuilder data_attributes;
         auto append_data_attribute = [&](auto name, auto value) {
@@ -591,10 +563,9 @@ String InspectorClient::generate_dom_tree(JsonObject const& dom_tree)
         append_data_attribute("id"sv, node_id);
 
         if (type == "text"sv) {
-            auto deprecated_text = node.get_byte_string("text"sv).release_value();
-            deprecated_text = escape_html_entities(deprecated_text);
-
+            auto deprecated_text = escape_html_entities(*node.get_string("text"sv));
             auto text = MUST(Web::Infra::strip_and_collapse_whitespace(deprecated_text));
+
             builder.appendff("<span data-node-type=\"text\" class=\"hoverable editable\" {}>", data_attributes.string_view());
 
             if (text.is_empty())
@@ -607,8 +578,7 @@ String InspectorClient::generate_dom_tree(JsonObject const& dom_tree)
         }
 
         if (type == "comment"sv) {
-            auto comment = node.get_byte_string("data"sv).release_value();
-            comment = escape_html_entities(comment);
+            auto comment = escape_html_entities(*node.get_string("data"sv));
 
             builder.appendff("<span class=\"hoverable comment\" {}>", data_attributes.string_view());
             builder.append("<span>&lt;!--</span>"sv);
@@ -619,7 +589,7 @@ String InspectorClient::generate_dom_tree(JsonObject const& dom_tree)
         }
 
         if (type == "shadow-root"sv) {
-            auto mode = node.get_byte_string("mode"sv).release_value();
+            auto mode = node.get_string("mode"sv).release_value();
 
             builder.appendff("<span class=\"hoverable internal\" {}>", data_attributes.string_view());
             builder.appendff("{} ({})", name, mode);
@@ -635,8 +605,8 @@ String InspectorClient::generate_dom_tree(JsonObject const& dom_tree)
                 m_body_or_frameset_node_id = node_id;
 
             auto tag = name;
-            if (node.get_byte_string("namespace"sv) == Web::Namespace::HTML.bytes_as_string_view())
-                tag = tag.to_lowercase();
+            if (node.get_string("namespace"sv) == Web::Namespace::HTML.bytes_as_string_view())
+                tag = MUST(tag.to_lowercase());
 
             builder.appendff("<span class=\"hoverable\" {}>", data_attributes.string_view());
             builder.append("<span>&lt;</span>"sv);
@@ -654,7 +624,7 @@ String InspectorClient::generate_dom_tree(JsonObject const& dom_tree)
                     builder.appendff("<span class=\"attribute-value\">\"{}\"</span>", escape_html_entities(value_string));
                     builder.append("</span>"sv);
 
-                    dom_node_attributes.empend(MUST(String::from_byte_string(name)), MUST(String::from_byte_string(value_string)));
+                    dom_node_attributes.empend(name, value_string);
                 });
             }
 
@@ -692,12 +662,11 @@ String InspectorClient::generate_accessibility_tree(JsonObject const& accessibil
     StringBuilder builder;
 
     generate_tree(builder, accessibility_tree, [&](JsonObject const& node) {
-        auto type = node.get_byte_string("type"sv).value_or("unknown"sv);
-        auto role = node.get_byte_string("role"sv).value_or({});
+        auto type = node.get_string("type"sv).value_or("unknown"_string);
+        auto role = node.get_string("role"sv).value_or({});
 
         if (type == "text"sv) {
-            auto text = node.get_byte_string("text"sv).release_value();
-            text = escape_html_entities(text);
+            auto text = escape_html_entities(*node.get_string("text"sv));
 
             builder.appendff("<span class=\"hoverable\">");
             builder.append(MUST(Web::Infra::strip_and_collapse_whitespace(text)));
@@ -707,16 +676,16 @@ String InspectorClient::generate_accessibility_tree(JsonObject const& accessibil
 
         if (type != "element"sv) {
             builder.appendff("<span class=\"hoverable internal\">");
-            builder.appendff(role.to_lowercase());
+            builder.appendff(MUST(role.to_lowercase()));
             builder.append("</span>"sv);
             return;
         }
 
-        auto name = node.get_byte_string("name"sv).value_or({});
-        auto description = node.get_byte_string("description"sv).value_or({});
+        auto name = node.get_string("name"sv).value_or({});
+        auto description = node.get_string("description"sv).value_or({});
 
         builder.appendff("<span class=\"hoverable\">");
-        builder.append(role.to_lowercase());
+        builder.append(MUST(role.to_lowercase()));
         builder.appendff(" name: \"{}\", description: \"{}\"", name, description);
         builder.append("</span>"sv);
     });
@@ -732,7 +701,7 @@ void InspectorClient::request_console_messages()
     m_waiting_for_messages = true;
 }
 
-void InspectorClient::handle_console_message(i32 message_index)
+void InspectorClient::console_message_available(i32 message_index)
 {
     if (message_index <= m_highest_received_message_index) {
         dbgln("Notified about console message we already have");
@@ -749,7 +718,7 @@ void InspectorClient::handle_console_message(i32 message_index)
         request_console_messages();
 }
 
-void InspectorClient::handle_console_messages(i32 start_index, ReadonlySpan<ByteString> message_types, ReadonlySpan<ByteString> messages)
+void InspectorClient::console_messages_received(i32 start_index, ReadonlySpan<String> message_types, ReadonlySpan<String> messages)
 {
     auto end_index = start_index + static_cast<i32>(message_types.size()) - 1;
     if (end_index <= m_highest_received_message_index) {
@@ -819,7 +788,7 @@ void InspectorClient::append_console_output(StringView html)
 
 void InspectorClient::clear_console_output()
 {
-    static constexpr auto script = "inspector.clearConsoleOutput();"sv;
+    static auto script = "inspector.clearConsoleOutput();"_string;
     m_inspector_web_view.run_javascript(script);
 }
 
@@ -833,7 +802,7 @@ void InspectorClient::begin_console_group(StringView label, bool start_expanded)
 
 void InspectorClient::end_console_group()
 {
-    static constexpr auto script = "inspector.endConsoleGroup();"sv;
+    static auto script = "inspector.endConsoleGroup();"_string;
     m_inspector_web_view.run_javascript(script);
 }
 

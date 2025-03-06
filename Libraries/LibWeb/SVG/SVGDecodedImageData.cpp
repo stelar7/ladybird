@@ -6,6 +6,7 @@
 
 #include <LibGfx/Bitmap.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
+#include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/Responses.h>
 #include <LibWeb/HTML/BrowsingContext.h>
@@ -40,7 +41,7 @@ ErrorOr<GC::Ref<SVGDecodedImageData>> SVGDecodedImageData::create(JS::Realm& rea
     navigation_params->navigable = navigable;
     navigation_params->response = response;
     navigation_params->origin = URL::Origin {};
-    navigation_params->policy_container = HTML::PolicyContainer {};
+    navigation_params->policy_container = navigable->heap().allocate<HTML::PolicyContainer>(navigable->active_document()->realm());
     navigation_params->final_sandboxing_flag_set = HTML::SandboxingFlagSet {};
     navigation_params->opener_policy = HTML::OpenerPolicy {};
 

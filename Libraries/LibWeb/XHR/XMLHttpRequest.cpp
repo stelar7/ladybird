@@ -47,6 +47,7 @@
 #include <LibWeb/Loader/ResourceLoader.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Platform/EventLoopPlugin.h>
+#include <LibWeb/Platform/Timer.h>
 #include <LibWeb/WebIDL/DOMException.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
 #include <LibWeb/XHR/EventNames.h>
@@ -217,8 +218,7 @@ WebIDL::ExceptionOr<JS::Value> XMLHttpRequest::response()
     // 6. Otherwise, if this’s response type is "blob", set this’s response object to a new Blob object representing this’s received bytes with type set to the result of get a final MIME type for this.
     else if (m_response_type == Bindings::XMLHttpRequestResponseType::Blob) {
         auto mime_type_as_string = get_final_mime_type().serialized();
-        auto blob_part = FileAPI::Blob::create(realm(), m_received_bytes, move(mime_type_as_string));
-        auto blob = FileAPI::Blob::create(realm(), Vector<FileAPI::BlobPart> { GC::make_root(*blob_part) });
+        auto blob = FileAPI::Blob::create(realm(), m_received_bytes, move(mime_type_as_string));
         m_response_object = GC::Ref<JS::Object> { blob };
     }
     // 7. Otherwise, if this’s response type is "document", set a document response for this.
@@ -573,7 +573,7 @@ WebIDL::ExceptionOr<void> XMLHttpRequest::send(Optional<DocumentOrXMLHttpRequest
 
         // 2. If body is a Document, then set this’s request body to body, serialized, converted, and UTF-8 encoded.
         if (body->has<GC::Root<DOM::Document>>()) {
-            auto string_serialized_document = TRY(body->get<GC::Root<DOM::Document>>().cell()->serialize_fragment(DOMParsing::RequireWellFormed::No));
+            auto string_serialized_document = TRY(body->get<GC::Root<DOM::Document>>().cell()->serialize_fragment(HTML::RequireWellFormed::No));
             m_request_body = Fetch::Infrastructure::byte_sequence_as_body(realm, string_serialized_document.bytes());
         }
         // 3. Otherwise:

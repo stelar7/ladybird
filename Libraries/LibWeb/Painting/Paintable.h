@@ -6,10 +6,12 @@
 
 #pragma once
 
-#include <AK/NonnullOwnPtr.h>
 #include <LibGC/Root.h>
+#include <LibGfx/Cursor.h>
+#include <LibWeb/CSS/ComputedValues.h>
+#include <LibWeb/Forward.h>
 #include <LibWeb/InvalidateDisplayList.h>
-#include <LibWeb/Layout/LineBox.h>
+#include <LibWeb/PixelUnits.h>
 #include <LibWeb/TraversalDecision.h>
 #include <LibWeb/TreeNode.h>
 
@@ -109,7 +111,7 @@ public:
 
     CSS::ImmutableComputedValues const& computed_values() const;
 
-    bool visible_for_hit_testing() const { return computed_values().pointer_events() != CSS::PointerEvents::None; }
+    bool visible_for_hit_testing() const;
 
     GC::Ptr<HTML::Navigable> navigable() const;
 

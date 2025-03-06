@@ -24,6 +24,7 @@
 #include <LibWeb/HTML/MessageEvent.h>
 #include <LibWeb/HTML/WindowOrWorkerGlobalScope.h>
 #include <LibWeb/Loader/ResourceLoader.h>
+#include <LibWeb/Platform/EventLoopPlugin.h>
 #include <LibWeb/WebIDL/AbstractOperations.h>
 #include <LibWeb/WebIDL/Buffers.h>
 #include <LibWeb/WebIDL/DOMException.h>
@@ -97,11 +98,13 @@ WebIDL::ExceptionOr<GC::Ref<WebSocket>> WebSocket::construct_impl(JS::Realm& rea
     web_socket->set_url(*url_record);
 
     // 11. Let client be this’s relevant settings object.
-    auto& client = relevant_settings_object;
+    // 12. Run this step in parallel:
+    Platform::EventLoopPlugin::the().deferred_invoke(GC::create_function(vm.heap(), [web_socket, url_record, protocols_sequence = move(protocols_sequence)]() {
+        auto& client = HTML::relevant_settings_object(*web_socket);
 
-    // FIXME: 12. Run this step in parallel:
-    //     1. Establish a WebSocket connection given urlRecord, protocols, and client. [FETCH]
-    TRY_OR_THROW_OOM(vm, web_socket->establish_web_socket_connection(*url_record, protocols_sequence, client));
+        //  1. Establish a WebSocket connection given urlRecord, protocols, and client. [FETCH]
+        (void)web_socket->establish_web_socket_connection(*url_record, protocols_sequence, client);
+    }));
 
     return web_socket;
 }
@@ -109,6 +112,7 @@ WebIDL::ExceptionOr<GC::Ref<WebSocket>> WebSocket::construct_impl(JS::Realm& rea
 WebSocket::WebSocket(JS::Realm& realm)
     : EventTarget(realm)
 {
+    set_overrides_must_survive_garbage_collection(true);
 }
 
 WebSocket::~WebSocket() = default;
@@ -117,9 +121,72 @@ void WebSocket::initialize(JS::Realm& realm)
 {
     Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(WebSocket);
+
+    auto& relevant_global = as<HTML::WindowOrWorkerGlobalScopeMixin>(HTML::relevant_global_object(*this));
+    relevant_global.register_web_socket({}, *this);
 }
 
-ErrorOr<void> WebSocket::establish_web_socket_connection(URL::URL& url_record, Vector<String>& protocols, HTML::EnvironmentSettingsObject& client)
+// https://html.spec.whatwg.org/multipage/server-sent-events.html#garbage-collection
+void WebSocket::finalize()
+{
+    auto ready_state = this->ready_state();
+
+    // If a WebSocket object is garbage collected while its connection is still open, the user agent must start the
+    // WebSocket closing handshake, with no status code for the Close message. [WSP]
+    if (ready_state != Requests::WebSocket::ReadyState::Closing && ready_state != Requests::WebSocket::ReadyState::Closed) {
+        // FIXME: LibProtocol does not yet support sending empty Close messages, so we use default values for now
+        m_websocket->close(1000);
+    }
+
+    auto& relevant_global = as<HTML::WindowOrWorkerGlobalScopeMixin>(HTML::relevant_global_object(*this));
+    relevant_global.unregister_web_socket({}, *this);
+}
+
+// https://html.spec.whatwg.org/multipage/server-sent-events.html#garbage-collection
+bool WebSocket::must_survive_garbage_collection() const
+{
+    auto ready_state = this->ready_state();
+
+    // FIXME: "as of the last time the event loop reached step 1"
+
+    // A WebSocket object whose ready state was set to CONNECTING (0) as of the last time the event loop reached step 1
+    // must not be garbage collected if there are any event listeners registered for open events, message events, error
+    // events, or close events.
+    if (ready_state == Requests::WebSocket::ReadyState::Connecting) {
+        if (has_event_listener(HTML::EventNames::open))
+            return true;
+        if (has_event_listener(HTML::EventNames::message))
+            return true;
+        if (has_event_listener(HTML::EventNames::error))
+            return true;
+        if (has_event_listener(HTML::EventNames::close))
+            return true;
+    }
+
+    // A WebSocket object whose ready state was set to OPEN (1) as of the last time the event loop reached step 1 must
+    // not be garbage collected if there are any event listeners registered for message events, error, or close events.
+    if (ready_state == Requests::WebSocket::ReadyState::Open) {
+        if (has_event_listener(HTML::EventNames::message))
+            return true;
+        if (has_event_listener(HTML::EventNames::error))
+            return true;
+        if (has_event_listener(HTML::EventNames::close))
+            return true;
+    }
+
+    // A WebSocket object whose ready state was set to CLOSING (2) as of the last time the event loop reached step 1
+    // must not be garbage collected if there are any event listeners registered for error or close events.
+    if (ready_state == Requests::WebSocket::ReadyState::Closing) {
+        if (has_event_listener(HTML::EventNames::error))
+            return true;
+        if (has_event_listener(HTML::EventNames::close))
+            return true;
+    }
+
+    return false;
+}
+
+ErrorOr<void> WebSocket::establish_web_socket_connection(URL::URL const& url_record, Vector<String> const& protocols, HTML::EnvironmentSettingsObject& client)
 {
     // FIXME: Integrate properly with FETCH as per https://fetch.spec.whatwg.org/#websocket-opening-handshake
 
@@ -332,6 +399,23 @@ void WebSocket::on_message(ByteBuffer message, bool is_text)
         dbgln("Unsupported WebSocket message type {}", m_binary_type);
         TODO();
     }));
+}
+
+// https://websockets.spec.whatwg.org/#make-disappear
+void WebSocket::make_disappear()
+{
+    // -> If the WebSocket connection is not yet established [WSP]
+    //    - Fail the WebSocket connection. [WSP]
+    // -> If the WebSocket closing handshake has not yet been started [WSP]
+    //    - Start the WebSocket closing handshake, with the status code to use in the WebSocket Close message being 1001. [WSP]
+    // -> Otherwise
+    //    - Do nothing.
+    // NOTE: All of these are handled by the WebSocket Protocol when calling close()
+    auto ready_state = this->ready_state();
+    if (ready_state == Requests::WebSocket::ReadyState::Closing || ready_state == Requests::WebSocket::ReadyState::Closed)
+        return;
+
+    m_websocket->close(1001);
 }
 
 #undef __ENUMERATE

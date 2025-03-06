@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2022, Andrew Kaster <akaster@serenityos.org>
+ * Copyright (c) 2025, Luke Wilde <luke@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -52,6 +53,7 @@ void WorkerGlobalScope::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_internal_port);
     visitor.visit(m_page);
     visitor.visit(m_fonts);
+    visitor.visit(m_policy_container);
 }
 
 void WorkerGlobalScope::finalize()
@@ -106,11 +108,11 @@ WebIDL::ExceptionOr<void> WorkerGlobalScope::import_scripts(Vector<String> const
         auto url_record = settings_object.encoding_parse_url(url);
 
         // 2. If urlRecord is failure, then throw a "SyntaxError" DOMException.
-        if (!url_record.is_valid())
+        if (!url_record.has_value())
             return WebIDL::SyntaxError::create(realm(), "Invalid URL"_string);
 
         // 3. Append urlRecord to urlRecords.
-        url_records.unchecked_append(url_record);
+        url_records.unchecked_append(url_record.release_value());
     }
 
     // 6. For each urlRecord of urlRecords:
@@ -163,6 +165,15 @@ GC::Ref<CSS::FontFaceSet> WorkerGlobalScope::fonts()
     if (!m_fonts)
         m_fonts = CSS::FontFaceSet::create(realm());
     return *m_fonts;
+}
+
+GC::Ref<PolicyContainer> WorkerGlobalScope::policy_container() const
+{
+    auto& realm = this->realm();
+    if (!m_policy_container) {
+        m_policy_container = realm.create<PolicyContainer>(realm);
+    }
+    return *m_policy_container;
 }
 
 }

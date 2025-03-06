@@ -14,6 +14,7 @@
 #include "Namespaces.h"
 #include <AK/Array.h>
 #include <AK/LexicalPath.h>
+#include <AK/NumericLimits.h>
 #include <AK/Queue.h>
 #include <AK/QuickSort.h>
 #include <LibIDL/Types.h>
@@ -950,7 +951,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
                 bool may_be_null = !optional_default_value.has_value() || parameter.type->is_nullable() || optional_default_value.value() == "null";
 
                 // Required dictionary members cannot be null.
-                may_be_null &= !member.required;
+                may_be_null &= !member.required && !member.default_value.has_value();
 
                 if (member.type->is_string() && optional && may_be_null) {
                     dictionary_generator.append(R"~~~(
@@ -1586,9 +1587,10 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
 )~~~");
             } else {
                 if (!optional_default_value.has_value()) {
+                    union_generator.set("nullish_or_undefined", union_type.is_nullable() ? "nullish" : "undefined");
                     union_generator.append(R"~~~(
     Optional<@union_type@> @cpp_name@;
-    if (!@js_name@@js_suffix@.is_undefined())
+    if (!@js_name@@js_suffix@.is_@nullish_or_undefined@())
         @cpp_name@ = TRY(@js_name@@js_suffix@_to_variant(@js_name@@js_suffix@));
 )~~~");
                 } else {
@@ -2701,9 +2703,9 @@ static void generate_html_constructor(SourceGenerator& generator, IDL::Construct
     // 10. Let element be the last entry in definition's construction stack.
     auto& element = definition->construction_stack().last();
 
-    // 11. If element is an already constructed marker, then throw an "InvalidStateError" DOMException.
+    // 11. If element is an already constructed marker, then throw a TypeError.
     if (element.has<HTML::AlreadyConstructedCustomElementMarker>())
-        return JS::throw_completion(WebIDL::InvalidStateError::create(realm, "Custom element has already been constructed"_string));
+        return vm.throw_completion<JS::TypeError>("Custom element has already been constructed"sv);
 
     // 12. Perform ? element.[[SetPrototypeOf]](prototype).
     auto actual_element = element.get<GC::Ref<DOM::Element>>();
@@ -2855,6 +2857,18 @@ JS::ThrowCompletionOr<GC::Ref<JS::Object>> @constructor_class@::construct([[mayb
     }
 }
 
+static ByteString get_best_value_for_underlying_enum_type(size_t size)
+{
+
+    if (size < NumericLimits<u8>::max()) {
+        return "u8";
+    } else if (size < NumericLimits<u16>::max()) {
+        return "u16";
+    }
+
+    VERIFY_NOT_REACHED();
+}
+
 static void generate_enumerations(HashMap<ByteString, Enumeration> const& enumerations, StringBuilder& builder)
 {
     SourceGenerator generator { builder };
@@ -2864,8 +2878,9 @@ static void generate_enumerations(HashMap<ByteString, Enumeration> const& enumer
             continue;
         auto enum_generator = generator.fork();
         enum_generator.set("enum.type.name", it.key);
+        enum_generator.set("enum.underlying_type", get_best_value_for_underlying_enum_type(it.value.translated_cpp_names.size()));
         enum_generator.append(R"~~~(
-enum class @enum.type.name@ {
+enum class @enum.type.name@ : @enum.underlying_type@ {
 )~~~");
         for (auto const& entry : it.value.translated_cpp_names) {
             enum_generator.set("enum.entry", entry.value);
@@ -3716,38 +3731,44 @@ JS_DEFINE_NATIVE_FUNCTION(@class_name@::@attribute.getter_callback@)
                     // NOTE: this is "impl" above
 
                     // 2. Let contentAttributeValue be the result of running this's get the content attribute.
-                    // 8. Return the canonical keyword for the state of attributeDefinition that contentAttributeValue corresponds to.
-                    // NOTE: We run step 8 here to have a field to assign to
+
                     attribute_generator.append(R"~~~(
-    auto retval = impl->attribute("@attribute.reflect_name@"_fly_string);
+    auto content_attribute_value = impl->attribute("@attribute.reflect_name@"_fly_string);
 )~~~");
 
                     // 3. Let attributeDefinition be the attribute definition of element's content attribute whose namespace is null
                     //    and local name is the reflected content attribute name.
                     // NOTE: this is "attribute" above
 
-                    // 4. Assert: attributeDefinition indicates it is an enumerated attribute.
-                    // 5. Assert: the reflected IDL attribute is limited to only known values.
-                    // NOTE: This is checked by the "Enumerated" extended attribute
+                    // 4. If attributeDefinition indicates it is an enumerated attribute:
                     auto is_enumerated = attribute.extended_attributes.contains("Enumerated");
-                    VERIFY(is_enumerated);
+                    if (is_enumerated) {
 
-                    // 6. Assert: contentAttributeValue corresponds to a state of attributeDefinition.
-                    auto valid_enumerations_type = attribute.extended_attributes.get("Enumerated").value();
-                    auto valid_enumerations = interface.enumerations.get(valid_enumerations_type).value();
+                        // NOTE: We run step 4 here to have a field to assign to
+                        // 4. Return the canonical keyword for the state of attributeDefinition that contentAttributeValue corresponds to.
+                        attribute_generator.append(R"~~~(
+    auto retval = impl->attribute("@attribute.reflect_name@"_fly_string);
+)~~~");
 
-                    auto missing_value_default = valid_enumerations.extended_attributes.get("MissingValueDefault");
-                    auto invalid_value_default = valid_enumerations.extended_attributes.get("InvalidValueDefault");
+                        // 1. Assert: the reflected IDL attribute is limited to only known values.
+                        // NOTE: This is checked by the "Enumerated" extended attribute, so there's nothing additional to assert.
 
-                    attribute_generator.set("missing_enum_default_value", missing_value_default.has_value() ? missing_value_default.value().view() : ""sv);
-                    attribute_generator.set("invalid_enum_default_value", invalid_value_default.has_value() ? invalid_value_default.value().view() : ""sv);
-                    attribute_generator.set("valid_enum_values", MUST(String::join(", "sv, valid_enumerations.values.values(), "\"{}\"_string"sv)));
+                        // 2. Assert: contentAttributeValue corresponds to a state of attributeDefinition.
+                        auto valid_enumerations_type = attribute.extended_attributes.get("Enumerated").value();
+                        auto valid_enumerations = interface.enumerations.get(valid_enumerations_type).value();
 
-                    attribute_generator.append(R"~~~(
+                        auto missing_value_default = valid_enumerations.extended_attributes.get("MissingValueDefault");
+                        auto invalid_value_default = valid_enumerations.extended_attributes.get("InvalidValueDefault");
+
+                        attribute_generator.set("missing_enum_default_value", missing_value_default.has_value() ? missing_value_default.value().view() : ""sv);
+                        attribute_generator.set("invalid_enum_default_value", invalid_value_default.has_value() ? invalid_value_default.value().view() : ""sv);
+                        attribute_generator.set("valid_enum_values", MUST(String::join(", "sv, valid_enumerations.values.values(), "\"{}\"_string"sv)));
+
+                        attribute_generator.append(R"~~~(
     Array valid_values { @valid_enum_values@ };
     )~~~");
-                    if (invalid_value_default.has_value()) {
-                        attribute_generator.append(R"~~~(
+                        if (invalid_value_default.has_value()) {
+                            attribute_generator.append(R"~~~(
 
     if (retval.has_value()) {
         auto found = false;
@@ -3763,19 +3784,26 @@ JS_DEFINE_NATIVE_FUNCTION(@class_name@::@attribute.getter_callback@)
             retval = "@invalid_enum_default_value@"_string;
     }
     )~~~");
-                    }
+                        }
 
-                    if (missing_value_default.has_value()) {
-                        attribute_generator.append(R"~~~(
+                        if (missing_value_default.has_value()) {
+                            attribute_generator.append(R"~~~(
     if (!retval.has_value())
         retval = "@missing_enum_default_value@"_string;
     )~~~");
-                    }
+                        }
 
-                    attribute_generator.append(R"~~~(
+                        attribute_generator.append(R"~~~(
     VERIFY(!retval.has_value() || valid_values.contains_slow(retval.value()));
 )~~~");
-                    // FIXME: 7. If contentAttributeValue corresponds to a state of attributeDefinition with no associated keyword value, then return null.
+
+                        // FIXME: 3. If contentAttributeValue corresponds to a state of attributeDefinition with no associated keyword value, then return null.
+                    } else {
+                        // 5. Return contentAttributeValue.
+                        attribute_generator.append(R"~~~(
+    auto retval = move(content_attribute_value);
+)~~~");
+                    }
                 }
             }
             // If a reflected IDL attribute has the type boolean:
@@ -4477,7 +4505,6 @@ using namespace Web::CredentialManagement;
 using namespace Web::Crypto;
 using namespace Web::CSS;
 using namespace Web::DOM;
-using namespace Web::DOMParsing;
 using namespace Web::DOMURL;
 using namespace Web::Encoding;
 using namespace Web::EntriesAPI;

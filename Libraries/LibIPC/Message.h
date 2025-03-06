@@ -12,8 +12,8 @@
 #include <AK/RefPtr.h>
 #include <AK/Vector.h>
 #include <LibCore/Forward.h>
+#include <LibCore/System.h>
 #include <LibIPC/Transport.h>
-#include <unistd.h>
 
 namespace IPC {
 
@@ -27,7 +27,7 @@ public:
     ~AutoCloseFileDescriptor()
     {
         if (m_fd != -1)
-            close(m_fd);
+            (void)Core::System::close(m_fd);
     }
 
     int value() const { return m_fd; }
@@ -45,11 +45,14 @@ public:
 
     ErrorOr<void> append_file_descriptor(int fd);
 
-    ErrorOr<void> transfer_message(Transport& socket);
+    ErrorOr<void> transfer_message(Transport& transport);
 
 private:
     Vector<u8, 1024> m_data;
     Vector<NonnullRefPtr<AutoCloseFileDescriptor>, 1> m_fds;
+#ifdef AK_OS_WINDOWS
+    Vector<size_t> m_handle_offsets;
+#endif
 };
 
 enum class ErrorCode : u32 {
@@ -66,7 +69,6 @@ public:
     virtual u32 endpoint_magic() const = 0;
     virtual int message_id() const = 0;
     virtual char const* message_name() const = 0;
-    virtual bool valid() const = 0;
     virtual ErrorOr<MessageBuffer> encode() const = 0;
 
 protected:

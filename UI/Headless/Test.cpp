@@ -147,7 +147,8 @@ void run_dump_test(HeadlessWebView& view, Test& test, URL::URL const& url, int t
 
     auto handle_completed_test = [&test, url]() -> ErrorOr<TestResult> {
         if (test.expectation_path.is_empty()) {
-            outln("{}", test.text);
+            if (test.mode != TestMode::Crash)
+                outln("{}", test.text);
             return TestResult::Pass;
         }
 
@@ -234,7 +235,7 @@ void run_dump_test(HeadlessWebView& view, Test& test, URL::URL const& url, int t
                 });
             });
         };
-    } else if (test.mode == TestMode::Text || test.mode == TestMode::Crash) {
+    } else if (test.mode == TestMode::Text) {
         view.on_load_finish = [&view, &test, on_test_complete, url](auto const& loaded_url) {
             // We don't want subframe loads to trigger the test finish.
             if (!url.equals(loaded_url, URL::ExcludeFragment::Yes))
@@ -260,6 +261,13 @@ void run_dump_test(HeadlessWebView& view, Test& test, URL::URL const& url, int t
 
             if (test.did_finish_loading)
                 on_test_complete();
+        };
+    } else if (test.mode == TestMode::Crash) {
+        view.on_load_finish = [on_test_complete = move(on_test_complete), url](auto const& loaded_url) {
+            // We don't want subframe loads to trigger the test finish.
+            if (!url.equals(loaded_url, URL::ExcludeFragment::Yes))
+                return;
+            on_test_complete();
         };
     }
 
@@ -382,7 +390,7 @@ static void run_test(HeadlessWebView& view, Test& test, Application& app)
     auto promise = Core::Promise<Empty>::construct();
 
     view.on_load_finish = [promise](auto const& url) {
-        if (!url.equals("about:blank"sv))
+        if (!url.equals(URL::about_blank()))
             return;
 
         Core::deferred_invoke([promise]() {
@@ -396,6 +404,7 @@ static void run_test(HeadlessWebView& view, Test& test, Application& app)
         auto url = URL::create_with_file_scheme(MUST(FileSystem::real_path(test.input_path)));
 
         switch (test.mode) {
+        case TestMode::Crash:
         case TestMode::Text:
         case TestMode::Layout:
             run_dump_test(view, test, url, app.per_test_timeout_in_seconds * 1000);
@@ -403,15 +412,12 @@ static void run_test(HeadlessWebView& view, Test& test, Application& app)
         case TestMode::Ref:
             run_ref_test(view, test, url, app.per_test_timeout_in_seconds * 1000);
             return;
-        case TestMode::Crash:
-            run_dump_test(view, test, url, app.per_test_timeout_in_seconds * 1000);
-            return;
         }
 
         VERIFY_NOT_REACHED();
     });
 
-    view.load("about:blank"sv);
+    view.load(URL::about_blank());
 }
 
 static void set_ui_callbacks_for_tests(HeadlessWebView& view)
@@ -479,7 +485,7 @@ ErrorOr<void> run_tests(Core::AnonymousBuffer const& theme, Web::DevicePixelSize
     TRY(collect_dump_tests(app, tests, ByteString::formatted("{}/Text", app.test_root_path), "."sv, TestMode::Text));
     TRY(collect_ref_tests(app, tests, ByteString::formatted("{}/Ref", app.test_root_path), "."sv));
     TRY(collect_crash_tests(app, tests, ByteString::formatted("{}/Crash", app.test_root_path), "."sv));
-#if !defined(AK_OS_MACOS)
+#if defined(AK_OS_LINUX) && ARCH(X86_64)
     TRY(collect_ref_tests(app, tests, ByteString::formatted("{}/Screenshot", app.test_root_path), "."sv));
 #endif
 

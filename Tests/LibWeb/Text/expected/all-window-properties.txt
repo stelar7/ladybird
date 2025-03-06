@@ -309,6 +309,7 @@ ResizeObserverEntry
 ResizeObserverSize
 Response
 SVGAElement
+SVGAnimatedEnumeration
 SVGAnimatedLength
 SVGAnimatedNumber
 SVGAnimatedRect
@@ -320,6 +321,7 @@ SVGDefsElement
 SVGDescElement
 SVGElement
 SVGEllipseElement
+SVGFilterElement
 SVGForeignObjectElement
 SVGGElement
 SVGGeometryElement

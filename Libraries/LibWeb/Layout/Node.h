@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018-2023, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2025, Jelle Raaijmakers <jelle@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -9,13 +10,9 @@
 #include <AK/NonnullRefPtr.h>
 #include <AK/Vector.h>
 #include <LibJS/Heap/Cell.h>
-#include <LibWeb/CSS/ComputedProperties.h>
-#include <LibWeb/CSS/ComputedValues.h>
-#include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleValues/ImageStyleValue.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/Forward.h>
-#include <LibWeb/Layout/BoxModelMetrics.h>
 #include <LibWeb/Painting/PaintContext.h>
 #include <LibWeb/Painting/Paintable.h>
 #include <LibWeb/TreeNode.h>
@@ -263,11 +260,10 @@ class NodeWithStyleAndBoxModelMetrics : public NodeWithStyle {
     GC_CELL(NodeWithStyleAndBoxModelMetrics, NodeWithStyle);
 
 public:
-    BoxModelMetrics& box_model() { return m_box_model; }
-    BoxModelMetrics const& box_model() const { return m_box_model; }
-
     GC::Ptr<NodeWithStyleAndBoxModelMetrics> continuation_of_node() const { return m_continuation_of_node; }
     void set_continuation_of_node(Badge<TreeBuilder>, GC::Ptr<NodeWithStyleAndBoxModelMetrics> node) { m_continuation_of_node = node; }
+
+    bool should_create_inline_continuation() const;
 
     void propagate_style_along_continuation(CSS::ComputedProperties const&) const;
 
@@ -287,7 +283,6 @@ protected:
 private:
     virtual bool is_node_with_style_and_box_model_metrics() const final { return true; }
 
-    BoxModelMetrics m_box_model;
     GC::Ptr<NodeWithStyleAndBoxModelMetrics> m_continuation_of_node;
 };
 

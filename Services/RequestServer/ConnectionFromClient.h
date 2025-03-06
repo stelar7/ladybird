@@ -43,6 +43,7 @@ public:
 private:
     explicit ConnectionFromClient(IPC::Transport);
 
+    virtual Messages::RequestServer::InitTransportResponse init_transport(int peer_pid) override;
     virtual Messages::RequestServer::ConnectNewClientResponse connect_new_client() override;
     virtual Messages::RequestServer::IsSupportedProtocolResponse is_supported_protocol(ByteString const&) override;
     virtual void set_dns_server(ByteString const& host_or_address, u16 port, bool use_tls) override;
@@ -75,5 +76,9 @@ private:
     HashMap<int, NonnullRefPtr<Core::Notifier>> m_write_notifiers;
     NonnullRefPtr<Resolver> m_resolver;
 };
+
+// FIXME: Find a good home for this
+ByteString build_curl_resolve_list(DNS::LookupResult const&, StringView host, u16 port);
+constexpr inline uintptr_t websocket_private_tag = 0x1;
 
 }

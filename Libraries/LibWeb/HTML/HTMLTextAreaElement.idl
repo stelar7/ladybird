@@ -1,12 +1,13 @@
 #import <HTML/HTMLElement.idl>
 #import <HTML/HTMLFormElement.idl>
+#import <HTML/ValidityState.idl>
 
 // https://html.spec.whatwg.org/multipage/form-elements.html#htmltextareaelement
 [Exposed=Window]
 interface HTMLTextAreaElement : HTMLElement {
     [HTMLConstructor] constructor();
 
-    [CEReactions, Enumerated=Autocomplete, Reflect] attribute DOMString autocomplete;
+    [CEReactions] attribute DOMString autocomplete;
     [CEReactions] attribute unsigned long cols;
     [CEReactions, Reflect=dirname] attribute DOMString dirName;
     [CEReactions, Reflect] attribute boolean disabled;
@@ -25,8 +26,8 @@ interface HTMLTextAreaElement : HTMLElement {
     [LegacyNullToEmptyString] attribute DOMString value;
     readonly attribute unsigned long textLength;
 
-    [FIXME] readonly attribute boolean willValidate;
-    [FIXME] readonly attribute ValidityState validity;
+    readonly attribute boolean willValidate;
+    readonly attribute ValidityState validity;
     [FIXME] readonly attribute DOMString validationMessage;
     boolean checkValidity();
     boolean reportValidity();

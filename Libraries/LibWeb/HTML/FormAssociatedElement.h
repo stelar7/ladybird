@@ -91,6 +91,9 @@ public:
     // https://html.spec.whatwg.org/multipage/forms.html#concept-submit-button
     virtual bool is_submit_button() const { return false; }
 
+    // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#check-validity-steps
+    bool check_validity_steps();
+
     // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#candidate-for-constraint-validation
     bool is_candidate_for_constraint_validation() const;
 
@@ -122,6 +125,12 @@ public:
     String form_action() const;
     WebIDL::ExceptionOr<void> set_form_action(String const&);
 
+    // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#dom-cva-validity
+    GC::Ref<ValidityState const> validity() const;
+
+    // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#dom-cva-setcustomvalidity
+    void set_custom_validity(String& error);
+
 protected:
     FormAssociatedElement() = default;
     virtual ~FormAssociatedElement() = default;
@@ -141,6 +150,9 @@ private:
 
     // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#parser-inserted-flag
     bool m_parser_inserted { false };
+
+    // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#custom-validity-error-message
+    String m_custom_validity_error_message;
 };
 
 enum class SelectionSource {
@@ -148,7 +160,8 @@ enum class SelectionSource {
     DOM,
 };
 
-class FormAssociatedTextControlElement : public FormAssociatedElement
+class FormAssociatedTextControlElement
+    : public FormAssociatedElement
     , public InputEventsTarget {
 public:
     // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#concept-textarea/input-relevant-value
@@ -219,6 +232,8 @@ protected:
     void relevant_value_was_changed();
 
 private:
+    virtual GC::Ref<JS::Cell> as_cell() override;
+
     void collapse_selection_to_offset(size_t);
     void selection_was_changed();
 

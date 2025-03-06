@@ -11,13 +11,13 @@
 #include <AK/Optional.h>
 #include <AK/OwnPtr.h>
 #include <LibGfx/Font/Typeface.h>
+#include <LibGfx/FontCascadeList.h>
 #include <LibWeb/Animations/KeyframeEffect.h>
 #include <LibWeb/CSS/CSSFontFaceRule.h>
 #include <LibWeb/CSS/CSSKeyframesRule.h>
 #include <LibWeb/CSS/CSSStyleDeclaration.h>
 #include <LibWeb/CSS/CascadeOrigin.h>
 #include <LibWeb/CSS/CascadedProperties.h>
-#include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/Selector.h>
 #include <LibWeb/CSS/StyleInvalidationData.h>
 #include <LibWeb/Forward.h>
@@ -110,6 +110,21 @@ struct OwnFontFaceKey {
     int slope { 0 };
 };
 
+struct RuleCache {
+    HashMap<FlyString, Vector<MatchingRule>> rules_by_id;
+    HashMap<FlyString, Vector<MatchingRule>> rules_by_class;
+    HashMap<FlyString, Vector<MatchingRule>> rules_by_tag_name;
+    HashMap<FlyString, Vector<MatchingRule>, AK::ASCIICaseInsensitiveFlyStringTraits> rules_by_attribute_name;
+    Array<Vector<MatchingRule>, to_underlying(CSS::Selector::PseudoElement::Type::KnownPseudoElementCount)> rules_by_pseudo_element;
+    Vector<MatchingRule> root_rules;
+    Vector<MatchingRule> other_rules;
+
+    HashMap<FlyString, NonnullRefPtr<Animations::KeyframeEffect::KeyFrameSet>> rules_by_animation_keyframes;
+
+    void add_rule(MatchingRule const&, Optional<Selector::PseudoElement::Type>, bool contains_root_pseudo_class);
+    void for_each_matching_rules(DOM::Element const&, Optional<Selector::PseudoElement::Type>, Function<IterationDecision(Vector<MatchingRule> const&)> callback) const;
+};
+
 class FontLoader;
 
 class StyleComputer {
@@ -146,7 +161,7 @@ public:
     [[nodiscard]] GC::Ref<ComputedProperties> compute_style(DOM::Element&, Optional<CSS::Selector::PseudoElement::Type> = {}) const;
     [[nodiscard]] GC::Ptr<ComputedProperties> compute_pseudo_element_style_if_needed(DOM::Element&, Optional<CSS::Selector::PseudoElement::Type>) const;
 
-    Vector<MatchingRule> const& get_hover_rules() const;
+    RuleCache const& get_hover_rules() const;
     [[nodiscard]] Vector<MatchingRule const*> collect_matching_rules(DOM::Element const&, CascadeOrigin, Optional<CSS::Selector::PseudoElement::Type>, bool& did_match_any_hover_rules, FlyString const& qualified_layer_name = {}) const;
 
     InvalidationSet invalidation_set_for_properties(Vector<InvalidationSet::Property> const&) const;
@@ -168,6 +183,8 @@ public:
     static CSSPixelFraction absolute_size_mapping(Keyword);
     RefPtr<Gfx::FontCascadeList const> compute_font_for_style_values(DOM::Element const* element, Optional<CSS::Selector::PseudoElement::Type> pseudo_element, CSSStyleValue const& font_family, CSSStyleValue const& font_size, CSSStyleValue const& font_style, CSSStyleValue const& font_weight, CSSStyleValue const& font_stretch, int math_depth = 0) const;
 
+    [[nodiscard]] RefPtr<CSSStyleValue> recascade_font_size_if_needed(DOM::Element&, Optional<CSS::Selector::PseudoElement::Type> pseudo_element, CascadedProperties&) const;
+
     void set_viewport_rect(Badge<DOM::Document>, CSSPixelRect const& viewport_rect) { m_viewport_rect = viewport_rect; }
 
     enum class AnimationRefresh {
@@ -183,10 +200,10 @@ public:
 
     [[nodiscard]] GC::Ref<ComputedProperties> compute_properties(DOM::Element&, Optional<Selector::PseudoElement::Type>, CascadedProperties&) const;
 
-    void absolutize_values(ComputedProperties&) const;
+    void absolutize_values(ComputedProperties&, GC::Ptr<DOM::Element const>) const;
     void compute_font(ComputedProperties&, DOM::Element const*, Optional<CSS::Selector::PseudoElement::Type>) const;
 
-    [[nodiscard]] bool should_reject_with_ancestor_filter(Selector const&) const;
+    [[nodiscard]] inline bool should_reject_with_ancestor_filter(Selector const&) const;
 
 private:
     enum class ComputeStyleMode {
@@ -259,18 +276,6 @@ private:
         bool has_has_selectors { false };
     };
 
-    struct RuleCache {
-        HashMap<FlyString, Vector<MatchingRule>> rules_by_id;
-        HashMap<FlyString, Vector<MatchingRule>> rules_by_class;
-        HashMap<FlyString, Vector<MatchingRule>> rules_by_tag_name;
-        HashMap<FlyString, Vector<MatchingRule>, AK::ASCIICaseInsensitiveFlyStringTraits> rules_by_attribute_name;
-        Array<Vector<MatchingRule>, to_underlying(CSS::Selector::PseudoElement::Type::KnownPseudoElementCount)> rules_by_pseudo_element;
-        Vector<MatchingRule> root_rules;
-        Vector<MatchingRule> other_rules;
-
-        HashMap<FlyString, NonnullRefPtr<Animations::KeyframeEffect::KeyFrameSet>> rules_by_animation_keyframes;
-    };
-
     struct RuleCaches {
         RuleCache main;
         HashMap<FlyString, NonnullOwnPtr<RuleCache>> by_layer;
@@ -281,14 +286,14 @@ private:
         HashMap<GC::Ref<DOM::ShadowRoot const>, NonnullOwnPtr<RuleCaches>> for_shadow_roots;
     };
 
-    void make_rule_cache_for_cascade_origin(CascadeOrigin, SelectorInsights&, Vector<MatchingRule>& hover_rules);
+    void make_rule_cache_for_cascade_origin(CascadeOrigin, SelectorInsights&);
 
     [[nodiscard]] RuleCache const* rule_cache_for_cascade_origin(CascadeOrigin, FlyString const& qualified_layer_name, GC::Ptr<DOM::ShadowRoot const>) const;
 
     static void collect_selector_insights(Selector const&, SelectorInsights&);
 
     OwnPtr<SelectorInsights> m_selector_insights;
-    Vector<MatchingRule> m_hover_rules;
+    OwnPtr<RuleCache> m_hover_rule_cache;
     OwnPtr<StyleInvalidationData> m_style_invalidation_data;
     OwnPtr<RuleCachesForDocumentAndShadowRoots> m_author_rule_cache;
     OwnPtr<RuleCachesForDocumentAndShadowRoots> m_user_rule_cache;
@@ -297,6 +302,8 @@ private:
 
     using FontLoaderList = Vector<NonnullOwnPtr<FontLoader>>;
     HashMap<OwnFontFaceKey, FontLoaderList> m_loaded_fonts;
+
+    [[nodiscard]] Length::FontMetrics const& root_element_font_metrics_for_element(GC::Ptr<DOM::Element const>) const;
 
     Length::FontMetrics m_default_font_metrics;
     Length::FontMetrics m_root_element_font_metrics;
@@ -337,5 +344,16 @@ private:
     Function<void(FontLoader const&)> m_on_load;
     Function<void()> m_on_fail;
 };
+
+inline bool StyleComputer::should_reject_with_ancestor_filter(Selector const& selector) const
+{
+    for (u32 hash : selector.ancestor_hashes()) {
+        if (hash == 0)
+            break;
+        if (!m_ancestor_filter.may_contain(hash))
+            return true;
+    }
+    return false;
+}
 
 }

@@ -598,6 +598,7 @@ TEST_CASE(ECMA262_parse)
         { "(?<a>a)(?<a>b)"sv, regex::Error::DuplicateNamedCapture },
         { "(?<a>a)(?<b>b)(?<a>c)"sv, regex::Error::DuplicateNamedCapture },
         { "(?<a>(?<a>a))"sv, regex::Error::DuplicateNamedCapture },
+        { "(?:(?<x>a)|(?<y>a)(?<x>b))(?:(?<z>c)|(?<z>d))"sv }, // Duplicate named capturing groups in separate alternatives should parse correctly
         { "(?<1a>a)"sv, regex::Error::InvalidNameForCaptureGroup },
         { "(?<\\a>a)"sv, regex::Error::InvalidNameForCaptureGroup },
         { "(?<\ta>a)"sv, regex::Error::InvalidNameForCaptureGroup },
@@ -716,6 +717,7 @@ TEST_CASE(ECMA262_match)
             ""sv,
             false, }, // See above, also ladybird#2931.
         { "[^]*[^]"sv, "i"sv, true }, // Optimizer bug, ignoring an enabled trailing 'invert' when comparing blocks, ladybird#3421.
+        { "xx|...|...."sv, "cd"sv, false },
     };
     // clang-format on
 
@@ -983,6 +985,15 @@ TEST_CASE(extremely_long_fork_chain)
     Regex<ECMA262> re("(?:aa)*");
     auto result = re.match(ByteString::repeated('a', 1000));
     EXPECT_EQ(result.success, true);
+}
+
+TEST_CASE(nullable_quantifiers)
+{
+    // clang-format off
+    Regex<ECMA262> re("(a?b?""?)*"); // Pattern (a?b??)* has to be concatenated to avoid "??)", which is a trigraph.
+    // clang-format on
+    auto result = re.match("ab"sv);
+    EXPECT_EQ(result.matches.at(0).view, "ab"sv);
 }
 
 TEST_CASE(theoretically_infinite_loop)

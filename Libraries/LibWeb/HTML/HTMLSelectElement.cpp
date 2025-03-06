@@ -9,6 +9,7 @@
 
 #include <LibWeb/Bindings/HTMLSelectElementPrototype.h>
 #include <LibWeb/Bindings/Intrinsics.h>
+#include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/ElementFactory.h>
@@ -606,8 +607,7 @@ void HTMLSelectElement::create_shadow_tree_if_needed()
     MUST(border->append_child(*m_inner_text_element));
 
     // FIXME: Find better way to add chevron icon
-    auto chevron_fill_color = document().page().palette().base_text();
-    auto chevron_svg = MUST(String::formatted("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\"><path fill=\"{}\" d=\"M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z\"/></svg>", chevron_fill_color));
+    static constexpr auto chevron_svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\"><path fill=\"currentcolor\" d=\"M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z\"/></svg>"sv;
 
     m_chevron_icon_element = DOM::create_element(document(), HTML::TagNames::div, Namespace::HTML).release_value_but_fixme_should_propagate_errors();
     MUST(m_chevron_icon_element->set_attribute(HTML::AttributeNames::style, R"~~~(
@@ -693,6 +693,19 @@ void HTMLSelectElement::update_selectedness()
         }
     }
     update_inner_text_element();
+}
+
+// https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#dom-cva-willvalidate
+bool HTMLSelectElement::will_validate()
+{
+    // The willValidate attribute's getter must return true, if this element is a candidate for constraint validation
+    return is_candidate_for_constraint_validation();
+}
+
+// https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#dom-cva-checkvalidity
+bool HTMLSelectElement::check_validity()
+{
+    return check_validity_steps();
 }
 
 bool HTMLSelectElement::is_focusable() const

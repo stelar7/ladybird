@@ -2,6 +2,7 @@
  * Copyright (c) 2018-2020, Andreas Kling <andreas@ladybird.org>
  * Copyright (c) 2021, Max Wipfli <mail@maxwipfli.ch>
  * Copyright (c) 2024, Sam Atkins <sam@ladybird.org>
+ * Copyright (c) 2023-2025, Shannon Booth <shannon@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -21,28 +22,12 @@
 
 namespace URL {
 
-// FIXME: It could make sense to force users of URL to use URL::Parser::basic_parse() explicitly instead of using a constructor.
-URL::URL(StringView string)
-    : URL(Parser::basic_parse(string).value_or(URL {}))
-{
-    if constexpr (URL_PARSER_DEBUG) {
-        if (m_data->valid)
-            dbgln("URL constructor: Parsed URL to be '{}'.", serialize());
-        else
-            dbgln("URL constructor: Parsed URL to be invalid.");
-    }
-}
-
-URL URL::complete_url(StringView relative_url) const
+Optional<URL> URL::complete_url(StringView relative_url) const
 {
     if (!is_valid())
         return {};
 
-    auto result = Parser::basic_parse(relative_url, *this);
-    if (!result.has_value())
-        return {};
-
-    return result.release_value();
+    return Parser::basic_parse(relative_url, *this);
 }
 
 ByteString URL::path_segment_at_index(size_t index) const
@@ -197,9 +182,9 @@ URL create_with_file_scheme(ByteString const& path, ByteString const& fragment, 
 
 URL create_with_url_or_path(ByteString const& url_or_path)
 {
-    URL url = url_or_path;
-    if (url.is_valid())
-        return url;
+    auto url = Parser::basic_parse(url_or_path);
+    if (url.has_value())
+        return url.release_value();
 
     ByteString path = LexicalPath::canonicalized_path(url_or_path);
     return create_with_file_scheme(path);
@@ -477,6 +462,16 @@ String percent_encode(StringView input, PercentEncodeSet set, SpaceAsPlus space_
             append_percent_encoded_if_necessary(builder, code_point, set);
     }
     return MUST(builder.to_string());
+}
+
+URL URL::about(String path)
+{
+    URL url;
+    url.m_data->valid = true;
+    url.m_data->scheme = "about"_string;
+    url.m_data->paths = { move(path) };
+    url.m_data->cannot_be_a_base_url = true;
+    return url;
 }
 
 // https://url.spec.whatwg.org/#percent-decode

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2023, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2018-2025, Andreas Kling <andreas@ladybird.org>
  * Copyright (c) 2021-2023, Linus Groh <linusg@serenityos.org>
  * Copyright (c) 2023-2024, Shannon Booth <shannon@serenityos.org>
  * Copyright (c) 2025, Jelle Raaijmakers <jelle@ladybird.org>
@@ -38,6 +38,7 @@
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/VisibilityState.h>
 #include <LibWeb/InvalidateDisplayList.h>
+#include <LibWeb/TrustedTypes/InjectionSink.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
 #include <LibWeb/WebIDL/ObservableArray.h>
 
@@ -103,7 +104,7 @@ public:
 
     static WebIDL::ExceptionOr<GC::Ref<Document>> create_and_initialize(Type, String content_type, HTML::NavigationParams const&);
 
-    [[nodiscard]] static GC::Ref<Document> create(JS::Realm&, URL::URL const& url = "about:blank"sv);
+    [[nodiscard]] static GC::Ref<Document> create(JS::Realm&, URL::URL const& url = URL::about_blank());
     [[nodiscard]] static GC::Ref<Document> create_for_fragment_parsing(JS::Realm&);
     static WebIDL::ExceptionOr<GC::Ref<Document>> construct_impl(JS::Realm&);
     virtual ~Document() override;
@@ -152,6 +153,7 @@ public:
 
     void update_base_element(Badge<HTML::HTMLBaseElement>);
     GC::Ptr<HTML::HTMLBaseElement const> first_base_element_with_href_in_tree_order() const;
+    GC::Ptr<HTML::HTMLBaseElement const> first_base_element_with_target_in_tree_order() const;
 
     String url_string() const { return m_url.to_string(); }
     String document_uri() const { return url_string(); }
@@ -185,11 +187,13 @@ public:
     Node* hovered_node() { return m_hovered_node.ptr(); }
     Node const* hovered_node() const { return m_hovered_node.ptr(); }
 
-    void set_inspected_node(Node*, Optional<CSS::Selector::PseudoElement::Type>);
-    Node* inspected_node() { return m_inspected_node.ptr(); }
-    Node const* inspected_node() const { return m_inspected_node.ptr(); }
-    Layout::Node* inspected_layout_node();
-    Layout::Node const* inspected_layout_node() const { return const_cast<Document*>(this)->inspected_layout_node(); }
+    void set_inspected_node(GC::Ptr<Node>);
+    GC::Ptr<Node const> inspected_node() const { return m_inspected_node; }
+
+    void set_highlighted_node(GC::Ptr<Node>, Optional<CSS::Selector::PseudoElement::Type>);
+    GC::Ptr<Node const> highlighted_node() const { return m_highlighted_node; }
+    GC::Ptr<Layout::Node> highlighted_layout_node();
+    GC::Ptr<Layout::Node const> highlighted_layout_node() const { return const_cast<Document*>(this)->highlighted_layout_node(); }
 
     Element* document_element();
     Element const* document_element() const;
@@ -396,6 +400,7 @@ public:
 
     Optional<String> const& pragma_set_default_language() const { return m_pragma_set_default_language; }
     void set_pragma_set_default_language(String language) { m_pragma_set_default_language = move(language); }
+    Optional<String> const& http_content_language() const { return m_http_content_language; }
 
     bool has_encoding() const { return m_encoding.has_value(); }
     Optional<String> const& encoding() const { return m_encoding; }
@@ -546,8 +551,8 @@ public:
     void set_active_sandboxing_flag_set(HTML::SandboxingFlagSet);
 
     // https://html.spec.whatwg.org/multipage/dom.html#concept-document-policy-container
-    HTML::PolicyContainer policy_container() const;
-    void set_policy_container(HTML::PolicyContainer);
+    GC::Ref<HTML::PolicyContainer> policy_container() const;
+    void set_policy_container(GC::Ref<HTML::PolicyContainer>);
 
     Vector<GC::Root<HTML::Navigable>> descendant_navigables();
     Vector<GC::Root<HTML::Navigable>> const descendant_navigables() const;
@@ -633,7 +638,7 @@ public:
 
     u32 unload_counter() const { return m_unload_counter; }
 
-    HTML::SourceSnapshotParams snapshot_source_snapshot_params() const;
+    GC::Ref<HTML::SourceSnapshotParams> snapshot_source_snapshot_params() const;
 
     void update_for_history_step_application(GC::Ref<HTML::SessionHistoryEntry>, bool do_not_reactivate, size_t script_history_length, size_t script_history_index, Optional<Bindings::NavigationType> navigation_type, Optional<Vector<GC::Ref<HTML::SessionHistoryEntry>>> entries_for_navigation_api = {}, GC::Ptr<HTML::SessionHistoryEntry> previous_entry_for_activation = {}, bool update_navigation_api = true);
 
@@ -710,6 +715,13 @@ public:
     void process_top_layer_removals();
 
     OrderedHashTable<GC::Ref<Element>> const& top_layer_elements() const { return m_top_layer_elements; }
+
+    // AD-HOC: These lists are managed dynamically instead of being generated as needed.
+    // Spec issue: https://github.com/whatwg/html/issues/11007
+    Vector<GC::Ref<HTML::HTMLElement>>& showing_auto_popover_list() { return m_showing_auto_popover_list; }
+    Vector<GC::Ref<HTML::HTMLElement>>& showing_hint_popover_list() { return m_showing_hint_popover_list; }
+    Vector<GC::Ref<HTML::HTMLElement>> const& showing_auto_popover_list() const { return m_showing_auto_popover_list; }
+    Vector<GC::Ref<HTML::HTMLElement>> const& showing_hint_popover_list() const { return m_showing_hint_popover_list; }
 
     size_t transition_generation() const { return m_transition_generation; }
 
@@ -801,6 +813,8 @@ public:
     // https://html.spec.whatwg.org/multipage/dom.html#allows-adding-render-blocking-elements
     [[nodiscard]] bool allows_adding_render_blocking_elements() const;
 
+    [[nodiscard]] bool is_render_blocking_element(GC::Ref<Element>) const;
+
     void add_render_blocking_element(GC::Ref<Element>);
     void remove_render_blocking_element(GC::Ref<Element>);
 
@@ -829,7 +843,11 @@ private:
 
     void evaluate_media_rules();
 
-    WebIDL::ExceptionOr<void> run_the_document_write_steps(StringView);
+    enum class AddLineFeed {
+        Yes,
+        No,
+    };
+    WebIDL::ExceptionOr<void> run_the_document_write_steps(Vector<String> const& text, AddLineFeed line_feed, TrustedTypes::InjectionSink sink);
 
     void queue_intersection_observer_task();
     void queue_an_intersection_observer_entry(IntersectionObserver::IntersectionObserver&, HighResolutionTime::DOMHighResTimeStamp time, GC::Ref<Geometry::DOMRectReadOnly> root_bounds, GC::Ref<Geometry::DOMRectReadOnly> bounding_client_rect, GC::Ref<Geometry::DOMRectReadOnly> intersection_rect, bool is_intersecting, double intersection_ratio, GC::Ref<Element> target);
@@ -857,9 +875,6 @@ private:
     GC::Ref<Page> m_page;
     OwnPtr<CSS::StyleComputer> m_style_computer;
     GC::Ptr<CSS::StyleSheetList> m_style_sheets;
-    GC::Ptr<Node> m_hovered_node;
-    GC::Ptr<Node> m_inspected_node;
-    Optional<CSS::Selector::PseudoElement::Type> m_inspected_pseudo_element;
     GC::Ptr<Node> m_active_favicon;
     WeakPtr<HTML::BrowsingContext> m_browsing_context;
     URL::URL m_url;
@@ -867,6 +882,11 @@ private:
     GC::Ptr<HTML::Window> m_window;
 
     GC::Ptr<Layout::Viewport> m_layout_root;
+
+    GC::Ptr<Node> m_hovered_node;
+    GC::Ptr<Node> m_inspected_node;
+    GC::Ptr<Node> m_highlighted_node;
+    Optional<CSS::Selector::PseudoElement::Type> m_highlighted_pseudo_element;
 
     Optional<Color> m_normal_link_color;
     Optional<Color> m_active_link_color;
@@ -915,6 +935,7 @@ private:
     HTML::DocumentReadyState m_readiness { HTML::DocumentReadyState::Complete };
     String m_content_type { "application/xml"_string };
     Optional<String> m_pragma_set_default_language;
+    Optional<String> m_http_content_language;
     Optional<String> m_encoding;
 
     bool m_ready_for_post_load_tasks { false };
@@ -1008,7 +1029,7 @@ private:
     HTML::SandboxingFlagSet m_active_sandboxing_flag_set;
 
     // https://html.spec.whatwg.org/multipage/dom.html#concept-document-policy-container
-    HTML::PolicyContainer m_policy_container;
+    mutable GC::Ptr<HTML::PolicyContainer> m_policy_container;
 
     // https://html.spec.whatwg.org/multipage/interaction.html#visibility-state
     HTML::VisibilityState m_visibility_state { HTML::VisibilityState::Hidden };
@@ -1022,8 +1043,9 @@ private:
     // https://w3c.github.io/selection-api/#dfn-selection
     GC::Ptr<Selection::Selection> m_selection;
 
-    // NOTE: This is a cache to make finding the first <base href> element O(1).
+    // NOTE: This is a cache to make finding the first <base href> or <base target> element O(1).
     GC::Ptr<HTML::HTMLBaseElement const> m_first_base_element_with_href_in_tree_order;
+    GC::Ptr<HTML::HTMLBaseElement const> m_first_base_element_with_target_in_tree_order;
 
     // https://html.spec.whatwg.org/multipage/images.html#list-of-available-images
     GC::Ptr<HTML::ListOfAvailableImages> m_list_of_available_images;
@@ -1098,6 +1120,9 @@ private:
     // instead they generate boxes as if they were siblings of the root element.
     OrderedHashTable<GC::Ref<Element>> m_top_layer_elements;
     OrderedHashTable<GC::Ref<Element>> m_top_layer_pending_removals;
+
+    Vector<GC::Ref<HTML::HTMLElement>> m_showing_auto_popover_list;
+    Vector<GC::Ref<HTML::HTMLElement>> m_showing_hint_popover_list;
 
     // https://dom.spec.whatwg.org/#document-allow-declarative-shadow-roots
     bool m_allow_declarative_shadow_roots { false };

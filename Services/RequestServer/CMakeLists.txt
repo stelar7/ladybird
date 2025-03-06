@@ -4,6 +4,7 @@ set(CMAKE_AUTOUIC OFF)
 
 set(SOURCES
     ConnectionFromClient.cpp
+    WebSocketImplCurl.cpp
 )
 
 if (ANDROID)
@@ -26,6 +27,7 @@ target_include_directories(requestserverservice PRIVATE ${LADYBIRD_SOURCE_DIR}/S
 
 target_link_libraries(RequestServer PRIVATE requestserverservice)
 target_link_libraries(requestserverservice PUBLIC LibCore LibDNS LibMain LibCrypto LibFileSystem LibIPC LibMain LibTLS LibWebView LibWebSocket LibURL LibTextCodec LibThreading CURL::libcurl)
+target_link_libraries(requestserverservice PRIVATE OpenSSL::Crypto OpenSSL::SSL)
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "SunOS")
     # Solaris has socket and networking related functions in two extra libraries

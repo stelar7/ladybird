@@ -4,6 +4,7 @@
 
 @media (prefers-color-scheme: dark) {
     :root {
+        --background: rgb(23, 23, 23);
         --separator: dimgray;
         --separator-accent: rgb(57, 57, 57);
         --tab-controls: rgb(57, 57, 57);
@@ -29,6 +30,7 @@
 
 @media (prefers-color-scheme: light) {
     :root {
+        --background: white;
         --separator: lightgray;
         --separator-accent: white;
         --tab-controls: rgb(229, 229, 229);
@@ -52,7 +54,7 @@
 }
 
 html {
-    color-scheme: light dark;
+    background-color: var(--background);
 }
 
 body {
@@ -184,7 +186,7 @@ body {
     left: 0;
     right: 0;
     background-color: var(--tab-controls);
-    border-top: 2px solid Canvas;
+    border-top: 2px solid var(--background);
     display: flex;
     padding: 0.5em;
 }
@@ -259,6 +261,18 @@ details > :not(:first-child) {
     color: var(--console-warning-color);
 }
 
+.property-filter {
+    display: block;
+    width: calc(100% - 10px);
+    height: 20px;
+    padding: 4px;
+    position: sticky;
+    top: 0;
+    border: 1px solid var(--console-table-border);
+    background-color: var(--console-input-color);
+    color: var(--text-color);
+}
+
 .property-table {
     width: 100%;
 
@@ -269,7 +283,7 @@ details > :not(:first-child) {
 .property-table th {
     background-color: var(--property-table-head);
     position: sticky;
-    top: 0px;
+    top: 30px;
 }
 
 .property-table th,
@@ -281,7 +295,11 @@ details > :not(:first-child) {
     text-overflow: ellipsis;
 }
 
-.property-table tr:nth-child(even) {
+.hidden-row {
+    display: none;
+}
+
+.property-table tr:nth-child(even of :not(.hidden-row)) {
     background-color: var(--property-table-row);
 }
 

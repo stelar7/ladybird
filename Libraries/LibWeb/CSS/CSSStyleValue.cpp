@@ -1,12 +1,13 @@
 /*
- * Copyright (c) 2018-2024, Andreas Kling <andreas@ladybird.org>
- * Copyright (c) 2021-2024, Sam Atkins <sam@ladybird.org>
+ * Copyright (c) 2018-2025, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2021-2025, Sam Atkins <sam@ladybird.org>
  * Copyright (c) 2021, Tobias Christiansen <tobyase@serenityos.org>
  * Copyright (c) 2022-2023, MacDue <macdue@dueutil.tech>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibGfx/Font/Font.h>
 #include <LibGfx/Font/FontStyleMapping.h>
 #include <LibGfx/Font/FontWeight.h>
 #include <LibWeb/CSS/CSSStyleValue.h>
@@ -24,11 +25,13 @@
 #include <LibWeb/CSS/StyleValues/ContentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterDefinitionsStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterStyleValue.h>
+#include <LibWeb/CSS/StyleValues/CursorStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CustomIdentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/CSS/StyleValues/EasingStyleValue.h>
 #include <LibWeb/CSS/StyleValues/EdgeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FilterValueListStyleValue.h>
+#include <LibWeb/CSS/StyleValues/FitContentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FlexStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FrequencyStyleValue.h>
 #include <LibWeb/CSS/StyleValues/GridAutoFlowStyleValue.h>
@@ -144,6 +147,12 @@ CounterDefinitionsStyleValue const& CSSStyleValue::as_counter_definitions() cons
     return static_cast<CounterDefinitionsStyleValue const&>(*this);
 }
 
+CursorStyleValue const& CSSStyleValue::as_cursor() const
+{
+    VERIFY(is_cursor());
+    return static_cast<CursorStyleValue const&>(*this);
+}
+
 CustomIdentStyleValue const& CSSStyleValue::as_custom_ident() const
 {
     VERIFY(is_custom_ident());
@@ -172,6 +181,12 @@ FilterValueListStyleValue const& CSSStyleValue::as_filter_value_list() const
 {
     VERIFY(is_filter_value_list());
     return static_cast<FilterValueListStyleValue const&>(*this);
+}
+
+FitContentStyleValue const& CSSStyleValue::as_fit_content() const
+{
+    VERIFY(is_fit_content());
+    return static_cast<FitContentStyleValue const&>(*this);
 }
 
 FlexStyleValue const& CSSStyleValue::as_flex() const

@@ -123,16 +123,11 @@ void WebContentClient::did_request_refresh(u64 page_id)
         view->reload();
 }
 
-void WebContentClient::did_request_cursor_change(u64 page_id, i32 cursor_type)
+void WebContentClient::did_request_cursor_change(u64 page_id, Gfx::Cursor const& cursor)
 {
-    if (cursor_type < 0 || cursor_type >= (i32)Gfx::StandardCursor::__Count) {
-        dbgln("DidRequestCursorChange: Bad cursor type");
-        return;
-    }
-
     if (auto view = view_for_page_id(page_id); view.has_value()) {
         if (view->on_cursor_change)
-            view->on_cursor_change(static_cast<Gfx::StandardCursor>(cursor_type));
+            view->on_cursor_change(cursor);
     }
 }
 
@@ -142,13 +137,11 @@ void WebContentClient::did_change_title(u64 page_id, ByteString const& title)
         process->set_title(MUST(String::from_byte_string(title)));
 
     if (auto view = view_for_page_id(page_id); view.has_value()) {
-        if (!view->on_title_change)
-            return;
+        auto title_or_url = title.is_empty() ? view->url().to_byte_string() : title;
+        view->set_title({}, title_or_url);
 
-        if (title.is_empty())
-            view->on_title_change(view->url().to_byte_string());
-        else
-            view->on_title_change(title);
+        if (view->on_title_change)
+            view->on_title_change(title_or_url);
     }
 }
 
@@ -266,41 +259,69 @@ void WebContentClient::did_get_source(u64 page_id, URL::URL const& url, URL::URL
     }
 }
 
-void WebContentClient::did_inspect_dom_tree(u64 page_id, ByteString const& dom_tree)
+template<typename JsonType = JsonObject>
+static JsonType parse_json(StringView json, StringView name)
 {
-    if (auto view = view_for_page_id(page_id); view.has_value()) {
-        if (view->on_received_dom_tree)
-            view->on_received_dom_tree(dom_tree);
+    auto parsed_tree = JsonValue::from_string(json);
+    if (parsed_tree.is_error()) {
+        dbgln("Unable to parse {}: {}", name, parsed_tree.error());
+        return {};
+    }
+
+    if constexpr (IsSame<JsonType, JsonObject>) {
+        if (!parsed_tree.value().is_object()) {
+            dbgln("Expected {} to be an object: {}", name, parsed_tree.value());
+            return {};
+        }
+
+        return move(parsed_tree.release_value().as_object());
+    } else if constexpr (IsSame<JsonType, JsonArray>) {
+        if (!parsed_tree.value().is_array()) {
+            dbgln("Expected {} to be an array: {}", name, parsed_tree.value());
+            return {};
+        }
+
+        return move(parsed_tree.release_value().as_array());
+    } else {
+        static_assert(DependentFalse<JsonType>);
     }
 }
 
-void WebContentClient::did_inspect_dom_node(u64 page_id, bool has_style, ByteString const& computed_style, ByteString const& resolved_style, ByteString const& custom_properties, ByteString const& node_box_sizing, ByteString const& aria_properties_state, ByteString const& fonts)
+void WebContentClient::did_inspect_dom_tree(u64 page_id, String const& dom_tree)
+{
+    if (auto view = view_for_page_id(page_id); view.has_value()) {
+        if (view->on_received_dom_tree)
+            view->on_received_dom_tree(parse_json(dom_tree, "DOM tree"sv));
+    }
+}
+
+void WebContentClient::did_inspect_dom_node(u64 page_id, bool has_style, String const& computed_style, String const& resolved_style, String const& custom_properties, String const& node_box_sizing, String const& aria_properties_state, String const& fonts)
 {
     auto view = view_for_page_id(page_id);
     if (!view.has_value() || !view->on_received_dom_node_properties)
         return;
 
-    Optional<ViewImplementation::DOMNodeProperties> properties;
+    ViewImplementation::DOMNodeProperties properties;
 
     if (has_style) {
         properties = ViewImplementation::DOMNodeProperties {
-            .computed_style_json = MUST(String::from_byte_string(computed_style)),
-            .resolved_style_json = MUST(String::from_byte_string(resolved_style)),
-            .custom_properties_json = MUST(String::from_byte_string(custom_properties)),
-            .node_box_sizing_json = MUST(String::from_byte_string(node_box_sizing)),
-            .aria_properties_state_json = MUST(String::from_byte_string(aria_properties_state)),
-            .fonts_json = MUST(String::from_byte_string(fonts))
+            .computed_style = parse_json(computed_style, "computed style"sv),
+            .resolved_style = parse_json(resolved_style, "resolved style"sv),
+            .custom_properties = parse_json(custom_properties, "custom properties"sv),
+            .node_box_sizing = parse_json(node_box_sizing, "node box sizing"sv),
+            .aria_properties_state = parse_json(aria_properties_state, "aria properties state"sv),
+            .fonts = parse_json<JsonArray>(fonts, "fonts"sv),
         };
     }
 
     view->on_received_dom_node_properties(move(properties));
 }
 
-void WebContentClient::did_inspect_accessibility_tree(u64 page_id, ByteString const& accessibility_tree)
+void WebContentClient::did_inspect_accessibility_tree(u64 page_id, String const& accessibility_tree)
 {
     if (auto view = view_for_page_id(page_id); view.has_value()) {
         if (view->on_received_accessibility_tree)
-            view->on_received_accessibility_tree(accessibility_tree);
+            view->on_received_accessibility_tree(parse_json(accessibility_tree, "accessibility tree"sv));
     }
 }
 
@@ -340,19 +361,35 @@ void WebContentClient::did_get_internal_page_info(u64 page_id, WebView::PageInfo
         view->did_receive_internal_page_info({}, type, info);
 }
 
-void WebContentClient::did_output_js_console_message(u64 page_id, i32 message_index)
+void WebContentClient::did_execute_js_console_input(u64 page_id, JsonValue const& result)
 {
     if (auto view = view_for_page_id(page_id); view.has_value()) {
-        if (view->on_received_console_message)
-            view->on_received_console_message(message_index);
+        if (view->on_received_js_console_result)
+            view->on_received_js_console_result(move(const_cast<JsonValue&>(result)));
     }
 }
 
-void WebContentClient::did_get_js_console_messages(u64 page_id, i32 start_index, Vector<ByteString> const& message_types, Vector<ByteString> const& messages)
+void WebContentClient::did_output_js_console_message(u64 page_id, i32 message_index)
 {
     if (auto view = view_for_page_id(page_id); view.has_value()) {
-        if (view->on_received_console_messages)
-            view->on_received_console_messages(start_index, message_types, messages);
+        if (view->on_console_message_available)
+            view->on_console_message_available(message_index);
+    }
+}
+
+void WebContentClient::did_get_styled_js_console_messages(u64 page_id, i32 start_index, Vector<String> const& message_types, Vector<String> const& messages)
+{
+    if (auto view = view_for_page_id(page_id); view.has_value()) {
+        if (view->on_received_styled_console_messages)
+            view->on_received_styled_console_messages(start_index, message_types, messages);
+    }
+}
+
+void WebContentClient::did_get_unstyled_js_console_messages(u64 page_id, i32 start_index, Vector<ConsoleOutput> const& console_output)
+{
+    if (auto view = view_for_page_id(page_id); view.has_value()) {
+        if (view->on_received_unstyled_console_messages)
+            view->on_received_unstyled_console_messages(start_index, move(const_cast<Vector<ConsoleOutput>&>(console_output)));
     }
 }
 

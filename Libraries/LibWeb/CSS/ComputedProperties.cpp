@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2024, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2018-2025, Andreas Kling <andreas@ladybird.org>
  * Copyright (c) 2021-2025, Sam Atkins <sam@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -11,13 +11,14 @@
 #include <LibGC/CellAllocator.h>
 #include <LibWeb/CSS/Clip.h>
 #include <LibWeb/CSS/ComputedProperties.h>
-#include <LibWeb/CSS/StyleValues/AngleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CSSKeywordValue.h>
 #include <LibWeb/CSS/StyleValues/ColorSchemeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ContentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterDefinitionsStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterStyleValue.h>
+#include <LibWeb/CSS/StyleValues/CustomIdentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
+#include <LibWeb/CSS/StyleValues/FitContentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/GridAutoFlowStyleValue.h>
 #include <LibWeb/CSS/StyleValues/GridTemplateAreaStyleValue.h>
 #include <LibWeb/CSS/StyleValues/GridTrackPlacementStyleValue.h>
@@ -30,7 +31,6 @@
 #include <LibWeb/CSS/StyleValues/PercentageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/PositionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RectStyleValue.h>
-#include <LibWeb/CSS/StyleValues/ScrollbarGutterStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ShadowStyleValue.h>
 #include <LibWeb/CSS/StyleValues/StringStyleValue.h>
 #include <LibWeb/CSS/StyleValues/StyleValueList.h>
@@ -157,13 +157,15 @@ Size ComputedProperties::size_value(PropertyID id) const
             return Size::make_min_content();
         case Keyword::MaxContent:
             return Size::make_max_content();
-        case Keyword::FitContent:
-            return Size::make_fit_content();
         case Keyword::None:
             return Size::make_none();
         default:
             VERIFY_NOT_REACHED();
         }
+    }
+    if (value.is_fit_content()) {
+        auto& fit_content = value.as_fit_content();
+        return Size::make_fit_content(fit_content.length_percentage());
     }
 
     if (value.is_calculated())
@@ -950,10 +952,30 @@ ContentVisibility ComputedProperties::content_visibility() const
     return keyword_to_content_visibility(value.to_keyword()).release_value();
 }
 
-Cursor ComputedProperties::cursor() const
+Vector<CursorData> ComputedProperties::cursor() const
 {
+    // Return the first available cursor.
     auto const& value = property(PropertyID::Cursor);
-    return keyword_to_cursor(value.to_keyword()).release_value();
+    Vector<CursorData> cursors;
+    if (value.is_value_list()) {
+        for (auto const& item : value.as_value_list().values()) {
+            if (item->is_cursor()) {
+                cursors.append({ item->as_cursor() });
+                continue;
+            }
+
+            if (auto keyword = keyword_to_cursor(item->to_keyword()); keyword.has_value())
+                cursors.append(keyword.release_value());
+        }
+    } else if (value.is_keyword()) {
+        if (auto keyword = keyword_to_cursor(value.to_keyword()); keyword.has_value())
+            cursors.append(keyword.release_value());
+    }
+
+    if (cursors.is_empty())
+        cursors.append(Cursor::Auto);
+
+    return cursors;
 }
 
 Visibility ComputedProperties::visibility() const
@@ -986,8 +1008,11 @@ Vector<TextDecorationLine> ComputedProperties::text_decoration_line() const
         return lines;
     }
 
-    if (value.is_keyword() && value.to_keyword() == Keyword::None)
-        return {};
+    if (value.is_keyword()) {
+        if (value.to_keyword() == Keyword::None)
+            return {};
+        return { keyword_to_text_decoration_line(value.to_keyword()).release_value() };
+    }
 
     dbgln("FIXME: Unsupported value for text-decoration-line: {}", value.to_string(CSSStyleValue::SerializationMode::Normal));
     return {};
@@ -1593,6 +1618,14 @@ MixBlendMode ComputedProperties::mix_blend_mode() const
 {
     auto const& value = property(PropertyID::MixBlendMode);
     return keyword_to_mix_blend_mode(value.to_keyword()).release_value();
+}
+
+Optional<FlyString> ComputedProperties::view_transition_name() const
+{
+    auto const& value = property(PropertyID::ViewTransitionName);
+    if (value.is_custom_ident())
+        return value.as_custom_ident().custom_ident();
+    return {};
 }
 
 MaskType ComputedProperties::mask_type() const

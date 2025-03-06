@@ -6,6 +6,7 @@
 
 #include <LibGfx/Bitmap.h>
 #include <LibWeb/Bindings/HTMLObjectElementPrototype.h>
+#include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleValues/CSSKeywordValue.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
@@ -76,6 +77,17 @@ void HTMLObjectElement::visit_edges(Cell::Visitor& visitor)
     Base::visit_edges(visitor);
     visitor.visit(m_resource_request);
     visitor.visit(m_document_observer);
+}
+
+// https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#dom-cva-willvalidate
+bool HTMLObjectElement::will_validate()
+{
+    // The willValidate attribute's getter must return true, if this element is a candidate for constraint validation,
+    // and false otherwise (i.e., false if any conditions are barring it from constraint validation).
+    // A submittable element is a candidate for constraint validation
+    // https://html.spec.whatwg.org/multipage/forms.html#category-submit
+    // Submittable elements: button, input, select, textarea, form-associated custom elements [but not object]
+    return false;
 }
 
 void HTMLObjectElement::form_associated_element_attribute_changed(FlyString const& name, Optional<String> const&, Optional<FlyString> const&)
@@ -434,7 +446,7 @@ void HTMLObjectElement::run_object_representation_handler_steps(Fetch::Infrastru
         // If the object element's content navigable is null, then create a new child navigable for the element.
         if (!m_content_navigable && in_a_document_tree()) {
             MUST(create_new_child_navigable());
-            set_content_navigable_initialized();
+            set_content_navigable_has_session_history_entry_and_ready_for_navigation();
         }
 
         // NOTE: Creating a new nested browsing context can fail if the document is not attached to a browsing context

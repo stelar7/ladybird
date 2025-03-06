@@ -36,6 +36,13 @@ set(SOURCES
     Clipboard/ClipboardItem.cpp
     Compression/CompressionStream.cpp
     Compression/DecompressionStream.cpp
+    ContentSecurityPolicy/Directives/Directive.cpp
+    ContentSecurityPolicy/Directives/DirectiveFactory.cpp
+    ContentSecurityPolicy/Directives/Names.cpp
+    ContentSecurityPolicy/Directives/SerializedDirective.cpp
+    ContentSecurityPolicy/Policy.cpp
+    ContentSecurityPolicy/PolicyList.cpp
+    ContentSecurityPolicy/SerializedPolicy.cpp
     CredentialManagement/Credential.cpp
     CredentialManagement/CredentialsContainer.cpp
     CredentialManagement/FederatedCredential.cpp
@@ -147,6 +154,7 @@ set(SOURCES
     CSS/StyleValues/CSSLCHLike.cpp
     CSS/StyleValues/CSSLightDark.cpp
     CSS/StyleValues/CSSRGB.cpp
+    CSS/StyleValues/CursorStyleValue.cpp
     CSS/StyleValues/DisplayStyleValue.cpp
     CSS/StyleValues/EasingStyleValue.cpp
     CSS/StyleValues/EdgeStyleValue.cpp
@@ -232,7 +240,6 @@ set(SOURCES
     DOM/TreeWalker.cpp
     DOM/Utils.cpp
     DOM/XMLDocument.cpp
-    DOMParsing/XMLSerializer.cpp
     DOMURL/DOMURL.cpp
     DOMURL/URLSearchParams.cpp
     DOMURL/URLSearchParamsIterator.cpp
@@ -258,7 +265,6 @@ set(SOURCES
     Fetch/FetchMethod.cpp
     Fetch/Headers.cpp
     Fetch/HeadersIterator.cpp
-    Fetch/Infrastructure/ConnectionTimingInfo.cpp
     Fetch/Infrastructure/FetchAlgorithms.cpp
     Fetch/Infrastructure/FetchController.cpp
     Fetch/Infrastructure/FetchRecord.cpp
@@ -285,6 +291,7 @@ set(SOURCES
     FileAPI/File.cpp
     FileAPI/FileList.cpp
     FileAPI/FileReader.cpp
+    FileAPI/FileReaderSync.cpp
     Geometry/DOMMatrix.cpp
     Geometry/DOMMatrixReadOnly.cpp
     Geometry/DOMPoint.cpp
@@ -299,6 +306,7 @@ set(SOURCES
     HTML/AttributeNames.cpp
     HTML/AudioTrack.cpp
     HTML/AudioTrackList.cpp
+    HTML/AutocompleteElement.cpp
     HTML/BeforeUnloadEvent.cpp
     HTML/BroadcastChannel.cpp
     HTML/BrowsingContext.cpp
@@ -486,11 +494,13 @@ set(SOURCES
     HTML/Scripting/SerializedEnvironmentSettingsObject.cpp
     HTML/SelectedFile.cpp
     HTML/SelectItem.cpp
+    HTML/SerializedPolicyContainer.cpp
     HTML/SessionHistoryEntry.cpp
     HTML/SessionHistoryTraversalQueue.cpp
     HTML/ShadowRealmGlobalScope.cpp
     HTML/SharedResourceRequest.cpp
     HTML/SourceSet.cpp
+    HTML/SourceSnapshotParams.cpp
     HTML/Storage.cpp
     HTML/StorageEvent.cpp
     HTML/StructuredSerialize.cpp
@@ -525,6 +535,7 @@ set(SOURCES
     HTML/WorkerNavigator.cpp
     HTML/WorkletGlobalScope.cpp
     HTML/ValidityState.cpp
+    HTML/XMLSerializer.cpp
     HighResolutionTime/Performance.cpp
     HighResolutionTime/TimeOrigin.cpp
     Infra/ByteSequences.cpp
@@ -554,7 +565,6 @@ set(SOURCES
     Layout/BlockContainer.cpp
     Layout/BlockFormattingContext.cpp
     Layout/Box.cpp
-    Layout/BoxModelMetrics.cpp
     Layout/BreakNode.cpp
     Layout/CanvasBox.cpp
     Layout/CheckBox.cpp
@@ -634,6 +644,7 @@ set(SOURCES
     Painting/BorderPainting.cpp
     Painting/BorderRadiusCornerClipper.cpp
     Painting/BordersData.cpp
+    Painting/BoxModelMetrics.cpp
     Painting/CanvasPaintable.cpp
     Painting/Command.cpp
     Painting/CheckBoxPaintable.cpp
@@ -728,6 +739,7 @@ set(SOURCES
     SVG/AttributeNames.cpp
     SVG/AttributeParser.cpp
     SVG/SVGAElement.cpp
+    SVG/SVGAnimatedEnumeration.cpp
     SVG/SVGAnimatedLength.cpp
     SVG/SVGAnimatedNumber.cpp
     SVG/SVGAnimatedRect.cpp
@@ -746,6 +758,7 @@ set(SOURCES
     SVG/SVGPathElement.cpp
     SVG/SVGCircleElement.cpp
     SVG/SVGEllipseElement.cpp
+    SVG/SVGFilterElement.cpp
     SVG/SVGForeignObjectElement.cpp
     SVG/SVGLength.cpp
     SVG/SVGLineElement.cpp

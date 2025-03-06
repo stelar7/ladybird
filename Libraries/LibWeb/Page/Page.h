@@ -16,13 +16,13 @@
 #include <AK/Weakable.h>
 #include <LibGC/Heap.h>
 #include <LibGC/Root.h>
+#include <LibGfx/Cursor.h>
 #include <LibGfx/Forward.h>
 #include <LibGfx/Palette.h>
 #include <LibGfx/Point.h>
 #include <LibGfx/Rect.h>
 #include <LibGfx/ShareableBitmap.h>
 #include <LibGfx/Size.h>
-#include <LibGfx/StandardCursor.h>
 #include <LibIPC/Forward.h>
 #include <LibURL/URL.h>
 #include <LibWeb/CSS/PreferredColorScheme.h>
@@ -75,6 +75,7 @@ public:
     HTML::Navigable const& focused_navigable() const { return const_cast<Page*>(this)->focused_navigable(); }
 
     void set_focused_navigable(Badge<EventHandler>, HTML::Navigable&);
+    void navigable_document_destroyed(Badge<DOM::Document>, HTML::Navigable&);
 
     void load(URL::URL const&);
 
@@ -127,8 +128,8 @@ public:
     bool is_in_tooltip_area() const { return m_is_in_tooltip_area; }
     void set_is_in_tooltip_area(bool b) { m_is_in_tooltip_area = b; }
 
-    Gfx::StandardCursor current_cursor() const { return m_current_cursor; }
-    void set_current_cursor(Gfx::StandardCursor cursor) { m_current_cursor = cursor; }
+    Gfx::Cursor current_cursor() const { return m_current_cursor; }
+    void set_current_cursor(Gfx::Cursor cursor) { m_current_cursor = move(cursor); }
 
     DevicePixelPoint window_position() const { return m_window_position; }
     void set_window_position(DevicePixelPoint position) { m_window_position = position; }
@@ -258,7 +259,7 @@ private:
     bool m_is_hovering_link { false };
     bool m_is_in_tooltip_area { false };
 
-    Gfx::StandardCursor m_current_cursor { Gfx::StandardCursor::Arrow };
+    Gfx::Cursor m_current_cursor { Gfx::StandardCursor::Arrow };
 
     DevicePixelPoint m_window_position {};
     DevicePixelSize m_window_size {};
@@ -323,6 +324,8 @@ public:
     virtual void paint_next_frame() = 0;
     virtual void process_screenshot_requests() = 0;
     virtual void paint(DevicePixelRect const&, Painting::BackingStore&, PaintOptions = {}) = 0;
+    virtual Queue<QueuedInputEvent>& input_event_queue() = 0;
+    virtual void report_finished_handling_input_event(u64 page_id, EventResult event_was_handled) = 0;
     virtual void page_did_change_title(ByteString const&) { }
     virtual void page_did_change_url(URL::URL const&) { }
     virtual void page_did_request_refresh() { }
@@ -336,7 +339,7 @@ public:
     virtual void page_did_create_new_document(Web::DOM::Document&) { }
     virtual void page_did_change_active_document_in_top_level_browsing_context(Web::DOM::Document&) { }
     virtual void page_did_finish_loading(URL::URL const&) { }
-    virtual void page_did_request_cursor_change(Gfx::StandardCursor) { }
+    virtual void page_did_request_cursor_change(Gfx::Cursor const&) { }
     virtual void page_did_request_context_menu(CSSPixelPoint) { }
     virtual void page_did_request_link_context_menu(CSSPixelPoint, URL::URL const&, [[maybe_unused]] ByteString const& target, [[maybe_unused]] unsigned modifiers) { }
     virtual void page_did_request_image_context_menu(CSSPixelPoint, URL::URL const&, [[maybe_unused]] ByteString const& target, [[maybe_unused]] unsigned modifiers, Optional<Gfx::Bitmap const*>) { }

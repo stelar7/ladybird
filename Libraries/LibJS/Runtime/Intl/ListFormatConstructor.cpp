@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2024, Tim Flynn <trflynn89@serenityos.org>
+ * Copyright (c) 2021-2025, Tim Flynn <trflynn89@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -10,13 +10,12 @@
 #include <LibJS/Runtime/Intl/AbstractOperations.h>
 #include <LibJS/Runtime/Intl/ListFormat.h>
 #include <LibJS/Runtime/Intl/ListFormatConstructor.h>
-#include <LibJS/Runtime/Temporal/AbstractOperations.h>
 
 namespace JS::Intl {
 
 GC_DEFINE_ALLOCATOR(ListFormatConstructor);
 
-// 13.1 The Intl.ListFormat Constructor, https://tc39.es/ecma402/#sec-intl-listformat-constructor
+// 14.1 The Intl.ListFormat Constructor, https://tc39.es/ecma402/#sec-intl-listformat-constructor
 ListFormatConstructor::ListFormatConstructor(Realm& realm)
     : NativeFunction(realm.vm().names.ListFormat.as_string(), realm.intrinsics().function_prototype())
 {
@@ -28,7 +27,7 @@ void ListFormatConstructor::initialize(Realm& realm)
 
     auto& vm = this->vm();
 
-    // 13.2.1 Intl.ListFormat.prototype, https://tc39.es/ecma402/#sec-Intl.ListFormat.prototype
+    // 14.2.1 Intl.ListFormat.prototype, https://tc39.es/ecma402/#sec-Intl.ListFormat.prototype
     define_direct_property(vm.names.prototype, realm.intrinsics().intl_list_format_prototype(), 0);
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
@@ -37,14 +36,14 @@ void ListFormatConstructor::initialize(Realm& realm)
     define_direct_property(vm.names.length, Value(0), Attribute::Configurable);
 }
 
-// 13.1.1 Intl.ListFormat ( [ locales [ , options ] ] ), https://tc39.es/ecma402/#sec-Intl.ListFormat
+// 14.1.1 Intl.ListFormat ( [ locales [ , options ] ] ), https://tc39.es/ecma402/#sec-Intl.ListFormat
 ThrowCompletionOr<Value> ListFormatConstructor::call()
 {
     // 1. If NewTarget is undefined, throw a TypeError exception.
     return vm().throw_completion<TypeError>(ErrorType::ConstructorWithoutNew, "Intl.ListFormat");
 }
 
-// 13.1.1 Intl.ListFormat ( [ locales [ , options ] ] ), https://tc39.es/ecma402/#sec-Intl.ListFormat
+// 14.1.1 Intl.ListFormat ( [ locales [ , options ] ] ), https://tc39.es/ecma402/#sec-Intl.ListFormat
 ThrowCompletionOr<GC::Ref<Object>> ListFormatConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
@@ -59,7 +58,7 @@ ThrowCompletionOr<GC::Ref<Object>> ListFormatConstructor::construct(FunctionObje
     auto requested_locales = TRY(canonicalize_locale_list(vm, locale_value));
 
     // 4. Set options to ? GetOptionsObject(options).
-    auto options = TRY(Temporal::get_options_object(vm, options_value));
+    auto options = TRY(get_options_object(vm, options_value));
 
     // 5. Let opt be a new Record.
     LocaleOptions opt {};
@@ -85,7 +84,7 @@ ThrowCompletionOr<GC::Ref<Object>> ListFormatConstructor::construct(FunctionObje
     // 12. Let style be ? GetOption(options, "style", string, « "long", "short", "narrow" », "long").
     auto style = TRY(get_option(vm, *options, vm.names.style, OptionType::String, { "long"sv, "short"sv, "narrow"sv }, "long"sv));
 
-    // 13. Set listFormat.[[Style]] to style.
+    // 14. Set listFormat.[[Style]] to style.
     list_format->set_style(style.as_string().utf8_string_view());
 
     // 14. Let resolvedLocaleData be r.[[LocaleData]].
@@ -101,7 +100,7 @@ ThrowCompletionOr<GC::Ref<Object>> ListFormatConstructor::construct(FunctionObje
     return list_format;
 }
 
-// 13.2.2 Intl.ListFormat.supportedLocalesOf ( locales [ , options ] ), https://tc39.es/ecma402/#sec-Intl.ListFormat.supportedLocalesOf
+// 14.2.2 Intl.ListFormat.supportedLocalesOf ( locales [ , options ] ), https://tc39.es/ecma402/#sec-Intl.ListFormat.supportedLocalesOf
 JS_DEFINE_NATIVE_FUNCTION(ListFormatConstructor::supported_locales_of)
 {
     auto locales = vm.argument(0);

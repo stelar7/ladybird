@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/Vector.h>
+#include <LibDNS/Resolver.h>
 #include <LibHTTP/HeaderMap.h>
 #include <LibURL/URL.h>
 
@@ -30,6 +31,12 @@ public:
     HTTP::HeaderMap const& headers() const { return m_headers; }
     void set_headers(HTTP::HeaderMap headers) { m_headers = move(headers); }
 
+    Optional<ByteString> const& root_certificates_path() const { return m_root_certificates_path; }
+    void set_root_certificates_path(Optional<ByteString> root_certificates_path) { m_root_certificates_path = move(root_certificates_path); }
+
+    Optional<DNS::LookupResult const&> dns_result() const { return m_dns_result ? Optional<DNS::LookupResult const&>(*m_dns_result) : OptionalNone {}; }
+    void set_dns_result(NonnullRefPtr<DNS::LookupResult const> dns_result) { m_dns_result = move(dns_result); }
+
     // secure flag - defined in RFC 6455 Section 3
     bool is_secure() const;
 
@@ -42,6 +49,8 @@ private:
     Vector<ByteString> m_protocols {};
     Vector<ByteString> m_extensions {};
     HTTP::HeaderMap m_headers;
+    Optional<ByteString> m_root_certificates_path;
+    RefPtr<DNS::LookupResult const> m_dns_result;
 };
 
 }

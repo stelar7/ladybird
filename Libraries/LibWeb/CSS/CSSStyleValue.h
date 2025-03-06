@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2018-2023, Andreas Kling <andreas@ladybird.org>
  * Copyright (c) 2021, Tobias Christiansen <tobyase@serenityos.org>
- * Copyright (c) 2021-2024, Sam Atkins <sam@ladybird.org>
+ * Copyright (c) 2021-2025, Sam Atkins <sam@ladybird.org>
  * Copyright (c) 2022-2023, MacDue <macdue@dueutil.tech>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -9,20 +9,16 @@
 
 #pragma once
 
-#include <AK/Concepts.h>
 #include <AK/GenericShorthands.h>
 #include <AK/NonnullOwnPtr.h>
 #include <AK/RefCounted.h>
 #include <AK/RefPtr.h>
 #include <AK/String.h>
 #include <AK/StringView.h>
-#include <AK/Variant.h>
 #include <AK/Vector.h>
 #include <AK/WeakPtr.h>
 #include <LibGfx/Color.h>
-#include <LibGfx/Font/FontVariant.h>
 #include <LibURL/URL.h>
-#include <LibWeb/CSS/Enums.h>
 #include <LibWeb/CSS/Keyword.h>
 #include <LibWeb/CSS/Length.h>
 #include <LibWeb/Forward.h>
@@ -101,11 +97,13 @@ public:
         Content,
         Counter,
         CounterDefinitions,
+        Cursor,
         CustomIdent,
         Display,
         Easing,
         Edge,
         FilterValueList,
+        FitContent,
         Flex,
         FontVariant,
         Frequency,
@@ -196,6 +194,10 @@ public:
     CounterDefinitionsStyleValue const& as_counter_definitions() const;
     CounterDefinitionsStyleValue& as_counter_definitions() { return const_cast<CounterDefinitionsStyleValue&>(const_cast<CSSStyleValue const&>(*this).as_counter_definitions()); }
 
+    bool is_cursor() const { return type() == Type::Cursor; }
+    CursorStyleValue const& as_cursor() const;
+    CursorStyleValue& as_cursor() { return const_cast<CursorStyleValue&>(const_cast<CSSStyleValue const&>(*this).as_cursor()); }
+
     bool is_custom_ident() const { return type() == Type::CustomIdent; }
     CustomIdentStyleValue const& as_custom_ident() const;
     CustomIdentStyleValue& as_custom_ident() { return const_cast<CustomIdentStyleValue&>(const_cast<CSSStyleValue const&>(*this).as_custom_ident()); }
@@ -215,6 +217,10 @@ public:
     bool is_filter_value_list() const { return type() == Type::FilterValueList; }
     FilterValueListStyleValue const& as_filter_value_list() const;
     FilterValueListStyleValue& as_filter_value_list() { return const_cast<FilterValueListStyleValue&>(const_cast<CSSStyleValue const&>(*this).as_filter_value_list()); }
+
+    [[nodiscard]] bool is_fit_content() const { return type() == Type::FitContent; }
+    [[nodiscard]] FitContentStyleValue const& as_fit_content() const;
+    [[nodiscard]] FitContentStyleValue& as_fit_content() { return const_cast<FitContentStyleValue&>(const_cast<CSSStyleValue const&>(*this).as_fit_content()); }
 
     bool is_flex() const { return type() == Type::Flex; }
     FlexStyleValue const& as_flex() const;

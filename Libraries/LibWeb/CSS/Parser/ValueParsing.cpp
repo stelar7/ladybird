@@ -15,6 +15,7 @@
 #include <AK/Debug.h>
 #include <AK/GenericLexer.h>
 #include <AK/TemporaryChange.h>
+#include <LibURL/URL.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyName.h>
 #include <LibWeb/CSS/StyleValues/AngleStyleValue.h>
@@ -30,11 +31,13 @@
 #include <LibWeb/CSS/StyleValues/CSSLabLike.h>
 #include <LibWeb/CSS/StyleValues/CSSLightDark.h>
 #include <LibWeb/CSS/StyleValues/CSSRGB.h>
+#include <LibWeb/CSS/StyleValues/ConicGradientStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterDefinitionsStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CustomIdentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/EasingStyleValue.h>
 #include <LibWeb/CSS/StyleValues/EdgeStyleValue.h>
+#include <LibWeb/CSS/StyleValues/FitContentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FlexStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FrequencyStyleValue.h>
 #include <LibWeb/CSS/StyleValues/GridTrackPlacementStyleValue.h>
@@ -42,9 +45,11 @@
 #include <LibWeb/CSS/StyleValues/ImageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/IntegerStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
+#include <LibWeb/CSS/StyleValues/LinearGradientStyleValue.h>
 #include <LibWeb/CSS/StyleValues/NumberStyleValue.h>
 #include <LibWeb/CSS/StyleValues/PercentageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/PositionStyleValue.h>
+#include <LibWeb/CSS/StyleValues/RadialGradientStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RatioStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RectStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ResolutionStyleValue.h>
@@ -1796,7 +1801,7 @@ RefPtr<CSSStyleValue> Parser::parse_counter_value(TokenStream<ComponentValue>& t
         auto transaction = tokens.begin_transaction();
         tokens.discard_whitespace();
 
-        auto counter_name = parse_custom_ident_value(tokens, { "none"sv });
+        auto counter_name = parse_custom_ident_value(tokens, { { "none"sv } });
         if (!counter_name)
             return {};
 
@@ -1817,7 +1822,7 @@ RefPtr<CSSStyleValue> Parser::parse_counter_value(TokenStream<ComponentValue>& t
         auto transaction = tokens.begin_transaction();
         tokens.discard_whitespace();
 
-        auto counter_style_name = parse_custom_ident_value(tokens, { "none"sv });
+        auto counter_style_name = parse_custom_ident_value(tokens, { { "none"sv } });
         if (!counter_style_name)
             return {};
 
@@ -1919,10 +1924,21 @@ RefPtr<StringStyleValue> Parser::parse_string_value(TokenStream<ComponentValue>&
     return nullptr;
 }
 
-RefPtr<CSSStyleValue> Parser::parse_image_value(TokenStream<ComponentValue>& tokens)
+RefPtr<AbstractImageStyleValue> Parser::parse_image_value(TokenStream<ComponentValue>& tokens)
 {
-    if (auto url = parse_url_function(tokens); url.has_value())
-        return ImageStyleValue::create(url.value());
+    tokens.mark();
+    auto url = parse_url_function(tokens);
+    if (url.has_value()) {
+        // If the value is a 'url(..)' parse as image, but if it is just a reference 'url(#xx)', leave it alone,
+        // so we can parse as URL further on. These URLs are used as references inside SVG documents for masks.
+        if (!url.value().equals(m_url, URL::ExcludeFragment::Yes)) {
+            tokens.discard_a_mark();
+            return ImageStyleValue::create(url.value());
+        }
+        tokens.restore_a_mark();
+        return nullptr;
+    }
+    tokens.discard_a_mark();
 
     if (auto linear_gradient = parse_linear_gradient_function(tokens))
         return linear_gradient;
@@ -2470,7 +2486,7 @@ Optional<URL::URL> Parser::parse_url_function(TokenStream<ComponentValue>& token
 
     auto convert_string_to_url = [&](StringView url_string) -> Optional<URL::URL> {
         auto url = complete_url(url_string);
-        if (url.is_valid()) {
+        if (url.has_value()) {
             transaction.commit();
             return url;
         }
@@ -2536,6 +2552,36 @@ Optional<ShapeRadius> Parser::parse_shape_radius(TokenStream<ComponentValue>& to
     }
 
     return {};
+}
+
+RefPtr<FitContentStyleValue> Parser::parse_fit_content_value(TokenStream<ComponentValue>& tokens)
+{
+    auto transaction = tokens.begin_transaction();
+    auto& component_value = tokens.consume_a_token();
+
+    if (component_value.is_ident("fit-content"sv)) {
+        transaction.commit();
+        return FitContentStyleValue::create();
+        return nullptr;
+    }
+
+    if (!component_value.is_function())
+        return nullptr;
+
+    auto const& function = component_value.function();
+    if (function.name != "fit-content"sv)
+        return nullptr;
+    TokenStream argument_tokens { function.value };
+    argument_tokens.discard_whitespace();
+    auto maybe_length = parse_length_percentage(argument_tokens);
+    if (!maybe_length.has_value())
+        return nullptr;
+    argument_tokens.discard_whitespace();
+    if (argument_tokens.has_next_token())
+        return nullptr;
+
+    transaction.commit();
+    return FitContentStyleValue::create(maybe_length.release_value());
 }
 
 RefPtr<CSSStyleValue> Parser::parse_basic_shape_value(TokenStream<ComponentValue>& tokens)
@@ -2812,7 +2858,7 @@ RefPtr<CSSStyleValue> Parser::parse_builtin_value(TokenStream<ComponentValue>& t
 }
 
 // https://www.w3.org/TR/css-values-4/#custom-idents
-RefPtr<CustomIdentStyleValue> Parser::parse_custom_ident_value(TokenStream<ComponentValue>& tokens, std::initializer_list<StringView> blacklist)
+RefPtr<CustomIdentStyleValue> Parser::parse_custom_ident_value(TokenStream<ComponentValue>& tokens, ReadonlySpan<StringView> blacklist)
 {
     auto transaction = tokens.begin_transaction();
     tokens.discard_whitespace();
@@ -2875,7 +2921,7 @@ Optional<CSS::GridSize> Parser::parse_grid_size(ComponentValue const& component_
     return {};
 }
 
-Optional<CSS::GridFitContent> Parser::parse_fit_content(Vector<ComponentValue> const& component_values)
+Optional<CSS::GridFitContent> Parser::parse_grid_fit_content(Vector<ComponentValue> const& component_values)
 {
     // https://www.w3.org/TR/css-grid-2/#valdef-grid-template-columns-fit-content
     // 'fit-content( <length-percentage> )'
@@ -3050,7 +3096,7 @@ Optional<CSS::ExplicitGridTrack> Parser::parse_track_sizing_function(ComponentVa
             else
                 return {};
         } else if (function_token.name.equals_ignoring_ascii_case("fit-content"sv)) {
-            auto maybe_fit_content_value = parse_fit_content(function_token.value);
+            auto maybe_fit_content_value = parse_grid_fit_content(function_token.value);
             if (maybe_fit_content_value.has_value())
                 return CSS::ExplicitGridTrack(maybe_fit_content_value.value());
             return {};
@@ -3096,7 +3142,7 @@ RefPtr<GridTrackPlacementStyleValue> Parser::parse_grid_track_placement(TokenStr
     };
     auto parse_custom_ident = [this](auto& tokens) {
         // The <custom-ident> additionally excludes the keywords span and auto.
-        return parse_custom_ident_value(tokens, { "span"sv, "auto"sv });
+        return parse_custom_ident_value(tokens, { { "span"sv, "auto"sv } });
     };
 
     auto transaction = tokens.begin_transaction();
@@ -3214,12 +3260,6 @@ RefPtr<CSSStyleValue> Parser::parse_calculated_value(ComponentValue const& compo
     if (!function_node)
         return nullptr;
 
-    // If the calculation got simplified down to a single value, return that instead.
-    if (function_node->type() == CalculationNode::Type::Numeric) {
-        if (auto number_value = as<NumericCalculationNode>(*function_node).to_style_value(context))
-            return number_value.release_nonnull();
-    }
-
     auto function_type = function_node->numeric_type();
     if (!function_type.has_value())
         return nullptr;
@@ -3309,10 +3349,10 @@ RefPtr<CalculationNode> Parser::convert_to_calculation_node(CalcParsing::Node co
             // AD-HOC: We also need to convert tokens into their numeric types.
 
             if (component_value->is(Token::Type::Ident)) {
-                auto maybe_constant = CalculationNode::constant_type_from_string(component_value->token().ident());
-                if (!maybe_constant.has_value())
+                auto maybe_keyword = keyword_from_string(component_value->token().ident());
+                if (!maybe_keyword.has_value())
                     return nullptr;
-                return ConstantCalculationNode::create(*maybe_constant);
+                return NumericCalculationNode::from_keyword(*maybe_keyword, context);
             }
 
             if (component_value->is(Token::Type::Number))
@@ -3678,9 +3718,17 @@ bool Parser::expand_variables(DOM::Element& element, Optional<Selector::PseudoEl
         if (auto custom_property_value = get_custom_property(element, pseudo_element, custom_property_name)) {
             VERIFY(custom_property_value->is_unresolved());
             TokenStream custom_property_tokens { custom_property_value->as_unresolved().values() };
+
+            auto dest_size_before = dest.size();
             if (!expand_variables(element, pseudo_element, custom_property_name, dependencies, custom_property_tokens, dest))
                 return false;
-            continue;
+
+            // If the size of dest has increased, then the custom property is not the initial guaranteed-invalid value.
+            // If it hasn't increased, then it is the initial guaranteed-invalid value, and thus we should move on to the fallback value.
+            if (dest_size_before < dest.size())
+                continue;
+
+            dbgln_if(CSS_PARSER_DEBUG, "CSSParser: Expanding custom property '{}' did not return any tokens, treating it as invalid and moving on to the fallback value.", custom_property_name);
         }
 
         // Use the provided fallback value, if any.

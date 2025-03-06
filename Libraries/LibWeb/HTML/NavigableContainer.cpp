@@ -109,6 +109,9 @@ WebIDL::ExceptionOr<void> NavigableContainer::create_new_child_navigable(GC::Ptr
     // 11. Let traversable be parentNavigable's traversable navigable.
     auto traversable = parent_navigable->traversable_navigable();
 
+    // AD-HOC: Let the initial about:blank document inherit the system visibility state from traversable.
+    document->update_the_visibility_state(traversable->system_visibility_state());
+
     // 12. Append the following session history traversal steps to traversable:
     traversable->append_session_history_traversal_steps(GC::create_function(heap(), [traversable, navigable, parent_navigable, history_entry, after_session_history_update] {
         // 1. Let parentDocState be parentNavigable's active session history entry's document state.
@@ -199,8 +202,12 @@ Optional<URL::URL> NavigableContainer::shared_attribute_processing_steps_for_ifr
     if (!m_content_navigable)
         return {};
 
+    if (initial_insertion && m_content_navigable->has_pending_navigations()) {
+        return {};
+    }
+
     // 1. Let url be the URL record about:blank.
-    auto url = URL::URL("about:blank");
+    auto url = URL::about_blank();
 
     // 2. If element has a src attribute specified, and its value is not the empty string,
     //    then parse the value of that attribute relative to element's node document.
@@ -307,7 +314,7 @@ void NavigableContainer::destroy_the_child_navigable()
 // https://html.spec.whatwg.org/multipage/iframe-embed-object.html#potentially-delays-the-load-event
 bool NavigableContainer::currently_delays_the_load_event() const
 {
-    if (!m_content_navigable_initialized)
+    if (!content_navigable_has_session_history_entry_and_ready_for_navigation())
         return true;
 
     if (!m_potentially_delays_the_load_event)

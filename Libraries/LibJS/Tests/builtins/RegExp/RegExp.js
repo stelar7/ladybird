@@ -66,3 +66,14 @@ test("Incorrectly escaped code units not converted to invalid patterns", () => {
     expect(re.test("⫀")).toBeTrue();
     expect(re.test("\\u2abe")).toBeFalse(); // ⫀ is \u2abe
 });
+
+test("regexp that always matches stops matching if it's past the end of the string instead of infinitely looping", () => {
+    const re = new RegExp("[\u200E]*", "gu");
+    expect("whf".match(re)).toEqual(["", "", "", ""]);
+    expect(re.lastIndex).toBe(0);
+});
+
+test("v flag should enable unicode mode", () => {
+    const re = new RegExp("a\\u{10FFFF}", "v");
+    expect(re.test("a\u{10FFFF}")).toBe(true);
+});

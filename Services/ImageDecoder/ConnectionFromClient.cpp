@@ -40,6 +40,15 @@ void ConnectionFromClient::die()
     }
 }
 
+Messages::ImageDecoderServer::InitTransportResponse ConnectionFromClient::init_transport([[maybe_unused]] int peer_pid)
+{
+#ifdef AK_OS_WINDOWS
+    m_transport.set_peer_pid(peer_pid);
+    return Core::System::getpid();
+#endif
+    VERIFY_NOT_REACHED();
+}
+
 ErrorOr<IPC::File> ConnectionFromClient::connect_new_client()
 {
     int socket_fds[2] {};
@@ -48,8 +57,8 @@ ErrorOr<IPC::File> ConnectionFromClient::connect_new_client()
 
     auto client_socket_or_error = Core::LocalSocket::adopt_fd(socket_fds[0]);
     if (client_socket_or_error.is_error()) {
-        close(socket_fds[0]);
-        close(socket_fds[1]);
+        (void)Core::System::close(socket_fds[0]);
+        (void)Core::System::close(socket_fds[1]);
         return client_socket_or_error.release_error();
     }
 
@@ -106,6 +115,8 @@ static ErrorOr<ConnectionFromClient::DecodeResult> decode_image_to_details(Core:
 
     if (auto maybe_icc_data = decoder->color_space(); !maybe_icc_data.is_error())
         result.color_profile = maybe_icc_data.value();
+    else
+        dbgln("Invalid color profile: {}", maybe_icc_data.error());
 
     Vector<Optional<NonnullRefPtr<Gfx::Bitmap>>> bitmaps;
 

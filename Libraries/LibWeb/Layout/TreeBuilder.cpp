@@ -9,6 +9,7 @@
 
 #include <AK/Optional.h>
 #include <AK/TemporaryChange.h>
+#include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/CSS/StyleValues/PercentageStyleValue.h>
@@ -32,7 +33,6 @@
 #include <LibWeb/Layout/TextNode.h>
 #include <LibWeb/Layout/TreeBuilder.h>
 #include <LibWeb/Layout/Viewport.h>
-#include <LibWeb/SVG/SVGForeignObjectElement.h>
 
 namespace Web::Layout {
 
@@ -81,8 +81,11 @@ static Layout::Node& insertion_parent_for_inline_node(Layout::NodeWithStyle& lay
     if (layout_parent.display().is_inline_outside() && layout_parent.display().is_flow_inside())
         return layout_parent;
 
-    if (layout_parent.display().is_flex_inside() || layout_parent.display().is_grid_inside())
+    if (layout_parent.display().is_flex_inside()
+        || layout_parent.display().is_grid_inside()
+        || layout_parent.display().is_table_cell()) {
         return last_child_creating_anonymous_wrapper_if_needed(layout_parent);
+    }
 
     if (!has_in_flow_block_children(layout_parent) || layout_parent.children_are_inline())
         return layout_parent;
@@ -215,7 +218,7 @@ void TreeBuilder::create_pseudo_element_if_needed(DOM::Element& element, CSS::Se
             document,
             pseudo_element_node->computed_values().list_style_type(),
             pseudo_element_node->computed_values().list_style_position(),
-            0,
+            element,
             marker_style);
         static_cast<ListItemBox&>(*pseudo_element_node).set_marker(list_item_marker);
         element.set_pseudo_element_node({}, CSS::Selector::PseudoElement::Type::Marker, list_item_marker);
@@ -305,13 +308,11 @@ void TreeBuilder::restructure_block_node_in_inline_parent(NodeWithStyleAndBoxMod
     }();
     nearest_block_ancestor.set_children_are_inline(false);
 
-    // Unwind the ancestor stack to find the topmost inline ancestor.
+    // Find the topmost inline ancestor.
     GC::Ptr<NodeWithStyleAndBoxModelMetrics> topmost_inline_ancestor;
     for (auto* ancestor = &parent; ancestor; ancestor = ancestor->parent()) {
         if (ancestor == &nearest_block_ancestor)
             break;
-        if (ancestor == m_ancestor_stack.last())
-            m_ancestor_stack.take_last();
         if (ancestor->is_inline())
             topmost_inline_ancestor = static_cast<NodeWithStyleAndBoxModelMetrics*>(ancestor);
     }
@@ -320,7 +321,7 @@ void TreeBuilder::restructure_block_node_in_inline_parent(NodeWithStyleAndBoxMod
     // We need to host the topmost inline ancestor and its previous siblings in an anonymous "before" wrapper. If an
     // inline wrapper does not already exist, we create a new one and add it to the nearest block ancestor.
     GC::Ptr<Node> before_wrapper;
-    if (auto last_child = nearest_block_ancestor.last_child(); last_child->is_anonymous() && last_child->children_are_inline()) {
+    if (auto* last_child = nearest_block_ancestor.last_child(); last_child->is_anonymous() && last_child->children_are_inline()) {
         before_wrapper = last_child;
     } else {
         before_wrapper = nearest_block_ancestor.create_anonymous_wrapper();
@@ -388,20 +389,18 @@ void TreeBuilder::restructure_block_node_in_inline_parent(NodeWithStyleAndBoxMod
             current_parent->append_child(new_inline_node);
             current_parent = new_inline_node;
 
-            // Stop recreating nodes when we've reached node's parent
+            // Replace the node in the ancestor stack with the new node.
+            auto& node_with_style = static_cast<NodeWithStyle&>(*inline_node);
+            if (auto stack_index = m_ancestor_stack.find_first_index(node_with_style); stack_index.has_value())
+                m_ancestor_stack[stack_index.release_value()] = new_inline_node;
+
+            // Stop recreating nodes when we've reached node's parent.
             if (inline_node == &parent)
                 break;
         }
 
         after_wrapper->set_children_are_inline(true);
         nearest_block_ancestor.append_child(after_wrapper);
-    }
-
-    // Rewind the ancestor stack
-    for (GC::Ptr<Node> inline_node = topmost_inline_ancestor; inline_node; inline_node = inline_node->last_child()) {
-        if (!is<NodeWithStyle>(*inline_node))
-            break;
-        m_ancestor_stack.append(static_cast<NodeWithStyle&>(*inline_node));
     }
 }
 
@@ -424,30 +423,6 @@ static bool is_ignorable_whitespace(Layout::Node const& node)
     }
 
     return false;
-}
-
-i32 TreeBuilder::calculate_list_item_index(DOM::Node& dom_node)
-{
-    if (is<HTML::HTMLLIElement>(dom_node)) {
-        auto& li = static_cast<HTML::HTMLLIElement&>(dom_node);
-        if (li.value() != 0)
-            return li.value();
-    }
-
-    if (dom_node.previous_sibling() != nullptr) {
-        DOM::Node* current = dom_node.previous_sibling();
-        while (current != nullptr) {
-            if (is<HTML::HTMLLIElement>(*current))
-                return calculate_list_item_index(*current) + 1;
-            current = current->previous_sibling();
-        }
-    }
-
-    if (is<HTML::HTMLOListElement>(*dom_node.parent())) {
-        auto& ol = static_cast<HTML::HTMLOListElement&>(*dom_node.parent());
-        return ol.start();
-    }
-    return 1;
 }
 
 void TreeBuilder::update_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& context, MustCreateSubtree must_create_subtree)
@@ -554,12 +529,10 @@ void TreeBuilder::update_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& 
             && old_layout_node != layout_node;
         if (may_replace_existing_layout_node) {
             old_layout_node->parent()->replace_child(*layout_node, *old_layout_node);
+        } else if (layout_node->is_svg_box()) {
+            m_ancestor_stack.last()->append_child(*layout_node);
         } else {
-            if (layout_node->is_svg_box()) {
-                m_ancestor_stack.last()->append_child(*layout_node);
-            } else {
-                insert_node_into_inline_or_block_ancestor(*layout_node, display, AppendOrPrepend::Append);
-            }
+            insert_node_into_inline_or_block_ancestor(*layout_node, display, AppendOrPrepend::Append);
         }
     }
 
@@ -613,10 +586,9 @@ void TreeBuilder::update_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& 
         // If we completely finished inserting a block level element into an inline parent, we need to fix up the tree so
         // that we can maintain the invariant that all children are either inline or non-inline. We can't do this earlier,
         // because the restructuring adds new children after this node that become part of the ancestor stack.
-        auto* layout_parent = layout_node->parent();
-        if (layout_parent && layout_parent->display().is_inline_outside() && !display.is_contents()
-            && !display.is_inline_outside() && layout_parent->display().is_flow_inside() && !layout_node->is_out_of_flow())
-            restructure_block_node_in_inline_parent(static_cast<NodeWithStyleAndBoxModelMetrics&>(*layout_node));
+        if (auto node_with_metrics = as_if<NodeWithStyleAndBoxModelMetrics>(*layout_node);
+            node_with_metrics && node_with_metrics->should_create_inline_continuation())
+            restructure_block_node_in_inline_parent(*node_with_metrics);
     }
 
     // https://www.w3.org/TR/css-contain-2/#containment-style
@@ -716,7 +688,7 @@ void TreeBuilder::update_layout_tree_after_children(DOM::Node& dom_node, GC::Ref
     if (is<ListItemBox>(*layout_node)) {
         auto& element = static_cast<DOM::Element&>(dom_node);
         auto marker_style = style_computer.compute_style(element, CSS::Selector::PseudoElement::Type::Marker);
-        auto list_item_marker = document.heap().allocate<ListItemMarkerBox>(document, layout_node->computed_values().list_style_type(), layout_node->computed_values().list_style_position(), calculate_list_item_index(dom_node), marker_style);
+        auto list_item_marker = document.heap().allocate<ListItemMarkerBox>(document, layout_node->computed_values().list_style_type(), layout_node->computed_values().list_style_position(), element, marker_style);
         static_cast<ListItemBox&>(*layout_node).set_marker(list_item_marker);
         element.set_pseudo_element_node({}, CSS::Selector::PseudoElement::Type::Marker, list_item_marker);
         layout_node->append_child(*list_item_marker);

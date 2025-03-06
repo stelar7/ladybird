@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024, Altomani Gianluca <altomanigianluca@gmail.com>
+ * Copyright (c) 2024-2025, Altomani Gianluca <altomanigianluca@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -9,15 +9,16 @@
 #include <AK/Error.h>
 #include <AK/Format.h>
 #include <LibCrypto/BigInt/UnsignedBigInteger.h>
+#include <LibCrypto/Hash/HashManager.h>
 #include <LibCrypto/OpenSSLForward.h>
 
-namespace Crypto {
-
-static int openssl_print_errors(char const* str, size_t len, [[maybe_unused]] void* u)
+inline int openssl_print_errors(char const* str, size_t len, [[maybe_unused]] void* u)
 {
-    dbgln("{}", StringView { str, len });
+    dbgln("{}", StringView { str, len - 1 });
     return 1;
 }
+
+namespace Crypto {
 
 #define OPENSSL_TRY_PTR(...)                                           \
     ({                                                                 \
@@ -106,9 +107,22 @@ public:
     static ErrorOr<OpenSSL_MD_CTX> create();
 };
 
+class OpenSSL_KDF_CTX {
+    OPENSSL_WRAPPER_CLASS(OpenSSL_KDF_CTX, EVP_KDF_CTX, EVP_KDF_CTX);
+};
+
+class OpenSSL_CIPHER_CTX {
+    OPENSSL_WRAPPER_CLASS(OpenSSL_CIPHER_CTX, EVP_CIPHER_CTX, EVP_CIPHER_CTX);
+
+public:
+    static ErrorOr<OpenSSL_CIPHER_CTX> create();
+};
+
 #undef OPENSSL_WRAPPER_CLASS
 
 ErrorOr<OpenSSL_BN> unsigned_big_integer_to_openssl_bignum(UnsignedBigInteger const& integer);
 ErrorOr<UnsignedBigInteger> openssl_bignum_to_unsigned_big_integer(OpenSSL_BN const& bn);
+
+ErrorOr<StringView> hash_kind_to_openssl_digest_name(Hash::HashKind hash);
 
 }

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2022-2023, Andreas Kling <andreas@ladybird.org>
- * Copyright (c) 2022-2023, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2022-2025, Sam Atkins <sam@ladybird.org>
  * Copyright (c) 2024, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
  * Copyright (c) 2025, Jelle Raaijmakers <jelle@ladybird.org>
  *
@@ -19,6 +19,7 @@
 #include <LibWeb/Layout/BlockContainer.h>
 #include <LibWeb/Layout/InlineNode.h>
 #include <LibWeb/Painting/BackgroundPainting.h>
+#include <LibWeb/Painting/DisplayListRecorder.h>
 #include <LibWeb/Painting/PaintableBox.h>
 #include <LibWeb/Painting/SVGPaintable.h>
 #include <LibWeb/Painting/SVGSVGPaintable.h>
@@ -474,7 +475,7 @@ void PaintableBox::paint(PaintContext& context, PaintPhase phase) const
         }
     }
 
-    if (phase == PaintPhase::Overlay && layout_node().document().inspected_layout_node() == &layout_node_with_style_and_box_metrics()) {
+    if (phase == PaintPhase::Overlay && layout_node().document().highlighted_layout_node() == &layout_node_with_style_and_box_metrics()) {
         auto content_rect = absolute_united_content_rect();
         auto margin_rect = united_rect_for_continuation_chain(*this, [](PaintableBox const& box) {
             auto margin_box = box.box_model().margin_box();
@@ -681,6 +682,7 @@ void paint_text_decoration(PaintContext& context, TextPaintable const& paintable
     auto baseline = fragment.baseline();
 
     auto line_color = paintable.computed_values().text_decoration_color();
+    auto line_style = paintable.computed_values().text_decoration_style();
     auto const& text_paintable = static_cast<TextPaintable const&>(fragment.paintable());
     auto device_line_thickness = context.rounded_device_pixels(text_paintable.text_decoration_thickness());
 
@@ -688,6 +690,24 @@ void paint_text_decoration(PaintContext& context, TextPaintable const& paintable
     for (auto line : text_decoration_lines) {
         DevicePixelPoint line_start_point {};
         DevicePixelPoint line_end_point {};
+
+        if (line == CSS::TextDecorationLine::SpellingError) {
+            // https://drafts.csswg.org/css-text-decor-4/#valdef-text-decoration-line-spelling-error
+            // This value indicates the type of text decoration used by the user agent to highlight spelling mistakes.
+            // Its appearance is UA-defined, and may be platform-dependent. It is often rendered as a red wavy underline.
+            line_color = Color::Red;
+            device_line_thickness = context.rounded_device_pixels(1);
+            line_style = CSS::TextDecorationStyle::Wavy;
+            line = CSS::TextDecorationLine::Underline;
+        } else if (line == CSS::TextDecorationLine::GrammarError) {
+            // https://drafts.csswg.org/css-text-decor-4/#valdef-text-decoration-line-grammar-error
+            // This value indicates the type of text decoration used by the user agent to highlight grammar mistakes.
+            // Its appearance is UA defined, and may be platform-dependent. It is often rendered as a green wavy underline.
+            line_color = Color::DarkGreen;
+            device_line_thickness = context.rounded_device_pixels(1);
+            line_style = CSS::TextDecorationStyle::Wavy;
+            line = CSS::TextDecorationLine::Underline;
+        }
 
         switch (line) {
         case CSS::TextDecorationLine::None:
@@ -709,9 +729,13 @@ void paint_text_decoration(PaintContext& context, TextPaintable const& paintable
         case CSS::TextDecorationLine::Blink:
             // Conforming user agents may simply not blink the text
             return;
+        case CSS::TextDecorationLine::SpellingError:
+        case CSS::TextDecorationLine::GrammarError:
+            // Handled above.
+            VERIFY_NOT_REACHED();
         }
 
-        switch (paintable.computed_values().text_decoration_style()) {
+        switch (line_style) {
         case CSS::TextDecorationStyle::Solid:
             painter.draw_line(line_start_point.to_type<int>(), line_end_point.to_type<int>(), line_color, device_line_thickness.value(), Gfx::LineStyle::Solid);
             break;
@@ -741,7 +765,24 @@ void paint_text_decoration(PaintContext& context, TextPaintable const& paintable
             painter.draw_line(line_start_point.to_type<int>(), line_end_point.to_type<int>(), line_color, device_line_thickness.value(), Gfx::LineStyle::Dotted);
             break;
         case CSS::TextDecorationStyle::Wavy:
-            painter.draw_triangle_wave(line_start_point.to_type<int>(), line_end_point.to_type<int>(), line_color, device_line_thickness.value() + 1, device_line_thickness.value());
+            auto amplitude = device_line_thickness.value() * 3;
+            switch (line) {
+            case CSS::TextDecorationLine::Underline:
+                line_start_point.translate_by(0, device_line_thickness + context.rounded_device_pixels(1));
+                line_end_point.translate_by(0, device_line_thickness + context.rounded_device_pixels(1));
+                break;
+            case CSS::TextDecorationLine::Overline:
+                line_start_point.translate_by(0, -device_line_thickness - context.rounded_device_pixels(1));
+                line_end_point.translate_by(0, -device_line_thickness - context.rounded_device_pixels(1));
+                break;
+            case CSS::TextDecorationLine::LineThrough:
+                line_start_point.translate_by(0, -device_line_thickness / 2);
+                line_end_point.translate_by(0, -device_line_thickness / 2);
+                break;
+            default:
+                VERIFY_NOT_REACHED();
+            }
+            painter.draw_triangle_wave(line_start_point.to_type<int>(), line_end_point.to_type<int>(), line_color, amplitude, device_line_thickness.value());
             break;
         }
     }
@@ -758,7 +799,7 @@ void paint_text_fragment(PaintContext& context, TextPaintable const& paintable, 
         auto fragment_absolute_rect = fragment.absolute_rect();
         auto fragment_absolute_device_rect = context.enclosing_device_rect(fragment_absolute_rect);
 
-        if (paintable.document().inspected_layout_node() == &paintable.layout_node())
+        if (paintable.document().highlighted_layout_node() == &paintable.layout_node())
             context.display_list_recorder().draw_rect(fragment_absolute_device_rect.to_type<int>(), Color::Magenta);
 
         auto text = paintable.text_for_rendering();
@@ -913,7 +954,8 @@ Paintable::DispatchEventOfSameName PaintableBox::handle_mousemove(Badge<EventHan
 
 bool PaintableBox::handle_mousewheel(Badge<EventHandler>, CSSPixelPoint, unsigned, unsigned, int wheel_delta_x, int wheel_delta_y)
 {
-    if (!could_be_scrolled_by_wheel_event()) {
+    // if none of the axes we scrolled with can be accepted by this element, don't handle scroll.
+    if ((!wheel_delta_x || !could_be_scrolled_by_wheel_event(ScrollDirection::Horizontal)) && (!wheel_delta_y || !could_be_scrolled_by_wheel_event(ScrollDirection::Vertical))) {
         return false;
     }
 
@@ -1213,6 +1255,8 @@ CSSPixelRect PaintableBox::transform_box_rect() const
 
 void PaintableBox::resolve_paint_properties()
 {
+    Base::resolve_paint_properties();
+
     auto const& computed_values = this->computed_values();
     auto const& layout_node = this->layout_node();
 
@@ -1315,7 +1359,7 @@ void PaintableBox::resolve_paint_properties()
 
 void PaintableWithLines::resolve_paint_properties()
 {
-    PaintableBox::resolve_paint_properties();
+    Base::resolve_paint_properties();
 
     auto const& layout_node = this->layout_node();
     for (auto const& fragment : fragments()) {

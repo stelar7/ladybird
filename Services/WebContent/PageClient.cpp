@@ -7,6 +7,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/JsonValue.h>
 #include <LibGfx/ShareableBitmap.h>
 #include <LibJS/Console.h>
 #include <LibJS/Runtime/ConsoleObject.h>
@@ -24,6 +25,8 @@
 #include <LibWeb/Painting/ViewportPaintable.h>
 #include <LibWebView/Attribute.h>
 #include <WebContent/ConnectionFromClient.h>
+#include <WebContent/DevToolsConsoleClient.h>
+#include <WebContent/InspectorConsoleClient.h>
 #include <WebContent/PageClient.h>
 #include <WebContent/PageHost.h>
 #include <WebContent/WebContentClientEndpoint.h>
@@ -33,6 +36,7 @@ namespace WebContent {
 
 static PageClient::UseSkiaPainter s_use_skia_painter = PageClient::UseSkiaPainter::GPUBackendIfAvailable;
 static bool s_is_headless { false };
+static bool s_devtools_enabled { false };
 
 GC_DEFINE_ALLOCATOR(PageClient);
 
@@ -49,6 +53,11 @@ bool PageClient::is_headless() const
 void PageClient::set_is_headless(bool is_headless)
 {
     s_is_headless = is_headless;
+}
+
+void PageClient::set_devtools_enabled(bool devtools_enabled)
+{
+    s_devtools_enabled = devtools_enabled;
 }
 
 GC::Ref<PageClient> PageClient::create(JS::VM& vm, PageHost& page_host, u64 id)
@@ -223,6 +232,16 @@ void PageClient::paint(Web::DevicePixelRect const& content_rect, Web::Painting::
     page().top_level_traversable()->paint(content_rect, target, paint_options);
 }
 
+Queue<Web::QueuedInputEvent>& PageClient::input_event_queue()
+{
+    return client().input_event_queue();
+}
+
+void PageClient::report_finished_handling_input_event(u64 page_id, Web::EventResult event_was_handled)
+{
+    client().async_did_finish_handling_input_event(page_id, event_was_handled);
+}
+
 void PageClient::set_viewport_size(Web::DevicePixelSize const& size)
 {
     page().top_level_traversable()->set_viewport_size(page().device_to_css_size(size));
@@ -232,9 +251,9 @@ void PageClient::set_viewport_size(Web::DevicePixelSize const& size)
     m_pending_set_browser_zoom_request = false;
 }
 
-void PageClient::page_did_request_cursor_change(Gfx::StandardCursor cursor)
+void PageClient::page_did_request_cursor_change(Gfx::Cursor const& cursor)
 {
-    client().async_did_request_cursor_change(m_id, (u32)cursor);
+    client().async_did_request_cursor_change(m_id, cursor);
 }
 
 void PageClient::page_did_layout()
@@ -721,20 +740,29 @@ void PageClient::initialize_js_console(Web::DOM::Document& document)
         return;
 
     auto& realm = document.realm();
-
     auto console_object = realm.intrinsics().console_object();
-    auto console_client = heap().allocate<WebContentConsoleClient>(console_object->console(), document.realm(), *this);
+
+    GC::Ptr<JS::ConsoleClient> console_client;
+    if (s_devtools_enabled)
+        console_client = DevToolsConsoleClient::create(document.realm(), console_object->console(), *this);
+    else
+        console_client = InspectorConsoleClient::create(document.realm(), console_object->console(), *this);
 
     document.set_console_client(console_client);
 }
 
-void PageClient::js_console_input(ByteString const& js_source)
+void PageClient::did_execute_js_console_input(JsonValue result)
+{
+    client().async_did_execute_js_console_input(m_id, move(result));
+}
+
+void PageClient::js_console_input(StringView js_source)
 {
     if (m_top_level_document_console_client)
         m_top_level_document_console_client->handle_input(js_source);
 }
 
-void PageClient::run_javascript(ByteString const& js_source)
+void PageClient::run_javascript(StringView js_source)
 {
     auto* active_document = page().top_level_browsing_context().active_document();
 
@@ -777,9 +805,14 @@ void PageClient::console_peer_did_misbehave(char const* reason)
     client().did_misbehave(reason);
 }
 
-void PageClient::did_get_js_console_messages(i32 start_index, Vector<ByteString> message_types, Vector<ByteString> messages)
+void PageClient::did_get_styled_js_console_messages(i32 start_index, Vector<String> message_types, Vector<String> messages)
 {
-    client().async_did_get_js_console_messages(m_id, start_index, move(message_types), move(messages));
+    client().async_did_get_styled_js_console_messages(m_id, start_index, move(message_types), move(messages));
+}
+
+void PageClient::did_get_unstyled_js_console_messages(i32 start_index, Vector<WebView::ConsoleOutput> console_output)
+{
+    client().async_did_get_unstyled_js_console_messages(m_id, start_index, move(console_output));
 }
 
 static void gather_style_sheets(Vector<Web::CSS::StyleSheetIdentifier>& results, Web::CSS::CSSStyleSheet& sheet)

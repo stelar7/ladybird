@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2023, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2018-2025, Andreas Kling <andreas@ladybird.org>
  * Copyright (c) 2021, the SerenityOS developers.
  * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
  * Copyright (c) 2023, Srikavin Ramkumar <me@srikavin.me>
@@ -43,6 +43,11 @@ public:
 
     static WebIDL::ExceptionOr<void> load_fallback_favicon_if_needed(GC::Ref<DOM::Document>);
 
+    void set_parser_document(Badge<HTMLParser>, GC::Ref<DOM::Document>);
+
+    void set_media(String);
+    String media() const;
+
 private:
     HTMLLinkElement(DOM::Document&, DOM::QualifiedName);
 
@@ -58,6 +63,7 @@ private:
 
     // ^HTMLElement
     virtual void visit_edges(Cell::Visitor&) override;
+    virtual bool is_implicitly_potentially_render_blocking() const override;
 
     struct LinkProcessingOptions {
         // href (default the empty string)
@@ -92,7 +98,7 @@ private:
         GC::Ptr<HTML::EnvironmentSettingsObject> environment;
         // policy container
         //      A policy container
-        HTML::PolicyContainer policy_container;
+        GC::Ptr<HTML::PolicyContainer> policy_container;
         // document (default null)
         //      Null or a Document
         GC::Ptr<Web::DOM::Document> document;
@@ -150,6 +156,10 @@ private:
     unsigned m_relationship { 0 };
     // https://html.spec.whatwg.org/multipage/semantics.html#explicitly-enabled
     bool m_explicitly_enabled { false };
+
+    Optional<String> m_mime_type;
+
+    WeakPtr<DOM::Document> m_parser_document;
 };
 
 }

@@ -14,6 +14,7 @@
 #include <LibWeb/HTML/FileFilter.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/PixelUnits.h>
+#include <LibWebView/Forward.h>
 #include <WebContent/BackingStoreManager.h>
 #include <WebContent/Forward.h>
 
@@ -37,6 +38,8 @@ public:
     virtual bool is_headless() const override;
     static void set_is_headless(bool);
 
+    static void set_devtools_enabled(bool);
+
     virtual bool is_ready_to_paint() const override;
 
     virtual Web::Page& page() override { return *m_page; }
@@ -47,6 +50,9 @@ public:
     virtual void paint_next_frame() override;
     virtual void process_screenshot_requests() override;
     virtual void paint(Web::DevicePixelRect const& content_rect, Web::Painting::BackingStore&, Web::PaintOptions = {}) override;
+
+    virtual Queue<Web::QueuedInputEvent>& input_event_queue() override;
+    virtual void report_finished_handling_input_event(u64 page_id, Web::EventResult event_was_handled) override;
 
     void set_palette_impl(Gfx::PaletteImpl&);
     void set_viewport_size(Web::DevicePixelSize const&);
@@ -79,12 +85,14 @@ public:
     void ready_to_paint();
 
     void initialize_js_console(Web::DOM::Document& document);
-    void js_console_input(ByteString const& js_source);
-    void run_javascript(ByteString const& js_source);
+    void js_console_input(StringView js_source);
+    void did_execute_js_console_input(JsonValue);
+    void run_javascript(StringView js_source);
     void js_console_request_messages(i32 start_index);
     void did_output_js_console_message(i32 message_index);
     void console_peer_did_misbehave(char const* reason);
-    void did_get_js_console_messages(i32 start_index, Vector<ByteString> message_types, Vector<ByteString> messages);
+    void did_get_styled_js_console_messages(i32 start_index, Vector<String> message_types, Vector<String> messages);
+    void did_get_unstyled_js_console_messages(i32 start_index, Vector<WebView::ConsoleOutput> console_output);
 
     Vector<Web::CSS::StyleSheetIdentifier> list_style_sheets() const;
 
@@ -108,7 +116,7 @@ private:
     virtual Web::CSS::PreferredColorScheme preferred_color_scheme() const override { return m_preferred_color_scheme; }
     virtual Web::CSS::PreferredContrast preferred_contrast() const override { return m_preferred_contrast; }
     virtual Web::CSS::PreferredMotion preferred_motion() const override { return m_preferred_motion; }
-    virtual void page_did_request_cursor_change(Gfx::StandardCursor) override;
+    virtual void page_did_request_cursor_change(Gfx::Cursor const&) override;
     virtual void page_did_layout() override;
     virtual void page_did_change_title(ByteString const&) override;
     virtual void page_did_change_url(URL::URL const&) override;

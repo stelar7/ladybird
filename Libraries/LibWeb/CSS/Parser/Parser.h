@@ -264,7 +264,7 @@ private:
     Optional<Gfx::UnicodeRange> parse_unicode_range(StringView);
     Vector<Gfx::UnicodeRange> parse_unicode_ranges(TokenStream<ComponentValue>&);
     Optional<GridSize> parse_grid_size(ComponentValue const&);
-    Optional<GridFitContent> parse_fit_content(Vector<ComponentValue> const&);
+    Optional<GridFitContent> parse_grid_fit_content(Vector<ComponentValue> const&);
     Optional<GridMinMax> parse_min_max(Vector<ComponentValue> const&);
     Optional<GridRepeat> parse_repeat(Vector<ComponentValue> const&);
     Optional<ExplicitGridTrack> parse_track_sizing_function(ComponentValue const&);
@@ -275,14 +275,16 @@ private:
     Optional<ShapeRadius> parse_shape_radius(TokenStream<ComponentValue>&);
     RefPtr<CSSStyleValue> parse_basic_shape_value(TokenStream<ComponentValue>&);
 
+    RefPtr<FitContentStyleValue> parse_fit_content_value(TokenStream<ComponentValue>&);
+
     template<typename TElement>
     Optional<Vector<TElement>> parse_color_stop_list(TokenStream<ComponentValue>& tokens, auto parse_position);
     Optional<Vector<LinearColorStopListElement>> parse_linear_color_stop_list(TokenStream<ComponentValue>&);
     Optional<Vector<AngularColorStopListElement>> parse_angular_color_stop_list(TokenStream<ComponentValue>&);
 
-    RefPtr<CSSStyleValue> parse_linear_gradient_function(TokenStream<ComponentValue>&);
-    RefPtr<CSSStyleValue> parse_conic_gradient_function(TokenStream<ComponentValue>&);
-    RefPtr<CSSStyleValue> parse_radial_gradient_function(TokenStream<ComponentValue>&);
+    RefPtr<LinearGradientStyleValue> parse_linear_gradient_function(TokenStream<ComponentValue>&);
+    RefPtr<ConicGradientStyleValue> parse_conic_gradient_function(TokenStream<ComponentValue>&);
+    RefPtr<RadialGradientStyleValue> parse_radial_gradient_function(TokenStream<ComponentValue>&);
 
     ParseErrorOr<NonnullRefPtr<CSSStyleValue>> parse_css_value(PropertyID, TokenStream<ComponentValue>&, Optional<String> original_source_text = {});
     RefPtr<CSSStyleValue> parse_css_value_for_property(PropertyID, TokenStream<ComponentValue>&);
@@ -293,7 +295,7 @@ private:
     Optional<PropertyAndValue> parse_css_value_for_properties(ReadonlySpan<PropertyID>, TokenStream<ComponentValue>&);
     RefPtr<CSSStyleValue> parse_builtin_value(TokenStream<ComponentValue>&);
     RefPtr<CSSStyleValue> parse_calculated_value(ComponentValue const&);
-    RefPtr<CustomIdentStyleValue> parse_custom_ident_value(TokenStream<ComponentValue>&, std::initializer_list<StringView> blacklist);
+    RefPtr<CustomIdentStyleValue> parse_custom_ident_value(TokenStream<ComponentValue>&, ReadonlySpan<StringView> blacklist);
     // NOTE: Implemented in generated code. (GenerateCSSMathFunctions.cpp)
     RefPtr<CalculationNode> parse_math_function(Function const&, CalculationContext const&);
     RefPtr<CalculationNode> parse_a_calc_function_node(Function const&, CalculationContext const&);
@@ -322,7 +324,7 @@ private:
     RefPtr<CSSStyleValue> parse_rect_value(TokenStream<ComponentValue>&);
     RefPtr<CSSStyleValue> parse_ratio_value(TokenStream<ComponentValue>&);
     RefPtr<StringStyleValue> parse_string_value(TokenStream<ComponentValue>&);
-    RefPtr<CSSStyleValue> parse_image_value(TokenStream<ComponentValue>&);
+    RefPtr<AbstractImageStyleValue> parse_image_value(TokenStream<ComponentValue>&);
     RefPtr<CSSStyleValue> parse_paint_value(TokenStream<ComponentValue>&);
     enum class PositionParsingMode {
         Normal,
@@ -366,6 +368,7 @@ private:
     RefPtr<CSSStyleValue> parse_counter_increment_value(TokenStream<ComponentValue>&);
     RefPtr<CSSStyleValue> parse_counter_reset_value(TokenStream<ComponentValue>&);
     RefPtr<CSSStyleValue> parse_counter_set_value(TokenStream<ComponentValue>&);
+    RefPtr<CSSStyleValue> parse_cursor_value(TokenStream<ComponentValue>&);
     RefPtr<CSSStyleValue> parse_display_value(TokenStream<ComponentValue>&);
     RefPtr<CSSStyleValue> parse_flex_shorthand_value(TokenStream<ComponentValue>&);
     RefPtr<CSSStyleValue> parse_flex_flow_value(TokenStream<ComponentValue>&);
@@ -460,7 +463,7 @@ private:
     JS::Realm& realm() const;
     bool in_quirks_mode() const;
     bool is_parsing_svg_presentation_attribute() const;
-    URL::URL complete_url(StringView) const;
+    Optional<URL::URL> complete_url(StringView) const;
 
     GC::Ptr<DOM::Document const> m_document;
     GC::Ptr<JS::Realm> m_realm;
