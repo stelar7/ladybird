@@ -152,13 +152,6 @@ GC::Ref<HTML::DOMStringList> IDBDatabase::object_store_names()
     return create_a_sorted_name_list(realm(), names);
 }
 
-// https://w3c.github.io/IndexedDB/#dom-idbdatabase-close
-void IDBDatabase::close()
-{
-    // 1. Run close a database connection with this connection.
-    close_a_database_connection(*this);
-}
-
 // https://w3c.github.io/IndexedDB/#dom-idbdatabase-deleteobjectstore
 WebIDL::ExceptionOr<void> IDBDatabase::delete_object_store(String const& name)
 {
@@ -236,6 +229,5 @@ WebIDL::ExceptionOr<GC::Ref<IDBTransaction>> IDBDatabase::transaction(Variant<St
     // 9. Return an IDBTransaction object representing transaction.
     return transaction;
 }
-
 
 }
