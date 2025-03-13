@@ -183,8 +183,10 @@ WebIDL::ExceptionOr<GC::Ref<IDBKeyRange>> IDBKeyRange::only(JS::VM& vm, JS::Valu
     if (key.is_error())
         return WebIDL::DataError::create(realm, "Value is invalid"_string);
 
+    auto key_value = key.release_value();
+
     // 3. Create and return a new key range containing only key.
-    return from_key(realm, key.release_value());
+    return IDBKeyRange::create(realm, key_value, key_value, false, false);
 }
 
 // https://w3c.github.io/IndexedDB/#dom-idbkeyrange-lowerbound
