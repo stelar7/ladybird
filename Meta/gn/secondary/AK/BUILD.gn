@@ -243,6 +243,7 @@ write_cmake_config("ak_debug_gen") {
     "HTTPJOB_DEBUG=",
     "HUNKS_DEBUG=",
     "ICO_DEBUG=",
+    "IDB_DEBUG=",
     "IDL_DEBUG=",
     "IMAGE_DECODER_DEBUG=",
     "IMAGE_LOADER_DEBUG=",
