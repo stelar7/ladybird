@@ -51,16 +51,6 @@ RequestList& ConnectionQueueHandler::for_key_and_name(StorageAPI::StorageKey& ke
         });
 }
 
-Vector<GC::Root<Database>> Database::for_key(StorageAPI::StorageKey const& key)
-{
-    Vector<GC::Root<Database>> databases;
-    for (auto const& database_mapping : m_databases.get(key).value_or({})) {
-        databases.append(database_mapping.value);
-    }
-
-    return databases;
-}
-
 Optional<GC::Root<Database> const&> Database::for_key_and_name(StorageAPI::StorageKey& key, String& name)
 {
     return m_databases.ensure(key, [] {
