@@ -17,7 +17,7 @@ GC_DEFINE_ALLOCATOR(IDBOpenDBRequest);
 IDBOpenDBRequest::~IDBOpenDBRequest() = default;
 
 IDBOpenDBRequest::IDBOpenDBRequest(JS::Realm& realm)
-    : IDBRequest(realm)
+    : IDBRequest(realm, {})
 {
 }
 
