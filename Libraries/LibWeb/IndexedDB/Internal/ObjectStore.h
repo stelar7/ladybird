@@ -19,6 +19,12 @@
 
 namespace Web::IndexedDB {
 
+// https://w3c.github.io/IndexedDB/#object-store-record
+struct Record {
+    GC::Ref<Key> key;
+    HTML::SerializationRecord value;
+};
+
 using KeyPath = Variant<String, Vector<String>>;
 
 // https://w3c.github.io/IndexedDB/#object-store-construct
@@ -38,6 +44,16 @@ public:
     Optional<KeyGenerator> key_generator() const { return m_key_generator; }
 
     GC::Ref<Database> database() const { return m_database; }
+    Vector<Record> const& records() const { return m_records; }
+
+    void add_index(GC::Ref<Index> index) { m_indexes.append(index); }
+    ReadonlySpan<GC::Ref<Index>> index_set() const { return m_indexes; }
+
+    Optional<Record> first_in_range(GC::Ref<IDBKeyRange> range);
+    u64 count_records_in_range(GC::Ref<IDBKeyRange> range);
+    bool has_record_with_key(GC::Ref<Key> key);
+    void remove_records_in_range(GC::Ref<IDBKeyRange> range);
+    void store_a_record(Record const& record);
 
 protected:
     virtual void visit_edges(Visitor&) override;
@@ -48,6 +64,9 @@ private:
     // AD-HOC: An ObjectStore needs to know what Database it belongs to...
     GC::Ref<Database> m_database;
 
+    // AD-HOC: An Index has referenced ObjectStores, we also need the reverse mapping
+    Vector<GC::Ref<Index>> m_indexes;
+
     // An object store has a name, which is a name. At any one time, the name is unique within the database to which it belongs.
     String m_name;
 
@@ -56,6 +75,9 @@ private:
 
     // An object store optionally has a key generator.
     Optional<KeyGenerator> m_key_generator;
+
+    // An object store has a list of records
+    Vector<Record> m_records;
 };
 
 }

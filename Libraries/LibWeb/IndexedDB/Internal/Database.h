@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <AK/Vector.h>
 #include <LibGC/Ptr.h>
 #include <LibWeb/DOM/EventTarget.h>
 #include <LibWeb/IndexedDB/IDBDatabase.h>

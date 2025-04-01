@@ -564,6 +564,7 @@ set(SOURCES
     IndexedDB/Internal/Database.cpp
     IndexedDB/Internal/Key.cpp
     IndexedDB/Internal/ObjectStore.cpp
+    IndexedDB/Internal/Index.cpp
     IndexedDB/Internal/RequestList.cpp
     Internals/InternalAnimationTimeline.cpp
     Internals/Internals.cpp

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibGC/Root.h>
 #include <LibWeb/IndexedDB/Internal/Key.h>
 #include <LibWeb/Infra/ByteSequences.h>
 #include <LibWeb/Infra/Strings.h>

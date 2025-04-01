@@ -4,12 +4,16 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/QuickSort.h>
+#include <AK/Vector.h>
 #include <LibWeb/Bindings/IDBDatabasePrototype.h>
 #include <LibWeb/Bindings/Intrinsics.h>
+#include <LibWeb/Crypto/Crypto.h>
 #include <LibWeb/HTML/EventNames.h>
 #include <LibWeb/IndexedDB/IDBDatabase.h>
 #include <LibWeb/IndexedDB/IDBObjectStore.h>
 #include <LibWeb/IndexedDB/Internal/Algorithms.h>
+#include <LibWeb/WebIDL/DOMException.h>
 
 namespace Web::IndexedDB {
 
@@ -21,6 +25,7 @@ IDBDatabase::IDBDatabase(JS::Realm& realm, Database& db)
     , m_associated_database(db)
 {
     db.associate(*this);
+    m_uuid = MUST(Crypto::generate_random_uuid());
     m_object_store_set = Vector<GC::Ref<ObjectStore>> { db.object_stores() };
 }
 
@@ -106,7 +111,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBObjectStore>> IDBDatabase::create_object_store(St
 
     // 3. If transaction’s state is not active, then throw a "TransactionInactiveError" DOMException.
     if (transaction->state() != IDBTransaction::TransactionState::Active)
-        return WebIDL::TransactionInactiveError::create(realm, "Transaction is not active"_string);
+        return WebIDL::TransactionInactiveError::create(realm, "Transaction is not active while creating object store"_string);
 
     // 4. Let keyPath be options’s keyPath member if it is not undefined or null, or null otherwise.
     auto key_path = options.key_path;
@@ -165,7 +170,7 @@ WebIDL::ExceptionOr<void> IDBDatabase::delete_object_store(String const& name)
 
     // 3. If transaction’s state is not active, then throw a "TransactionInactiveError" DOMException.
     if (transaction->state() != IDBTransaction::TransactionState::Active)
-        return WebIDL::TransactionInactiveError::create(realm, "Transaction is not active"_string);
+        return WebIDL::TransactionInactiveError::create(realm, "Transaction is not active while deleting object store"_string);
 
     // 4. Let store be the object store named name in database, or throw a "NotFoundError" DOMException if none.
     auto store = database->object_store_with_name(name);
@@ -173,14 +178,62 @@ WebIDL::ExceptionOr<void> IDBDatabase::delete_object_store(String const& name)
         return WebIDL::NotFoundError::create(realm, "Object store not found"_string);
 
     // 5. Remove store from this's object store set.
-    this->remove_from_object_store_set(*store);
+    remove_from_object_store_set(*store);
 
     // FIXME: 6. If there is an object store handle associated with store and transaction, remove all entries from its index set.
 
     // 7. Destroy store.
     database->remove_object_store(*store);
-
     return {};
+}
+
+WebIDL::ExceptionOr<GC::Ref<IDBTransaction>> IDBDatabase::transaction(Variant<String, Vector<String>> store_names, Bindings::IDBTransactionMode mode, IDBTransactionOptions options)
+{
+    // 1. If a live upgrade transaction is associated with the connection, throw an "InvalidStateError" DOMException.
+    auto database = associated_database();
+    if (database->upgrade_transaction())
+        return WebIDL::InvalidStateError::create(realm(), "Upgrade transaction is live"_string);
+
+    // 2. If this's close pending flag is true, then throw an "InvalidStateError" DOMException.
+    if (close_pending())
+        return WebIDL::InvalidStateError::create(realm(), "Close pending"_string);
+
+    // 3. Let scope be the set of unique strings in storeNames if it is a sequence, or a set containing one string equal to storeNames otherwise.
+    Vector<String> scope;
+    if (store_names.has<Vector<String>>()) {
+        scope = store_names.get<Vector<String>>();
+    } else {
+        scope.append(store_names.get<String>());
+    }
+
+    // 4. If any string in scope is not the name of an object store in the connected database, throw a "NotFoundError" DOMException.
+    for (auto const& store_name : scope) {
+        if (!database->object_store_with_name(store_name))
+            return WebIDL::NotFoundError::create(realm(), "Object store not found"_string);
+    }
+
+    // 5. If scope is empty, throw an "InvalidAccessError" DOMException.
+    if (scope.is_empty())
+        return WebIDL::InvalidAccessError::create(realm(), "Scope is empty"_string);
+
+    // 6. If mode is not "readonly" or "readwrite", throw a TypeError.
+    if (mode != Bindings::IDBTransactionMode::Readonly && mode != Bindings::IDBTransactionMode::Readwrite)
+        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid transaction mode"_string };
+
+    // 7. Let transaction be a newly created transaction with this connection, mode, options’ durability member, and the set of object stores named in scope.
+    Vector<GC::Root<ObjectStore>> scope_stores;
+    for (auto const& store_name : scope) {
+        auto store = database->object_store_with_name(store_name);
+        scope_stores.append(*store);
+    }
+
+    auto transaction = IDBTransaction::create(realm(), *this, mode, options.durability, scope_stores);
+
+    // 8. Set transaction’s cleanup event loop to the current event loop.
+    transaction->set_cleanup_event_loop(HTML::main_thread_event_loop());
+
+    // 9. Return an IDBTransaction object representing transaction.
+    return transaction;
 }
 
 }
