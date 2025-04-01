@@ -18,10 +18,12 @@
 #include <LibJS/Runtime/Accessor.h>
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/BigInt.h>
+#include <LibJS/Runtime/CompletionCell.h>
 #include <LibJS/Runtime/DeclarativeEnvironment.h>
 #include <LibJS/Runtime/ECMAScriptFunctionObject.h>
 #include <LibJS/Runtime/Environment.h>
 #include <LibJS/Runtime/FunctionEnvironment.h>
+#include <LibJS/Runtime/GeneratorResult.h>
 #include <LibJS/Runtime/GlobalEnvironment.h>
 #include <LibJS/Runtime/GlobalObject.h>
 #include <LibJS/Runtime/Iterator.h>
@@ -36,6 +38,30 @@
 #include <LibJS/Runtime/Value.h>
 #include <LibJS/Runtime/ValueInlines.h>
 #include <LibJS/SourceTextModule.h>
+
+namespace JS {
+
+struct PropertyKeyAndEnumerableFlag {
+    JS::PropertyKey key;
+    bool enumerable { false };
+};
+
+}
+
+namespace AK {
+template<>
+struct Traits<JS::PropertyKeyAndEnumerableFlag> : public DefaultTraits<JS::PropertyKeyAndEnumerableFlag> {
+    static unsigned hash(JS::PropertyKeyAndEnumerableFlag const& entry)
+    {
+        return Traits<JS::PropertyKey>::hash(entry.key);
+    }
+
+    static bool equals(JS::PropertyKeyAndEnumerableFlag const& a, JS::PropertyKeyAndEnumerableFlag const& b)
+    {
+        return Traits<JS::PropertyKey>::equals(a.key, b.key);
+    }
+};
+}
 
 namespace JS::Bytecode {
 
@@ -168,18 +194,10 @@ ALWAYS_INLINE void Interpreter::set(Operand op, Value value)
 
 ALWAYS_INLINE Value Interpreter::do_yield(Value value, Optional<Label> continuation)
 {
-    auto object = Object::create(realm(), nullptr);
-    object->define_direct_property("result", value, JS::default_attributes);
-
-    if (continuation.has_value())
-        // FIXME: If we get a pointer, which is not accurately representable as a double
-        //        will cause this to explode
-        object->define_direct_property("continuation", Value(continuation->address()), JS::default_attributes);
-    else
-        object->define_direct_property("continuation", js_null(), JS::default_attributes);
-
-    object->define_direct_property("isAwait", Value(false), JS::default_attributes);
-    return object;
+    // FIXME: If we get a pointer, which is not accurately representable as a double
+    //        will cause this to explode
+    auto continuation_value = continuation.has_value() ? Value(continuation->address()) : js_null();
+    return vm().heap().allocate<GeneratorResult>(value, continuation_value, false).ptr();
 }
 
 // 16.1.6 ScriptEvaluation ( scriptRecord ), https://tc39.es/ecma262/#sec-runtime-semantics-scriptevaluation
@@ -600,6 +618,7 @@ FLATTEN_ON_CLANG void Interpreter::run_bytecode(size_t entry_point)
             HANDLE_INSTRUCTION(GetByValue);
             HANDLE_INSTRUCTION(GetByValueWithThis);
             HANDLE_INSTRUCTION(GetCalleeAndThisFromEnvironment);
+            HANDLE_INSTRUCTION_WITHOUT_EXCEPTION_CHECK(GetCompletionFields);
             HANDLE_INSTRUCTION(GetGlobal);
             HANDLE_INSTRUCTION_WITHOUT_EXCEPTION_CHECK(GetImportMeta);
             HANDLE_INSTRUCTION(GetIterator);
@@ -656,6 +675,7 @@ FLATTEN_ON_CLANG void Interpreter::run_bytecode(size_t entry_point)
             HANDLE_INSTRUCTION(ResolveThisBinding);
             HANDLE_INSTRUCTION_WITHOUT_EXCEPTION_CHECK(RestoreScheduledJump);
             HANDLE_INSTRUCTION(RightShift);
+            HANDLE_INSTRUCTION_WITHOUT_EXCEPTION_CHECK(SetCompletionType);
             HANDLE_INSTRUCTION(SetLexicalBinding);
             HANDLE_INSTRUCTION(SetVariableBinding);
             HANDLE_INSTRUCTION(StrictlyEquals);
@@ -754,8 +774,6 @@ Interpreter::ResultAndReturnRegister Interpreter::run_executable(Executable& exe
     auto return_value = js_undefined();
     if (!reg(Register::return_value()).is_empty())
         return_value = reg(Register::return_value());
-    else if (!reg(Register::saved_return_value()).is_empty())
-        return_value = reg(Register::saved_return_value());
     auto exception = reg(Register::exception());
 
     vm().run_queued_promise_jobs();
@@ -809,7 +827,7 @@ void Interpreter::enter_object_environment(Object& object)
     running_execution_context().lexical_environment = new_object_environment(object, true, old_environment);
 }
 
-ThrowCompletionOr<GC::Ref<Bytecode::Executable>> compile(VM& vm, ASTNode const& node, FunctionKind kind, DeprecatedFlyString const& name)
+ThrowCompletionOr<GC::Ref<Bytecode::Executable>> compile(VM& vm, ASTNode const& node, FunctionKind kind, FlyString const& name)
 {
     auto executable_result = Bytecode::Generator::generate_from_ast_node(vm, node, kind);
     if (executable_result.is_error())
@@ -1175,7 +1193,7 @@ inline ThrowCompletionOr<Value> get_global(Interpreter& interpreter, IdentifierT
     return vm.throw_completion<ReferenceError>(ErrorType::UnknownIdentifier, identifier);
 }
 
-inline ThrowCompletionOr<void> put_by_property_key(VM& vm, Value base, Value this_value, Value value, Optional<DeprecatedFlyString const&> const& base_identifier, PropertyKey name, Op::PropertyKind kind, PropertyLookupCache* cache = nullptr)
+inline ThrowCompletionOr<void> put_by_property_key(VM& vm, Value base, Value this_value, Value value, Optional<FlyString const&> const& base_identifier, PropertyKey name, Op::PropertyKind kind, PropertyLookupCache* cache = nullptr)
 {
     // Better error message than to_object would give
     if (vm.in_strict_mode() && base.is_nullish())
@@ -1195,14 +1213,14 @@ inline ThrowCompletionOr<void> put_by_property_key(VM& vm, Value base, Value thi
     case Op::PropertyKind::Getter: {
         auto& function = value.as_function();
         if (function.name().is_empty() && is<ECMAScriptFunctionObject>(function))
-            static_cast<ECMAScriptFunctionObject*>(&function)->set_name(ByteString::formatted("get {}", name));
+            static_cast<ECMAScriptFunctionObject*>(&function)->set_name(MUST(String::formatted("get {}", name)));
         object->define_direct_accessor(name, &function, nullptr, Attribute::Configurable | Attribute::Enumerable);
         break;
     }
     case Op::PropertyKind::Setter: {
         auto& function = value.as_function();
         if (function.name().is_empty() && is<ECMAScriptFunctionObject>(function))
-            static_cast<ECMAScriptFunctionObject*>(&function)->set_name(ByteString::formatted("set {}", name));
+            static_cast<ECMAScriptFunctionObject*>(&function)->set_name(MUST(String::formatted("set {}", name)));
         object->define_direct_accessor(name, nullptr, &function, Attribute::Configurable | Attribute::Enumerable);
         break;
     }
@@ -1282,7 +1300,7 @@ inline Value new_function(VM& vm, FunctionNode const& function_node, Optional<Id
     Value value;
 
     if (!function_node.has_name()) {
-        DeprecatedFlyString name = {};
+        FlyString name;
         if (lhs_name.has_value())
             name = vm.bytecode_interpreter().current_executable().get_identifier(lhs_name.value());
         value = function_node.instantiate_ordinary_function_expression(vm, name);
@@ -1299,7 +1317,7 @@ inline Value new_function(VM& vm, FunctionNode const& function_node, Optional<Id
     return value;
 }
 
-inline ThrowCompletionOr<void> put_by_value(VM& vm, Value base, Optional<DeprecatedFlyString const&> const& base_identifier, Value property_key_value, Value value, Op::PropertyKind kind)
+inline ThrowCompletionOr<void> put_by_value(VM& vm, Value base, Optional<FlyString const&> const& base_identifier, Value property_key_value, Value value, Op::PropertyKind kind)
 {
     // OPTIMIZATION: Fast path for simple Int32 indexes in array-like objects.
     if ((kind == Op::PropertyKind::KeyValue || kind == Op::PropertyKind::DirectKeyValue)
@@ -1402,7 +1420,7 @@ struct CalleeAndThis {
     Value this_value;
 };
 
-inline ThrowCompletionOr<CalleeAndThis> get_callee_and_this_from_environment(Bytecode::Interpreter& interpreter, DeprecatedFlyString const& name, EnvironmentCoordinate& cache)
+inline ThrowCompletionOr<CalleeAndThis> get_callee_and_this_from_environment(Bytecode::Interpreter& interpreter, FlyString const& name, EnvironmentCoordinate& cache)
 {
     auto& vm = interpreter.vm();
 
@@ -1448,14 +1466,14 @@ inline ThrowCompletionOr<CalleeAndThis> get_callee_and_this_from_environment(Byt
 }
 
 // 13.2.7.3 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-regular-expression-literals-runtime-semantics-evaluation
-inline Value new_regexp(VM& vm, ParsedRegex const& parsed_regex, ByteString const& pattern, ByteString const& flags)
+inline Value new_regexp(VM& vm, ParsedRegex const& parsed_regex, String const& pattern, String const& flags)
 {
     // 1. Let pattern be CodePointsToString(BodyText of RegularExpressionLiteral).
     // 2. Let flags be CodePointsToString(FlagText of RegularExpressionLiteral).
 
     // 3. Return ! RegExpCreate(pattern, flags).
     auto& realm = *vm.current_realm();
-    Regex<ECMA262> regex(parsed_regex.regex, parsed_regex.pattern, parsed_regex.flags);
+    Regex<ECMA262> regex(parsed_regex.regex, parsed_regex.pattern.to_byte_string(), parsed_regex.flags);
     // NOTE: We bypass RegExpCreate and subsequently RegExpAlloc as an optimization to use the already parsed values.
     auto regexp_object = RegExpObject::create(realm, move(regex), pattern, flags);
     // RegExpAlloc has these two steps from the 'Legacy RegExp features' proposal.
@@ -1490,7 +1508,7 @@ inline GC::RootVector<Value> argument_list_evaluation(VM& vm, Value arguments)
     return argument_values;
 }
 
-inline ThrowCompletionOr<void> create_variable(VM& vm, DeprecatedFlyString const& name, Op::EnvironmentMode mode, bool is_global, bool is_immutable, bool is_strict)
+inline ThrowCompletionOr<void> create_variable(VM& vm, FlyString const& name, Op::EnvironmentMode mode, bool is_global, bool is_immutable, bool is_strict)
 {
     if (mode == Op::EnvironmentMode::Lexical) {
         VERIFY(!is_global);
@@ -1525,13 +1543,13 @@ inline ThrowCompletionOr<ECMAScriptFunctionObject*> new_class(VM& vm, Value supe
     auto* class_environment = vm.lexical_environment();
     vm.running_execution_context().lexical_environment = vm.running_execution_context().saved_lexical_environments.take_last();
 
-    Optional<DeprecatedFlyString> binding_name;
-    DeprecatedFlyString class_name;
+    Optional<FlyString> binding_name;
+    FlyString class_name;
     if (!class_expression.has_name() && lhs_name.has_value()) {
         class_name = interpreter.current_executable().get_identifier(lhs_name.value());
     } else {
         binding_name = name;
-        class_name = name.is_null() ? ""sv : name;
+        class_name = name;
     }
 
     return TRY(class_expression.create_class_constructor(vm, class_environment, vm.lexical_environment(), super_class, element_keys, binding_name, class_name));
@@ -1589,7 +1607,7 @@ inline ThrowCompletionOr<GC::Ref<Object>> super_call_with_argument_array(VM& vm,
 
 inline ThrowCompletionOr<GC::Ref<Array>> iterator_to_array(VM& vm, Value iterator)
 {
-    auto& iterator_record = as<IteratorRecord>(iterator.as_object());
+    auto& iterator_record = static_cast<IteratorRecord&>(iterator.as_cell());
 
     auto array = MUST(Array::create(*vm.current_realm(), 0));
     size_t index = 0;
@@ -1694,18 +1712,8 @@ inline ThrowCompletionOr<Value> delete_by_value_with_this(Bytecode::Interpreter&
     return Value(TRY(reference.delete_(vm)));
 }
 
-class PropertyNameIteratorState final : public GC::Cell {
-    GC_CELL(PropertyNameIteratorState, GC::Cell);
-    GC_DECLARE_ALLOCATOR(PropertyNameIteratorState);
-
-public:
-    HashTable<PropertyKey> non_enumerable_property_keys;
-};
-
-GC_DEFINE_ALLOCATOR(PropertyNameIteratorState);
-
 // 14.7.5.9 EnumerateObjectProperties ( O ), https://tc39.es/ecma262/#sec-enumerate-object-properties
-inline ThrowCompletionOr<Object*> get_object_property_iterator(VM& vm, Value value)
+inline ThrowCompletionOr<Value> get_object_property_iterator(VM& vm, Value value)
 {
     // While the spec does provide an algorithm, it allows us to implement it ourselves so long as we meet the following invariants:
     //    1- Returned property keys do not include keys that are Symbols
@@ -1724,34 +1732,37 @@ inline ThrowCompletionOr<Object*> get_object_property_iterator(VM& vm, Value val
     // Note: While the spec doesn't explicitly require these to be ordered, it says that the values should be retrieved via OwnPropertyKeys,
     //       so we just keep the order consistent anyway.
 
-    struct ObjectWithProperties {
-        WeakPtr<Object> object;
-        OrderedHashTable<PropertyKey> property_names;
-    };
-    Vector<ObjectWithProperties> objects_with_properties;
-
+    OrderedHashTable<PropertyKeyAndEnumerableFlag> properties;
     HashTable<GC::Ref<Object>> seen_objects;
-    HashTable<PropertyKey> seen_property_keys;
     // Collect all keys immediately (invariant no. 5)
     for (auto object_to_check = GC::Ptr { object.ptr() }; object_to_check && !seen_objects.contains(*object_to_check); object_to_check = TRY(object_to_check->internal_get_prototype_of())) {
         seen_objects.set(*object_to_check);
-        objects_with_properties.prepend(ObjectWithProperties {
-            .object = *object_to_check,
-            .property_names = {},
-        });
-        auto& properties = objects_with_properties.first().property_names;
         for (auto& key : TRY(object_to_check->internal_own_property_keys())) {
             if (key.is_symbol())
                 continue;
 
-            auto property_key = TRY(PropertyKey::from_value(vm, key));
+            // NOTE: If there is a non-enumerable property higher up the prototype chain with the same key,
+            //       we mustn't include this property even if it's enumerable (invariant no. 5 and 6)
+            //       This is achieved with the PropertyKeyAndEnumerableFlag struct, which doesn't consider
+            //       the enumerable flag when comparing keys.
+            PropertyKeyAndEnumerableFlag new_entry {
+                .key = TRY(PropertyKey::from_value(vm, key)),
+                .enumerable = false,
+            };
 
-            if (seen_property_keys.set(property_key, AK::HashSetExistingEntryBehavior::Keep) == HashSetResult::KeptExistingEntry)
+            if (properties.contains(new_entry))
                 continue;
 
-            properties.set(property_key);
+            auto descriptor = TRY(object_to_check->internal_get_own_property(new_entry.key));
+            if (!descriptor.has_value())
+                continue;
+
+            new_entry.enumerable = *descriptor->enumerable;
+            properties.set(move(new_entry), AK::HashSetExistingEntryBehavior::Keep);
         }
     }
+
+    properties.remove_all_matching([&](auto& entry) { return !entry.enumerable; });
 
     auto& realm = *vm.current_realm();
 
@@ -1759,39 +1770,22 @@ inline ThrowCompletionOr<Object*> get_object_property_iterator(VM& vm, Value val
     auto value_offset = realm.intrinsics().iterator_result_object_value_offset();
     auto done_offset = realm.intrinsics().iterator_result_object_done_offset();
 
-    auto state = realm.heap().allocate<PropertyNameIteratorState>();
-
     auto callback = NativeFunction::create(
-        *vm.current_realm(), [objects_with_properties = move(objects_with_properties), result_object, value_offset, done_offset, state](VM& vm) mutable -> ThrowCompletionOr<Value> {
+        *vm.current_realm(), [items = move(properties), result_object, value_offset, done_offset](VM& vm) mutable -> ThrowCompletionOr<Value> {
+            auto& iterated_object = vm.this_value().as_object();
             while (true) {
-                if (objects_with_properties.is_empty()) {
+                if (items.is_empty()) {
                     result_object->put_direct(done_offset, JS::Value(true));
                     return result_object;
                 }
 
-                auto& object = objects_with_properties.last();
+                auto key = move(items.take_first().key);
 
-                if (object.property_names.is_empty()
-                    || !object.object) {
-                    objects_with_properties.take_last();
-                    continue;
-                }
-
-                auto key = object.property_names.take_first();
-
-                // NOTE: If there is a non-enumerable property higher up the prototype chain with the same key,
-                //       we mustn't include this property even if it's enumerable (invariant no. 5 and 6)
-                if (state->non_enumerable_property_keys.contains(key))
+                // If the property is deleted, don't include it (invariant no. 2)
+                if (!TRY(iterated_object.has_property(key)))
                     continue;
 
-                auto descriptor = TRY(object.object->internal_get_own_property(key));
-                if (!descriptor.has_value())
-                    continue;
-
-                if (!*descriptor->enumerable) {
-                    state->non_enumerable_property_keys.set(move(key));
-                    continue;
-                }
+                result_object->put_direct(done_offset, JS::Value(false));
 
                 if (key.is_number())
                     result_object->put_direct(value_offset, PrimitiveString::create(vm, String::number(key.as_number())));
@@ -1800,12 +1794,11 @@ inline ThrowCompletionOr<Object*> get_object_property_iterator(VM& vm, Value val
                 else
                     VERIFY_NOT_REACHED(); // We should not have non-string/number keys.
 
-                result_object->put_direct(done_offset, JS::Value(false));
                 return result_object;
             }
         },
         1, vm.names.next);
-    return realm.create<IteratorRecord>(realm, object, callback, false).ptr();
+    return vm.heap().allocate<IteratorRecord>(object, callback, false);
 }
 
 ByteString Instruction::to_byte_string(Bytecode::Executable const& executable) const
@@ -2844,13 +2837,11 @@ void PrepareYield::execute_impl(Bytecode::Interpreter& interpreter) const
 void Await::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto yielded_value = interpreter.get(m_argument).value_or(js_undefined());
-    auto object = Object::create(interpreter.realm(), nullptr);
-    object->define_direct_property("result", yielded_value, JS::default_attributes);
     // FIXME: If we get a pointer, which is not accurately representable as a double
     //        will cause this to explode
-    object->define_direct_property("continuation", Value(m_continuation_label.address()), JS::default_attributes);
-    object->define_direct_property("isAwait", Value(true), JS::default_attributes);
-    interpreter.do_return(object);
+    auto continuation_value = Value(m_continuation_label.address());
+    auto result = interpreter.vm().heap().allocate<GeneratorResult>(yielded_value, continuation_value, true);
+    interpreter.do_return(result);
 }
 
 ThrowCompletionOr<void> GetByValue::execute_impl(Bytecode::Interpreter& interpreter) const
@@ -2916,14 +2907,14 @@ ThrowCompletionOr<void> GetIterator::execute_impl(Bytecode::Interpreter& interpr
 
 ThrowCompletionOr<void> GetObjectFromIteratorRecord::execute_impl(Bytecode::Interpreter& interpreter) const
 {
-    auto& iterator_record = as<IteratorRecord>(interpreter.get(m_iterator_record).as_object());
+    auto& iterator_record = static_cast<IteratorRecord&>(interpreter.get(m_iterator_record).as_cell());
     interpreter.set(m_object, iterator_record.iterator);
     return {};
 }
 
 ThrowCompletionOr<void> GetNextMethodFromIteratorRecord::execute_impl(Bytecode::Interpreter& interpreter) const
 {
-    auto& iterator_record = as<IteratorRecord>(interpreter.get(m_iterator_record).as_object());
+    auto& iterator_record = static_cast<IteratorRecord&>(interpreter.get(m_iterator_record).as_cell());
     interpreter.set(m_next_method, iterator_record.next_method);
     return {};
 }
@@ -2939,14 +2930,15 @@ ThrowCompletionOr<void> GetMethod::execute_impl(Bytecode::Interpreter& interpret
 
 ThrowCompletionOr<void> GetObjectPropertyIterator::execute_impl(Bytecode::Interpreter& interpreter) const
 {
-    interpreter.set(dst(), TRY(get_object_property_iterator(interpreter.vm(), interpreter.get(object()))));
+    auto iterator_record = TRY(get_object_property_iterator(interpreter.vm(), interpreter.get(object())));
+    interpreter.set(dst(), iterator_record);
     return {};
 }
 
 ThrowCompletionOr<void> IteratorClose::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
-    auto& iterator = as<IteratorRecord>(interpreter.get(m_iterator_record).as_object());
+    auto& iterator = static_cast<IteratorRecord&>(interpreter.get(m_iterator_record).as_cell());
 
     // FIXME: Return the value of the resulting completion. (Note that m_completion_value can be empty!)
     TRY(iterator_close(vm, iterator, Completion { m_completion_type, m_completion_value }));
@@ -2956,7 +2948,7 @@ ThrowCompletionOr<void> IteratorClose::execute_impl(Bytecode::Interpreter& inter
 ThrowCompletionOr<void> AsyncIteratorClose::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
-    auto& iterator = as<IteratorRecord>(interpreter.get(m_iterator_record).as_object());
+    auto& iterator = static_cast<IteratorRecord&>(interpreter.get(m_iterator_record).as_cell());
 
     // FIXME: Return the value of the resulting completion. (Note that m_completion_value can be empty!)
     TRY(async_iterator_close(vm, iterator, Completion { m_completion_type, m_completion_value }));
@@ -2966,7 +2958,7 @@ ThrowCompletionOr<void> AsyncIteratorClose::execute_impl(Bytecode::Interpreter& 
 ThrowCompletionOr<void> IteratorNext::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
-    auto& iterator_record = as<IteratorRecord>(interpreter.get(m_iterator_record).as_object());
+    auto& iterator_record = static_cast<IteratorRecord&>(interpreter.get(m_iterator_record).as_cell());
     interpreter.set(dst(), TRY(iterator_next(vm, iterator_record)));
     return {};
 }
@@ -3835,6 +3827,35 @@ ByteString Dump::to_byte_string_impl(Bytecode::Executable const& executable) con
 {
     return ByteString::formatted("Dump '{}', {}", m_text,
         format_operand("value"sv, m_value, executable));
+}
+
+void GetCompletionFields::execute_impl(Bytecode::Interpreter& interpreter) const
+{
+    auto const& completion_cell = static_cast<CompletionCell const&>(interpreter.get(m_completion).as_cell());
+    interpreter.set(m_value_dst, completion_cell.completion().value().value_or(js_undefined()));
+    interpreter.set(m_type_dst, Value(to_underlying(completion_cell.completion().type())));
+}
+
+ByteString GetCompletionFields::to_byte_string_impl(Bytecode::Executable const& executable) const
+{
+    return ByteString::formatted("GetCompletionFields {}, {}, {}",
+        format_operand("value_dst"sv, m_value_dst, executable),
+        format_operand("type_dst"sv, m_type_dst, executable),
+        format_operand("completion"sv, m_completion, executable));
+}
+
+void SetCompletionType::execute_impl(Bytecode::Interpreter& interpreter) const
+{
+    auto& completion_cell = static_cast<CompletionCell&>(interpreter.get(m_completion).as_cell());
+    auto completion = completion_cell.completion();
+    completion_cell.set_completion(Completion { completion.type(), completion.value() });
+}
+
+ByteString SetCompletionType::to_byte_string_impl(Bytecode::Executable const& executable) const
+{
+    return ByteString::formatted("SetCompletionType {}, type={}",
+        format_operand("completion"sv, m_completion, executable),
+        to_underlying(m_type));
 }
 
 }

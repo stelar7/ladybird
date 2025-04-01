@@ -22,6 +22,7 @@
 #include <LibWebView/Options.h>
 #include <LibWebView/Process.h>
 #include <LibWebView/ProcessManager.h>
+#include <LibWebView/Settings.h>
 
 namespace WebView {
 
@@ -35,6 +36,8 @@ public:
 
     static Application& the() { return *s_the; }
 
+    static Settings& settings() { return the().m_settings; }
+
     static BrowserOptions const& browser_options() { return the().m_browser_options; }
     static WebContentOptions& web_content_options() { return the().m_web_content_options; }
 
@@ -42,6 +45,8 @@ public:
     static ImageDecoderClient::Client& image_decoder_client() { return *the().m_image_decoder_client; }
 
     static CookieJar& cookie_jar() { return *the().m_cookie_jar; }
+
+    static ProcessManager& process_manager() { return the().m_process_manager; }
 
     Core::EventLoop& event_loop() { return m_event_loop; }
 
@@ -56,8 +61,6 @@ public:
 #endif
     Optional<Process&> find_process(pid_t);
 
-    void send_updated_process_statistics_to_view(ViewImplementation&);
-
     ErrorOr<LexicalPath> path_for_downloaded_file(StringView file) const;
 
     enum class DevtoolsState {
@@ -69,10 +72,10 @@ public:
 
 protected:
     template<DerivedFrom<Application> ApplicationType>
-    static NonnullOwnPtr<ApplicationType> create(Main::Arguments& arguments, URL::URL new_tab_page_url)
+    static NonnullOwnPtr<ApplicationType> create(Main::Arguments& arguments)
     {
         auto app = adopt_own(*new ApplicationType { {}, arguments });
-        app->initialize(arguments, move(new_tab_page_url));
+        app->initialize(arguments);
 
         return app;
     }
@@ -87,7 +90,7 @@ protected:
     virtual Optional<ByteString> ask_user_for_download_folder() const { return {}; }
 
 private:
-    void initialize(Main::Arguments const& arguments, URL::URL new_tab_page_url);
+    void initialize(Main::Arguments const& arguments);
 
     void launch_spare_web_content_process();
     ErrorOr<void> launch_request_server();
@@ -99,9 +102,9 @@ private:
     virtual void inspect_tab(DevTools::TabDescription const&, OnTabInspectionComplete) const override;
     virtual void listen_for_dom_properties(DevTools::TabDescription const&, OnDOMNodePropertiesReceived) const override;
     virtual void stop_listening_for_dom_properties(DevTools::TabDescription const&) const override;
-    virtual void inspect_dom_node(DevTools::TabDescription const&, DOMNodeProperties::Type, Web::UniqueNodeID, Optional<Web::CSS::Selector::PseudoElement::Type>) const override;
+    virtual void inspect_dom_node(DevTools::TabDescription const&, DOMNodeProperties::Type, Web::UniqueNodeID, Optional<Web::CSS::PseudoElement>) const override;
     virtual void clear_inspected_dom_node(DevTools::TabDescription const&) const override;
-    virtual void highlight_dom_node(DevTools::TabDescription const&, Web::UniqueNodeID, Optional<Web::CSS::Selector::PseudoElement::Type>) const override;
+    virtual void highlight_dom_node(DevTools::TabDescription const&, Web::UniqueNodeID, Optional<Web::CSS::PseudoElement>) const override;
     virtual void clear_highlighted_dom_node(DevTools::TabDescription const&) const override;
     virtual void listen_for_dom_mutations(DevTools::TabDescription const&, OnDOMMutationReceived) const override;
     virtual void stop_listening_for_dom_mutations(DevTools::TabDescription const&) const override;
@@ -127,6 +130,8 @@ private:
 
     static Application* s_the;
 
+    Settings m_settings;
+
     BrowserOptions m_browser_options;
     WebContentOptions m_web_content_options;
 
@@ -150,11 +155,11 @@ private:
 
 }
 
-#define WEB_VIEW_APPLICATION(ApplicationType)                                                           \
-public:                                                                                                 \
-    static NonnullOwnPtr<ApplicationType> create(Main::Arguments& arguments, URL::URL new_tab_page_url) \
-    {                                                                                                   \
-        return WebView::Application::create<ApplicationType>(arguments, move(new_tab_page_url));        \
-    }                                                                                                   \
-                                                                                                        \
+#define WEB_VIEW_APPLICATION(ApplicationType)                                \
+public:                                                                      \
+    static NonnullOwnPtr<ApplicationType> create(Main::Arguments& arguments) \
+    {                                                                        \
+        return WebView::Application::create<ApplicationType>(arguments);     \
+    }                                                                        \
+                                                                             \
     ApplicationType(Badge<WebView::Application>, Main::Arguments&);

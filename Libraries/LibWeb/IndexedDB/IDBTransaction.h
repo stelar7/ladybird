@@ -16,8 +16,8 @@
 #include <LibWeb/DOM/EventTarget.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/IndexedDB/IDBDatabase.h>
-#include <LibWeb/IndexedDB/IDBObjectStore.h>
 #include <LibWeb/IndexedDB/IDBRequest.h>
+#include <LibWeb/IndexedDB/Internal/ObjectStore.h>
 #include <LibWeb/IndexedDB/Internal/RequestList.h>
 
 namespace Web::IndexedDB {
@@ -37,7 +37,7 @@ class IDBTransaction : public DOM::EventTarget {
 public:
     virtual ~IDBTransaction() override;
 
-    [[nodiscard]] static GC::Ref<IDBTransaction> create(JS::Realm&, GC::Ref<IDBDatabase>, Bindings::IDBTransactionMode, Bindings::IDBTransactionDurability, Vector<GC::Root<IDBObjectStore>>);
+    [[nodiscard]] static GC::Ref<IDBTransaction> create(JS::Realm&, GC::Ref<IDBDatabase>, Bindings::IDBTransactionMode, Bindings::IDBTransactionDurability, Vector<GC::Root<ObjectStore>>);
     [[nodiscard]] Bindings::IDBTransactionMode mode() const { return m_mode; }
     [[nodiscard]] TransactionState state() const { return m_state; }
     [[nodiscard]] GC::Ptr<WebIDL::DOMException> error() const { return m_error; }
@@ -46,7 +46,7 @@ public:
     [[nodiscard]] GC::Ptr<IDBRequest> associated_request() const { return m_associated_request; }
     [[nodiscard]] bool aborted() const { return m_aborted; }
     [[nodiscard]] GC::Ref<HTML::DOMStringList> object_store_names();
-    [[nodiscard]] Vector<GC::Root<IDBObjectStore>> scope() const { return m_scope; }
+    [[nodiscard]] Vector<GC::Root<ObjectStore>> scope() const { return m_scope; }
     [[nodiscard]] RequestList& request_list() { return m_request_list; }
 
     void set_mode(Bindings::IDBTransactionMode mode) { m_mode = mode; }
@@ -62,8 +62,8 @@ public:
     [[nodiscard]] bool is_finished() const { return m_state == TransactionState::Finished; }
     [[nodiscard]] bool is_complete() const { return is_finished(); }
 
-    void add_to_scope(GC::Ref<IDBObjectStore> object_store) { m_scope.append(object_store); }
-    [[nodiscard]] GC::Ptr<IDBObjectStore> object_store_named(String const& name) const;
+    void add_to_scope(GC::Ref<ObjectStore> object_store) { m_scope.append(object_store); }
+    [[nodiscard]] GC::Ptr<ObjectStore> object_store_named(String const& name) const;
     [[nodiscard]] String uuid() const { return m_uuid; }
 
     WebIDL::ExceptionOr<void> abort();
@@ -78,7 +78,7 @@ public:
     WebIDL::CallbackType* onerror();
 
 protected:
-    explicit IDBTransaction(JS::Realm&, GC::Ref<IDBDatabase>, Bindings::IDBTransactionMode, Bindings::IDBTransactionDurability, Vector<GC::Root<IDBObjectStore>>);
+    explicit IDBTransaction(JS::Realm&, GC::Ref<IDBDatabase>, Bindings::IDBTransactionMode, Bindings::IDBTransactionDurability, Vector<GC::Root<ObjectStore>>);
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Visitor& visitor) override;
 
@@ -105,7 +105,7 @@ private:
     bool m_aborted { false };
 
     // A transaction has a scope which is a set of object stores that the transaction may interact with.
-    Vector<GC::Root<IDBObjectStore>> m_scope;
+    Vector<GC::Root<ObjectStore>> m_scope;
 
     // A transaction has a request list of pending requests which have been made against the transaction.
     RequestList m_request_list;

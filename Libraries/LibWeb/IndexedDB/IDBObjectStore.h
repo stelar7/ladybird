@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024, stelar7 <dudedbz@gmail.com>
+ * Copyright (c) 2024-2025, stelar7 <dudedbz@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -17,61 +17,46 @@
 #include <LibWeb/Bindings/IDBCursorPrototype.h>
 #include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/HTML/StructuredSerializeTypes.h>
-#include <LibWeb/IndexedDB/IDBIndex.h>
 #include <LibWeb/IndexedDB/IDBRequest.h>
 #include <LibWeb/IndexedDB/IDBTransaction.h>
 #include <LibWeb/IndexedDB/Internal/Algorithms.h>
 #include <LibWeb/IndexedDB/Internal/Key.h>
 #include <LibWeb/IndexedDB/Internal/KeyGenerator.h>
+#include <LibWeb/IndexedDB/Internal/ObjectStore.h>
 
 namespace Web::IndexedDB {
+
+using KeyPath = Variant<String, Vector<String>>;
 
 struct IDBIndexParameters {
     bool unique { false };
     bool multi_entry { false };
 };
 
-// https://w3c.github.io/IndexedDB/#object-store-record
-struct Record {
-    GC::Ref<Key> key;
-    HTML::SerializationRecord value;
-};
-
 // https://w3c.github.io/IndexedDB/#object-store-interface
+// https://w3c.github.io/IndexedDB/#object-store-handle-construct
 class IDBObjectStore : public Bindings::PlatformObject {
     WEB_PLATFORM_OBJECT(IDBObjectStore, Bindings::PlatformObject);
     GC_DECLARE_ALLOCATOR(IDBObjectStore);
 
 public:
+    [[nodiscard]] static GC::Ref<IDBObjectStore> create(JS::Realm&, GC::Ref<ObjectStore>, GC::Ref<IDBTransaction>);
+
     String name() const { return m_name; }
-    void set_name(String name) { m_name = move(name); }
+    WebIDL::ExceptionOr<void> set_name(String const& value);
 
-    bool auto_increment() const { return m_auto_increment; }
-    Optional<KeyPath> internal_key_path() const { return m_key_path; }
-    JS::Value key_path() const
-    {
-        if (!m_key_path.has_value())
-            return JS::js_null();
-
-        return m_key_path.value().visit(
-            [&](String const& value) -> JS::Value { return JS::PrimitiveString::create(realm().vm(), value); },
-            [&](Vector<String> const& value) -> JS::Value { return JS::Array::create_from<String>(realm(), value.span(), [&](auto const& entry) -> JS::Value {
-                                                                return JS::PrimitiveString::create(realm().vm(), entry);
-                                                            }); });
-    }
+    bool auto_increment() const;
+    JS::Value key_path() const;
 
     // If the object store has a key path it is said to use in-line keys. Otherwise it is said to use out-of-line keys.
-    bool uses_inline_keys() const { return m_key_path.has_value(); }
-    bool uses_out_of_line_keys() const { return !m_key_path.has_value(); }
-
-    Optional<KeyGenerator> key_generator() const { return m_key_generator; }
-
-    [[nodiscard]] Vector<Record> records() const { return m_records; }
+    bool uses_inline_keys() const;
+    bool uses_out_of_line_keys() const;
 
     void set_transaction(GC::Ref<IDBTransaction> transaction) { m_transaction = transaction; }
     GC::Ref<IDBTransaction> transaction() { return m_transaction; }
-    AK::ReadonlySpan<GC::Ref<IDBIndex>> index_set() const { return m_indexes; }
-    void add_index(GC::Ref<IDBIndex> index) { m_indexes.append(index); }
+    GC::Ref<ObjectStore> store() { return m_store; }
+    AK::ReadonlySpan<GC::Ref<Index>> index_set() const { return m_indexes; }
+    void add_index(GC::Ref<Index> index) { m_indexes.append(index); }
 
     [[nodiscard]] WebIDL::ExceptionOr<GC::Ref<IDBRequest>> count(Optional<JS::Value>);
     WebIDL::ExceptionOr<GC::Ref<IDBIndex>> create_index(String const&, KeyPath, IDBIndexParameters options = {});
@@ -88,35 +73,22 @@ public:
     [[nodiscard]] bool has_record_with_key(GC::Ref<Key> key);
     void remove_records_in_range(GC::Ref<IDBKeyRange>);
     void store_a_record(Record const&);
-    [[nodiscard]] u64 count_records_in_range(GC::Ref<IDBKeyRange>);
-    Optional<Record> first_in_range(GC::Ref<IDBKeyRange>);
 
 protected:
-    explicit IDBObjectStore(JS::Realm&, String, bool, Optional<KeyPath> const&, GC::Ref<IDBTransaction>);
+    explicit IDBObjectStore(JS::Realm&, GC::Ref<ObjectStore>, GC::Ref<IDBTransaction>);
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Visitor& visitor) override;
 
 private:
-    // An object store has a name, which is a name. At any one time, the name is unique within the database to which it belongs.
-    String m_name;
+    // An object store handle has an index set
+    Vector<GC::Ref<Index>> m_indexes;
 
-    // An object store optionally has a key path.
-    Optional<KeyPath> m_key_path;
-
-    // If autoIncrement is true, then the created object store uses a key generator.
-    bool m_auto_increment { false };
-
-    // An object store optionally has a key generator.
-    Optional<KeyGenerator> m_key_generator;
-
-    // An object store handle has an associated transaction.
+    // An object store handle has an associated object store and an associated transaction.
+    GC::Ref<ObjectStore> m_store;
     GC::Ref<IDBTransaction> m_transaction;
 
-    // An object store handle has an index set
-    Vector<GC::Ref<IDBIndex>> m_indexes;
-
-    // An object store has a list of records
-    Vector<Record> m_records;
+    // An object store handle has a name, which is initialized to the name of the associated object store when the object store handle is created.
+    String m_name;
 };
 
 }

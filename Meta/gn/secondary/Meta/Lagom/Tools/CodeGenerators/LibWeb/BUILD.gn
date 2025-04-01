@@ -52,6 +52,14 @@ lagom_tool("GenerateCSSPseudoClass") {
   ]
 }
 
+lagom_tool("GenerateCSSPseudoElement") {
+  sources = [ "GenerateCSSPseudoElement.cpp" ]
+  deps = [
+    ":headers",
+    "//Userland/Libraries/LibMain",
+  ]
+}
+
 lagom_tool("GenerateCSSTransformFunctions") {
   sources = [ "GenerateCSSTransformFunctions.cpp" ]
   deps = [
@@ -73,6 +81,14 @@ lagom_tool("GenerateWindowOrWorkerInterfaces") {
   deps = [
     ":headers",
     "//Userland/Libraries/LibIDL",
+    "//Userland/Libraries/LibMain",
+  ]
+}
+
+lagom_tool("GenerateNamedCharacterReferences") {
+  sources = [ "GenerateNamedCharacterReferences.cpp" ]
+  deps = [
+    ":headers",
     "//Userland/Libraries/LibMain",
   ]
 }

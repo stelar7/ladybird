@@ -40,7 +40,6 @@ public:
         Array,
     };
 
-public:
     [[nodiscard]] static GC::Ref<Key> create(JS::Realm&, KeyType, KeyValue);
     virtual ~Key();
 

@@ -15,8 +15,10 @@ class CookieJar;
 class Database;
 class OutOfProcessWebView;
 class ProcessManager;
+class Settings;
 class ViewImplementation;
 class WebContentClient;
+class WebUI;
 
 struct Attribute;
 struct ConsoleOutput;

@@ -1342,7 +1342,7 @@ Messages::WebDriverClient::GetElementPropertyResponse WebDriverConnection::get_e
         // 5. Let property be the result of calling the Object.[[GetProperty]](name) on element.
         Web::HTML::TemporaryExecutionContext execution_context { current_browsing_context().active_document()->realm() };
 
-        if (auto property_or_error = element->get(name.to_byte_string()); !property_or_error.is_throw_completion()) {
+        if (auto property_or_error = element->get(name); !property_or_error.is_throw_completion()) {
             auto property = property_or_error.release_value();
 
             // 6. Let result be the value of property if not undefined, or null.
@@ -3090,7 +3090,7 @@ void WebDriverConnection::delete_cookies(Optional<StringView> const& name)
 }
 
 // https://w3c.github.io/webdriver/#dfn-calculate-the-absolute-position
-Gfx::IntPoint WebDriverConnection::calculate_absolute_position_of_element(GC::Ref<Web::Geometry::DOMRect> rect)
+Gfx::IntPoint WebDriverConnection::calculate_absolute_position_of_element(Web::CSSPixelRect rect)
 {
     // 1. Let rect be the value returned by calling getBoundingClientRect().
 
@@ -3098,10 +3098,10 @@ Gfx::IntPoint WebDriverConnection::calculate_absolute_position_of_element(GC::Re
     auto const* window = current_top_level_browsing_context()->active_window();
 
     // 3. Let x be (scrollX of window + rect’s x coordinate).
-    auto x = (window ? static_cast<int>(window->scroll_x()) : 0) + static_cast<int>(rect->x());
+    auto x = (window ? static_cast<int>(window->scroll_x()) : 0) + static_cast<int>(rect.x());
 
     // 4. Let y be (scrollY of window + rect’s y coordinate).
-    auto y = (window ? static_cast<int>(window->scroll_y()) : 0) + static_cast<int>(rect->y());
+    auto y = (window ? static_cast<int>(window->scroll_y()) : 0) + static_cast<int>(rect.y());
 
     // 5. Return a pair of (x, y).
     return { x, y };
@@ -3115,8 +3115,8 @@ Gfx::IntRect WebDriverConnection::calculate_absolute_rect_of_element(Web::DOM::E
     return {
         coordinates.x(),
         coordinates.y(),
-        static_cast<int>(bounding_rect->width()),
-        static_cast<int>(bounding_rect->height())
+        static_cast<int>(bounding_rect.width()),
+        static_cast<int>(bounding_rect.height())
     };
 }
 

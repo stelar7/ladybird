@@ -63,6 +63,7 @@
 #include <LibWeb/DOM/DocumentType.h>
 #include <LibWeb/DOM/EditingHostManager.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/DOM/ElementByIdMap.h>
 #include <LibWeb/DOM/ElementFactory.h>
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/DOM/HTMLCollection.h>
@@ -482,6 +483,7 @@ void Document::initialize(JS::Realm& realm)
 {
     Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(Document);
+    Bindings::DocumentPrototype::define_unforgeable_attributes(realm, *this);
 
     m_selection = realm.create<Selection::Selection>(realm, *this);
 
@@ -1320,6 +1322,9 @@ void Document::update_layout(UpdateLayoutReason reason)
     }
 
     m_layout_root->for_each_in_inclusive_subtree_of_type<Layout::Box>([&](auto& child) {
+        if (auto dom_node = child.dom_node(); dom_node && dom_node->is_element()) {
+            child.set_has_size_containment(as<Element>(*dom_node).has_size_containment());
+        }
         bool needs_layout_update = child.dom_node() && child.dom_node()->needs_layout_update();
         if (needs_layout_update || child.is_anonymous()) {
             child.reset_cached_intrinsic_sizes();
@@ -1329,7 +1334,7 @@ void Document::update_layout(UpdateLayoutReason reason)
     });
 
     // Assign each box that establishes a formatting context a list of absolutely positioned children it should take care of during layout
-    m_layout_root->for_each_in_inclusive_subtree([&](auto& child) {
+    m_layout_root->for_each_in_inclusive_subtree_of_type<Layout::Box>([&](auto& child) {
         if (!child.is_absolutely_positioned())
             return TraversalDecision::Continue;
         if (auto* containing_block = child.containing_block()) {
@@ -1685,7 +1690,7 @@ void Document::set_inspected_node(GC::Ptr<Node> node)
     m_inspected_node = node;
 }
 
-void Document::set_highlighted_node(GC::Ptr<Node> node, Optional<CSS::Selector::PseudoElement::Type> pseudo_element)
+void Document::set_highlighted_node(GC::Ptr<Node> node, Optional<CSS::PseudoElement> pseudo_element)
 {
     if (m_highlighted_node == node && m_highlighted_pseudo_element == pseudo_element)
         return;
@@ -1797,12 +1802,12 @@ void Document::invalidate_style_for_elements_affected_by_hover_change(Node& old_
         SelectorEngine::MatchContext context;
         if (SelectorEngine::matches(selector, element, {}, context, {}))
             return true;
-        if (element.has_pseudo_element(CSS::Selector::PseudoElement::Type::Before)) {
-            if (SelectorEngine::matches(selector, element, {}, context, CSS::Selector::PseudoElement::Type::Before))
+        if (element.has_pseudo_element(CSS::PseudoElement::Before)) {
+            if (SelectorEngine::matches(selector, element, {}, context, CSS::PseudoElement::Before))
                 return true;
         }
-        if (element.has_pseudo_element(CSS::Selector::PseudoElement::Type::After)) {
-            if (SelectorEngine::matches(selector, element, {}, context, CSS::Selector::PseudoElement::Type::After))
+        if (element.has_pseudo_element(CSS::PseudoElement::After)) {
+            if (SelectorEngine::matches(selector, element, {}, context, CSS::PseudoElement::After))
                 return true;
         }
         return false;
@@ -4585,7 +4590,7 @@ void Document::queue_an_intersection_observer_entry(IntersectionObserver::Inters
 }
 
 // https://www.w3.org/TR/intersection-observer/#compute-the-intersection
-static GC::Ref<Geometry::DOMRectReadOnly> compute_intersection(GC::Ref<Element> target, IntersectionObserver::IntersectionObserver const& observer)
+static CSSPixelRect compute_intersection(GC::Ref<Element> target, IntersectionObserver::IntersectionObserver const& observer)
 {
     // 1. Let intersectionRect be the result of getting the bounding box for target.
     auto intersection_rect = target->get_bounding_client_rect();
@@ -4604,12 +4609,7 @@ static GC::Ref<Geometry::DOMRectReadOnly> compute_intersection(GC::Ref<Element> 
     // 5. Update intersectionRect by intersecting it with the root intersection rectangle.
     // FIXME: Pass in target so we can properly apply rootMargin.
     auto root_intersection_rectangle = observer.root_intersection_rectangle();
-    CSSPixelRect intersection_rect_as_pixel_rect(intersection_rect->x(), intersection_rect->y(), intersection_rect->width(), intersection_rect->height());
-    intersection_rect_as_pixel_rect.intersect(root_intersection_rectangle);
-    intersection_rect->set_x(static_cast<double>(intersection_rect_as_pixel_rect.x()));
-    intersection_rect->set_y(static_cast<double>(intersection_rect_as_pixel_rect.y()));
-    intersection_rect->set_width(static_cast<double>(intersection_rect_as_pixel_rect.width()));
-    intersection_rect->set_height(static_cast<double>(intersection_rect_as_pixel_rect.height()));
+    intersection_rect.intersect(root_intersection_rectangle);
 
     // FIXME: 6. Map intersectionRect to the coordinate space of the viewport of the document containing target.
 
@@ -4647,10 +4647,10 @@ void Document::run_the_update_intersection_observations_steps(HighResolutionTime
             bool is_intersecting = false;
 
             // targetRect be a DOMRectReadOnly with x, y, width, and height set to 0.
-            auto target_rect = Geometry::DOMRectReadOnly::construct_impl(realm, 0, 0, 0, 0).release_value_but_fixme_should_propagate_errors();
+            CSSPixelRect target_rect { 0, 0, 0, 0 };
 
             // intersectionRect be a DOMRectReadOnly with x, y, width, and height set to 0.
-            auto intersection_rect = Geometry::DOMRectReadOnly::construct_impl(realm, 0, 0, 0, 0).release_value_but_fixme_should_propagate_errors();
+            CSSPixelRect intersection_rect { 0, 0, 0, 0 };
 
             // SPEC ISSUE: It doesn't pass in intersection ratio to "queue an IntersectionObserverEntry" despite needing it.
             //             This is default 0, as isIntersecting is default false, see step 9.
@@ -4673,20 +4673,19 @@ void Document::run_the_update_intersection_observations_steps(HighResolutionTime
                 intersection_rect = compute_intersection(target, observer);
 
                 // 6. Let targetArea be targetRect’s area.
-                auto target_area = target_rect->width() * target_rect->height();
+                auto target_area = target_rect.width() * target_rect.height();
 
                 // 7. Let intersectionArea be intersectionRect’s area.
-                auto intersection_area = intersection_rect->width() * intersection_rect->height();
+                auto intersection_area = intersection_rect.size().area();
 
                 // 8. Let isIntersecting be true if targetRect and rootBounds intersect or are edge-adjacent, even if the
                 //    intersection has zero area (because rootBounds or targetRect have zero area).
-                CSSPixelRect target_rect_as_pixel_rect(target_rect->x(), target_rect->y(), target_rect->width(), target_rect->height());
-                is_intersecting = target_rect_as_pixel_rect.edge_adjacent_intersects(root_bounds);
+                is_intersecting = target_rect.edge_adjacent_intersects(root_bounds);
 
                 // 9. If targetArea is non-zero, let intersectionRatio be intersectionArea divided by targetArea.
                 //    Otherwise, let intersectionRatio be 1 if isIntersecting is true, or 0 if isIntersecting is false.
                 if (target_area != 0.0)
-                    intersection_ratio = intersection_area / target_area;
+                    intersection_ratio = (intersection_area / target_area).to_double();
                 else
                     intersection_ratio = is_intersecting ? 1.0 : 0.0;
 
@@ -4716,7 +4715,9 @@ void Document::run_the_update_intersection_observations_steps(HighResolutionTime
                 auto root_bounds_as_dom_rect = Geometry::DOMRectReadOnly::construct_impl(realm, static_cast<double>(root_bounds.x()), static_cast<double>(root_bounds.y()), static_cast<double>(root_bounds.width()), static_cast<double>(root_bounds.height())).release_value_but_fixme_should_propagate_errors();
 
                 // SPEC ISSUE: It doesn't pass in intersectionRatio, but it's required.
-                queue_an_intersection_observer_entry(observer, time, root_bounds_as_dom_rect, target_rect, intersection_rect, is_intersecting, intersection_ratio, target);
+                auto target_dom_rect = MUST(Geometry::DOMRectReadOnly::construct_impl(realm, static_cast<double>(target_rect.x()), static_cast<double>(target_rect.y()), static_cast<double>(target_rect.width()), static_cast<double>(target_rect.height())));
+                auto intersection_dom_rect = MUST(Geometry::DOMRectReadOnly::construct_impl(realm, static_cast<double>(intersection_rect.x()), static_cast<double>(intersection_rect.y()), static_cast<double>(intersection_rect.width()), static_cast<double>(intersection_rect.height())));
+                queue_an_intersection_observer_entry(observer, time, root_bounds_as_dom_rect, target_dom_rect, intersection_dom_rect, is_intersecting, intersection_ratio, target);
             }
 
             // 15. Assign thresholdIndex to intersectionObserverRegistration’s previousThresholdIndex property.
@@ -4741,7 +4742,7 @@ void Document::start_intersection_observing_a_lazy_loading_element(Element& elem
     // 2. If doc's lazy load intersection observer is null, set it to a new IntersectionObserver instance, initialized as follows:
     if (!m_lazy_load_intersection_observer) {
         // - The callback is these steps, with arguments entries and observer:
-        auto callback = JS::NativeFunction::create(realm, "", [this](JS::VM& vm) -> JS::ThrowCompletionOr<JS::Value> {
+        auto callback = JS::NativeFunction::create(realm, ""_fly_string, [this](JS::VM& vm) -> JS::ThrowCompletionOr<JS::Value> {
             // For each entry in entries using a method of iteration which does not trigger developer-modifiable array accessors or iteration hooks:
             auto& entries = as<JS::Array>(vm.argument(0).as_object());
             auto entries_length = MUST(MUST(entries.get(vm.names.length)).to_length(vm));
@@ -5349,7 +5350,7 @@ static void insert_in_tree_order(Vector<GC::Ref<DOM::Element>>& elements, DOM::E
         elements.append(element);
 }
 
-void Document::element_id_changed(Badge<DOM::Element>, GC::Ref<DOM::Element> element)
+void Document::element_id_changed(Badge<DOM::Element>, GC::Ref<DOM::Element> element, Optional<FlyString> old_id)
 {
     for (auto* form_associated_element : m_form_associated_elements_with_form_attribute)
         form_associated_element->element_id_changed({});
@@ -5358,6 +5359,14 @@ void Document::element_id_changed(Badge<DOM::Element>, GC::Ref<DOM::Element> ele
         insert_in_tree_order(m_potentially_named_elements, element);
     else
         (void)m_potentially_named_elements.remove_first_matching([element](auto& e) { return e == element; });
+
+    auto new_id = element->id();
+    if (old_id.has_value()) {
+        element->document_or_shadow_root_element_by_id_map().remove(old_id.value(), element);
+    }
+    if (new_id.has_value()) {
+        element->document_or_shadow_root_element_by_id_map().add(new_id.value(), element);
+    }
 }
 
 void Document::element_with_id_was_added(Badge<DOM::Element>, GC::Ref<DOM::Element> element)
@@ -5367,6 +5376,10 @@ void Document::element_with_id_was_added(Badge<DOM::Element>, GC::Ref<DOM::Eleme
 
     if (is_potentially_named_element_by_id(*element))
         insert_in_tree_order(m_potentially_named_elements, element);
+
+    if (auto id = element->id(); id.has_value()) {
+        element->document_or_shadow_root_element_by_id_map().add(id.value(), element);
+    }
 }
 
 void Document::element_with_id_was_removed(Badge<DOM::Element>, GC::Ref<DOM::Element> element)
@@ -5376,6 +5389,10 @@ void Document::element_with_id_was_removed(Badge<DOM::Element>, GC::Ref<DOM::Ele
 
     if (is_potentially_named_element_by_id(*element))
         (void)m_potentially_named_elements.remove_first_matching([element](auto& e) { return e == element; });
+
+    if (auto id = element->id(); id.has_value()) {
+        element->document_or_shadow_root_element_by_id_map().remove(id.value(), element);
+    }
 }
 
 void Document::element_name_changed(Badge<DOM::Element>, GC::Ref<DOM::Element> element)
@@ -6443,6 +6460,22 @@ WebIDL::CallbackType* Document::onvisibilitychange()
 void Document::set_onvisibilitychange(WebIDL::CallbackType* value)
 {
     set_event_handler_attribute(HTML::EventNames::visibilitychange, value);
+}
+
+ElementByIdMap& Document::element_by_id() const
+{
+    if (!m_element_by_id)
+        m_element_by_id = make<ElementByIdMap>();
+    return *m_element_by_id;
+}
+
+GC::Ptr<Element> ElementByIdMap::get(FlyString const& element_id) const
+{
+    if (auto elements = m_map.get(element_id); elements.has_value() && !elements->is_empty()) {
+        if (auto element = elements->first(); element.has_value())
+            return *element;
+    }
+    return {};
 }
 
 StringView to_string(SetNeedsLayoutReason reason)

@@ -27,6 +27,7 @@ namespace WebView {
 Application* Application::s_the = nullptr;
 
 Application::Application()
+    : m_settings(Settings::create({}))
 {
     VERIFY(!s_the);
     s_the = this;
@@ -57,7 +58,7 @@ Application::~Application()
     s_the = nullptr;
 }
 
-void Application::initialize(Main::Arguments const& arguments, URL::URL new_tab_page_url)
+void Application::initialize(Main::Arguments const& arguments)
 {
 #ifndef AK_OS_WINDOWS
     // Increase the open file limit, as the default limits on Linux cause us to run out of file descriptors with around 15 tabs open.
@@ -152,9 +153,8 @@ void Application::initialize(Main::Arguments const& arguments, URL::URL new_tab_
         disable_site_isolation = true;
 
     m_browser_options = {
-        .urls = sanitize_urls(raw_urls, new_tab_page_url),
+        .urls = sanitize_urls(raw_urls, m_settings.new_tab_page_url()),
         .raw_urls = move(raw_urls),
-        .new_tab_page_url = move(new_tab_page_url),
         .certificates = move(certificates),
         .new_window = new_window ? NewWindow::Yes : NewWindow::No,
         .force_new_process = force_new_process ? ForceNewProcess::Yes : ForceNewProcess::No,
@@ -323,19 +323,6 @@ Optional<Process&> Application::find_process(pid_t pid)
     return m_process_manager.find_process(pid);
 }
 
-void Application::send_updated_process_statistics_to_view(ViewImplementation& view)
-{
-    m_process_manager.update_all_process_statistics();
-    auto statistics = m_process_manager.serialize_json();
-
-    StringBuilder builder;
-    builder.append("processes.loadProcessStatistics(\""sv);
-    builder.append_escaped_for_json(statistics);
-    builder.append("\");"sv);
-
-    view.run_javascript(MUST(builder.to_string()));
-}
-
 void Application::process_did_exit(Process&& process)
 {
     if (m_in_shutdown)
@@ -469,7 +456,7 @@ void Application::stop_listening_for_dom_properties(DevTools::TabDescription con
     view->on_received_dom_node_properties = nullptr;
 }
 
-void Application::inspect_dom_node(DevTools::TabDescription const& description, DOMNodeProperties::Type property_type, Web::UniqueNodeID node_id, Optional<Web::CSS::Selector::PseudoElement::Type> pseudo_element) const
+void Application::inspect_dom_node(DevTools::TabDescription const& description, DOMNodeProperties::Type property_type, Web::UniqueNodeID node_id, Optional<Web::CSS::PseudoElement> pseudo_element) const
 {
     auto view = ViewImplementation::find_view_by_id(description.id);
     if (!view.has_value())
@@ -484,7 +471,7 @@ void Application::clear_inspected_dom_node(DevTools::TabDescription const& descr
         view->clear_inspected_dom_node();
 }
 
-void Application::highlight_dom_node(DevTools::TabDescription const& description, Web::UniqueNodeID node_id, Optional<Web::CSS::Selector::PseudoElement::Type> pseudo_element) const
+void Application::highlight_dom_node(DevTools::TabDescription const& description, Web::UniqueNodeID node_id, Optional<Web::CSS::PseudoElement> pseudo_element) const
 {
     if (auto view = ViewImplementation::find_view_by_id(description.id); view.has_value())
         view->highlight_dom_node(node_id, pseudo_element);
@@ -700,7 +687,7 @@ void Application::listen_for_console_messages(DevTools::TabDescription const& de
         return;
 
     view->on_console_message_available = move(on_console_message_available);
-    view->on_received_unstyled_console_messages = move(on_received_console_output);
+    view->on_received_console_messages = move(on_received_console_output);
     view->js_console_request_messages(0);
 }
 
@@ -711,7 +698,7 @@ void Application::stop_listening_for_console_messages(DevTools::TabDescription c
         return;
 
     view->on_console_message_available = nullptr;
-    view->on_received_unstyled_console_messages = nullptr;
+    view->on_received_console_messages = nullptr;
 }
 
 void Application::request_console_messages(DevTools::TabDescription const& description, i32 start_index) const

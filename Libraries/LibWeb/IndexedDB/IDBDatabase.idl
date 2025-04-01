@@ -1,6 +1,7 @@
 #import <DOM/EventTarget.idl>
 #import <DOM/EventHandler.idl>
 #import <IndexedDB/IDBTransaction.idl>
+#import <IndexedDB/IDBObjectStore.idl>
 
 [Exposed=(Window,Worker)]
 interface IDBDatabase : EventTarget {

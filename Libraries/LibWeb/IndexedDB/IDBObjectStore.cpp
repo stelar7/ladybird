@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024, stelar7 <dudedbz@gmail.com>
+ * Copyright (c) 2024-2025, stelar7 <dudedbz@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -7,9 +7,11 @@
 #include <AK/Format.h>
 #include <AK/Optional.h>
 #include <AK/QuickSort.h>
+#include <AK/String.h>
 #include <AK/Vector.h>
 #include <LibGC/Function.h>
 #include <LibGC/Ptr.h>
+#include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/Value.h>
 #include <LibWeb/Bindings/IDBObjectStorePrototype.h>
 #include <LibWeb/Bindings/Intrinsics.h>
@@ -32,22 +34,18 @@ GC_DEFINE_ALLOCATOR(IDBObjectStore);
 
 IDBObjectStore::~IDBObjectStore() = default;
 
-IDBObjectStore::IDBObjectStore(JS::Realm& realm, String name, bool auto_increment, Optional<KeyPath> const& key_path, GC::Ref<IDBTransaction> transaction)
+IDBObjectStore::IDBObjectStore(JS::Realm& realm, GC::Ref<ObjectStore> store, GC::Ref<IDBTransaction> transaction)
     : PlatformObject(realm)
-    , m_name(move(name))
-    , m_key_path(key_path)
-    , m_auto_increment(auto_increment)
+    , m_store(store)
     , m_transaction(transaction)
+    , m_name(store->name())
 {
-    transaction->add_to_scope(*this);
-
-    if (m_auto_increment)
-        m_key_generator = KeyGenerator {};
+    transaction->add_to_scope(store);
 }
 
-GC::Ref<IDBObjectStore> IDBObjectStore::create(JS::Realm& realm, String name, bool auto_increment, Optional<KeyPath> const& key_path, GC::Ref<IDBTransaction> transaction)
+GC::Ref<IDBObjectStore> IDBObjectStore::create(JS::Realm& realm, GC::Ref<ObjectStore> store, GC::Ref<IDBTransaction> transaction)
 {
-    return realm.create<IDBObjectStore>(realm, name, auto_increment, key_path, transaction);
+    return realm.create<IDBObjectStore>(realm, store, transaction);
 }
 
 void IDBObjectStore::initialize(JS::Realm& realm)
@@ -61,6 +59,25 @@ void IDBObjectStore::visit_edges(Visitor& visitor)
     Base::visit_edges(visitor);
     visitor.visit(m_transaction);
     visitor.visit(m_indexes);
+    visitor.visit(m_store);
+}
+
+// https://w3c.github.io/IndexedDB/#object-store-in-line-keys
+bool IDBObjectStore::uses_inline_keys() const
+{
+    return m_store->uses_inline_keys();
+}
+
+// https://w3c.github.io/IndexedDB/#object-store-in-line-keys
+bool IDBObjectStore::uses_out_of_line_keys() const
+{
+    return m_store->uses_out_of_line_keys();
+}
+
+// https://w3c.github.io/IndexedDB/#dom-idbobjectstore-autoincrement
+bool IDBObjectStore::auto_increment() const
+{
+    return m_store->key_generator().has_value();
 }
 
 WebIDL::ExceptionOr<GC::Ref<IDBIndex>> IDBObjectStore::create_index(String const& name, KeyPath key_path, IDBIndexParameters options)
@@ -71,7 +88,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBIndex>> IDBObjectStore::create_index(String const
     auto transaction = this->transaction();
 
     // 2. Let store be this's object store.
-    auto& store = *this;
+    auto store = this->store();
 
     // 3. If transaction is not an upgrade transaction, throw an "InvalidStateError" DOMException.
     if (transaction->mode() != Bindings::IDBTransactionMode::Versionchange)
@@ -84,7 +101,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBIndex>> IDBObjectStore::create_index(String const
         return WebIDL::TransactionInactiveError::create(realm, "Transaction is not active while creating index"_string);
 
     // 6. If an index named name already exists in store, throw a "ConstraintError" DOMException.
-    for (auto const& index : store.index_set()) {
+    for (auto const& index : store->index_set()) {
         if (index->name() == name)
             return WebIDL::ConstraintError::create(realm, "An index with the given name already exists"_string);
     }
@@ -105,13 +122,13 @@ WebIDL::ExceptionOr<GC::Ref<IDBIndex>> IDBObjectStore::create_index(String const
 
     // 11. Let index be a new index in store.
     //     Set index’s name to name, key path to keyPath, unique flag to unique, and multiEntry flag to multiEntry.
-    auto index = IDBIndex::create(realm, store, name, key_path, unique, multi_entry);
+    auto index = Index::create(realm, store, name, key_path, unique, multi_entry);
 
     // 12. Add index to this's index set.
     this->add_index(index);
 
     // 13. Return a new index handle associated with index and this.
-    return index;
+    return IDBIndex::create(realm, index, *this);
 }
 
 // https://w3c.github.io/IndexedDB/#dom-idbobjectstore-indexnames
@@ -135,7 +152,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::add_or_put(GC::Ref<IDBO
     auto transaction = handle->transaction();
 
     // 2. Let store be handle’s object store.
-    auto& store = *handle;
+    auto& store = *handle->m_store;
 
     // FIXME: 3. If store has been deleted, throw an "InvalidStateError" DOMException.
 
@@ -179,7 +196,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::add_or_put(GC::Ref<IDBO
     // 11. If store uses in-line keys, then:
     if (store.uses_inline_keys()) {
         // 1. Let kpk be the result of extracting a key from a value using a key path with clone and store’s key path. Rethrow any exceptions.
-        auto kpk = extract_a_key_from_a_value_using_a_key_path(realm, clone, store.internal_key_path().value());
+        auto kpk = extract_a_key_from_a_value_using_a_key_path(realm, clone, store.key_path().value());
 
         // 2. If kpk is invalid, throw a "DataError" DOMException.
         if (kpk.is_error())
@@ -199,7 +216,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::add_or_put(GC::Ref<IDBO
                 return WebIDL::DataError::create(realm, "Store does not have a key generator"_string);
 
             // 2. Otherwise, if check that a key could be injected into a value with clone and store’s key path return false, throw a "DataError" DOMException.
-            if (!check_that_a_key_could_be_injected_into_a_value(realm, clone, store.internal_key_path().value()))
+            if (!check_that_a_key_could_be_injected_into_a_value(realm, clone, store.key_path().value()))
                 return WebIDL::DataError::create(realm, "Key could not be injected into value"_string);
         }
     }
@@ -232,7 +249,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::count(Optional<JS::Valu
     auto transaction = this->transaction();
 
     // 2. Let store be this's object store.
-    auto& store = *this;
+    auto store = this->store();
 
     // FIXME: 3. If store has been deleted, throw an "InvalidStateError" DOMException.
 
@@ -277,7 +294,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::open_cursor(JS::Value q
     auto transaction = this->transaction();
 
     // 2. Let store be this's object store.
-    auto& store = *this;
+    auto store = this->store();
 
     // FIXME: 3. If store has been deleted, throw an "InvalidStateError" DOMException.
 
@@ -290,7 +307,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::open_cursor(JS::Value q
 
     // 6. Let cursor be a new cursor with its transaction set to transaction, undefined position, direction set to direction,
     //    got value flag set to false, undefined key and value, source set to store, range set to range, and key only flag set to false.
-    auto cursor = IDBCursor::create(realm, transaction, {}, direction, false, {}, {}, GC::Ref(store), range, false);
+    auto cursor = IDBCursor::create(realm, transaction, {}, direction, false, {}, {}, store, range, false);
 
     // 7. Let operation be an algorithm to run iterate a cursor with the current Realm record and cursor.
     auto operation = GC::Function<WebIDL::ExceptionOr<JS::Value>()>::create(realm.heap(), [&realm, cursor] {
@@ -317,7 +334,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::get(JS::Value query)
     auto transaction = this->transaction();
 
     // 2. Let store be this's object store.
-    auto& store = *this;
+    auto store = this->store();
 
     // FIXME: 3. If store has been deleted, throw an "InvalidStateError" DOMException.
 
@@ -339,49 +356,60 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::get(JS::Value query)
     return result;
 }
 
-bool IDBObjectStore::has_record_with_key(GC::Ref<Key> key)
+// https://w3c.github.io/IndexedDB/#dom-idbobjectstore-keypath
+JS::Value IDBObjectStore::key_path() const
 {
-    auto index = m_records.find_if([&key](auto const& record) {
-        return record.key == key;
-    });
+    if (!m_store->key_path().has_value())
+        return JS::js_null();
 
-    return index != m_records.end();
+    return m_store->key_path().value().visit(
+        [&](String const& value) -> JS::Value {
+            return JS::PrimitiveString::create(realm().vm(), value);
+        },
+        [&](Vector<String> const& value) -> JS::Value {
+            return JS::Array::create_from<String>(realm(), value.span(), [&](auto const& entry) -> JS::Value {
+                return JS::PrimitiveString::create(realm().vm(), entry);
+            });
+        });
 }
 
-void IDBObjectStore::remove_records_in_range(GC::Ref<IDBKeyRange> range)
+// https://w3c.github.io/IndexedDB/#dom-idbobjectstore-name
+WebIDL::ExceptionOr<void> IDBObjectStore::set_name(String const& value)
 {
-    m_records.remove_all_matching([&](auto const& record) {
-        return range->is_in_range(record.key);
-    });
-}
+    auto& realm = this->realm();
 
-void IDBObjectStore::store_a_record(Record const& record)
-{
-    m_records.append(record);
+    // 1. Let name be the given value.
+    auto const& name = value;
 
-    // The record is stored in the object store’s list of records such that the list is sorted according to the key of the records in ascending order.
-    AK::quick_sort(m_records, [](auto const& a, auto const& b) {
-        return a.key < b.key;
-    });
-}
+    // 2. Let transaction be this’s transaction.
+    auto& transaction = m_transaction;
 
-u64 IDBObjectStore::count_records_in_range(GC::Ref<IDBKeyRange> range)
-{
-    u64 count = 0;
-    for (auto const& record : m_records) {
-        if (range->is_in_range(record.key))
-            ++count;
-    }
+    // 3. Let store be this’s object store.
+    auto& store = m_store;
 
-    return count;
-}
+    // FIXME: 4. If store has been deleted, throw an "InvalidStateError" DOMException.
 
-Optional<Record> IDBObjectStore::first_in_range(GC::Ref<IDBKeyRange> range)
-{
-    for (auto const& record : m_records) {
-        if (range->is_in_range(record.key))
-            return record;
-    }
+    // 5. If transaction is not an upgrade transaction, throw an "InvalidStateError" DOMException.
+    if (transaction->mode() != Bindings::IDBTransactionMode::Versionchange)
+        return WebIDL::InvalidStateError::create(realm, "Attempted to set name outside of version change"_string);
+
+    // 6. If transaction’s state is not active, throw a "TransactionInactiveError" DOMException.
+    if (transaction->state() != IDBTransaction::TransactionState::Active)
+        return WebIDL::TransactionInactiveError::create(realm, "Transaction is not active"_string);
+
+    // 7. If store’s name is equal to name, terminate these steps.
+    if (store->name() == name)
+        return {};
+
+    // 8. If an object store named name already exists in store’s database, throw a "ConstraintError" DOMException.
+    if (store->database()->object_store_with_name(name))
+        return WebIDL::ConstraintError::create(realm, "Object store with the given name already exists"_string);
+
+    // 9. Set store’s name to name.
+    store->set_name(name);
+
+    // 10. Set this’s name to name.
+    m_name = name;
 
     return {};
 }

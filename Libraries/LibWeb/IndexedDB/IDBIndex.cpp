@@ -5,6 +5,7 @@
  */
 
 #include <AK/QuickSort.h>
+#include <LibGC/Ptr.h>
 #include <LibWeb/Bindings/IDBIndexPrototype.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/HTML/EventNames.h>
@@ -17,19 +18,17 @@ GC_DEFINE_ALLOCATOR(IDBIndex);
 
 IDBIndex::~IDBIndex() = default;
 
-IDBIndex::IDBIndex(JS::Realm& realm, GC::Ref<IDBObjectStore> object_store, String name, KeyPath key_path, bool unique, bool multi_entry)
+IDBIndex::IDBIndex(JS::Realm& realm, GC::Ref<Index> index, GC::Ref<IDBObjectStore> object_store)
     : PlatformObject(realm)
-    , m_name(move(name))
-    , m_unique(unique)
-    , m_multi_entry(multi_entry)
-    , m_object_store(object_store)
-    , m_key_path(move(key_path))
+    , m_index(index)
+    , m_object_store_handle(object_store)
+    , m_name(index->name())
 {
 }
 
-GC::Ref<IDBIndex> IDBIndex::create(JS::Realm& realm, GC::Ref<IDBObjectStore> object_store, String name, KeyPath key_path, bool unique, bool multi_entry)
+GC::Ref<IDBIndex> IDBIndex::create(JS::Realm& realm, GC::Ref<Index> index, GC::Ref<IDBObjectStore> object_store)
 {
-    return realm.create<IDBIndex>(realm, object_store, name, key_path, unique, multi_entry);
+    return realm.create<IDBIndex>(realm, index, object_store);
 }
 
 void IDBIndex::initialize(JS::Realm& realm)
@@ -38,34 +37,67 @@ void IDBIndex::initialize(JS::Realm& realm)
     WEB_SET_PROTOTYPE_FOR_INTERFACE(IDBIndex);
 }
 
-GC::Ref<IDBTransaction> IDBIndex::transaction()
+void IDBIndex::visit_edges(Visitor& visitor)
 {
-    // The transaction of an index handle is the transaction of its associated object store handle
-    return m_object_store->transaction();
+    Base::visit_edges(visitor);
+    visitor.visit(m_index);
+    visitor.visit(m_object_store_handle);
 }
 
-void IDBIndex::store_a_record(IndexRecord const& record)
+WebIDL::ExceptionOr<void> IDBIndex::set_name(String const& value)
 {
-    m_records.append(record);
+    auto& realm = this->realm();
 
-    // The records are stored in index’s list of records such that the list is sorted primarily on the records keys, and secondarily on the records values, in ascending order.
-    AK::quick_sort(m_records, [](IndexRecord const& a, IndexRecord const& b) {
-        auto key_compare = Key::compare_two_keys(a.key, b.key);
+    // 1. Let name be the given value.
+    auto const& name = value;
 
-        if (key_compare != 0)
-            return key_compare < 0;
+    // 2. Let transaction be this’s transaction.
+    auto transaction = this->transaction();
 
-        return Key::compare_two_keys(a.value, b.value) < 0;
-    });
+    // 3. Let index be this’s index.
+    auto index = this->index();
+
+    // 4. If transaction is not an upgrade transaction, throw an "InvalidStateError" DOMException.
+    if (!transaction->is_upgrade_transaction())
+        return WebIDL::InvalidStateError::create(realm, "Transaction is not an upgrade transaction"_string);
+
+    // 5. If transaction’s state is not active, then throw a "TransactionInactiveError" DOMException.
+    if (transaction->state() != IDBTransaction::TransactionState::Active)
+        return WebIDL::TransactionInactiveError::create(realm, "Transaction is not active"_string);
+
+    // FIXME: 6. If index or index’s object store has been deleted, throw an "InvalidStateError" DOMException.
+
+    // 7. If index’s name is equal to name, terminate these steps.
+    if (index->name() == name)
+        return {};
+
+    // 8. If an index named name already exists in index’s object store, throw a "ConstraintError" DOMException.
+    for (auto const& existing_index : m_object_store_handle->index_set()) {
+        if (existing_index->name() == name)
+            return WebIDL::ConstraintError::create(realm, "An index with the given name already exists"_string);
+    }
+
+    // 9. Set index’s name to name.
+    index->set_name(name);
+
+    // 10. Set this’s name to name.
+    m_name = name;
+
+    return {};
 }
 
-bool IDBIndex::has_record_with_key(GC::Ref<Key> key)
+// https://w3c.github.io/IndexedDB/#dom-idbindex-keypath
+JS::Value IDBIndex::key_path() const
 {
-    auto index = m_records.find_if([&key](auto const& record) {
-        return record.key == key;
-    });
-
-    return index != m_records.end();
+    return m_index->key_path().visit(
+        [&](String const& value) -> JS::Value {
+            return JS::PrimitiveString::create(realm().vm(), value);
+        },
+        [&](Vector<String> const& value) -> JS::Value {
+            return JS::Array::create_from<String>(realm(), value.span(), [&](auto const& entry) -> JS::Value {
+                return JS::PrimitiveString::create(realm().vm(), entry);
+            });
+        });
 }
 
 }

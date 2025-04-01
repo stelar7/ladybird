@@ -324,7 +324,7 @@ public:
     virtual CSS::PreferredMotion preferred_motion() const = 0;
     virtual void paint_next_frame() = 0;
     virtual void process_screenshot_requests() = 0;
-    virtual void paint(DevicePixelRect const&, Painting::BackingStore&, PaintOptions = {}) = 0;
+    virtual void start_display_list_rendering(DevicePixelRect const&, Painting::BackingStore&, PaintOptions, Function<void()>&& callback) = 0;
     virtual Queue<QueuedInputEvent>& input_event_queue() = 0;
     virtual void report_finished_handling_input_event(u64 page_id, EventResult event_was_handled) = 0;
     virtual void page_did_change_title(ByteString const&) { }
@@ -400,7 +400,7 @@ public:
 
     virtual void page_did_mutate_dom([[maybe_unused]] FlyString const& type, [[maybe_unused]] DOM::Node const& target, [[maybe_unused]] DOM::NodeList& added_nodes, [[maybe_unused]] DOM::NodeList& removed_nodes, [[maybe_unused]] GC::Ptr<DOM::Node> previous_sibling, [[maybe_unused]] GC::Ptr<DOM::Node> next_sibling, [[maybe_unused]] Optional<String> const& attribute_name) { }
 
-    virtual void update_process_statistics() { }
+    virtual void received_message_from_web_ui([[maybe_unused]] String const& name, [[maybe_unused]] JS::Value data) { }
 
     virtual bool is_ready_to_paint() const = 0;
 

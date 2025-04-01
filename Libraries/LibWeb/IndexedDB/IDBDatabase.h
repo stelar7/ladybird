@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024, stelar7 <dudedbz@gmail.com>
+ * Copyright (c) 2024-2025, stelar7 <dudedbz@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -15,6 +15,7 @@
 #include <LibWeb/IndexedDB/IDBTransaction.h>
 #include <LibWeb/IndexedDB/Internal/Algorithms.h>
 #include <LibWeb/IndexedDB/Internal/Database.h>
+#include <LibWeb/IndexedDB/Internal/ObjectStore.h>
 #include <LibWeb/StorageAPI/StorageKey.h>
 
 namespace Web::IndexedDB {
@@ -62,15 +63,17 @@ public:
     [[nodiscard]] GC::Ref<HTML::DOMStringList> object_store_names();
     [[nodiscard]] ReadonlySpan<GC::Ref<IDBTransaction>> created_transactions() { return m_created_transactions; }
     void add_created_transaction(GC::Ref<IDBTransaction> transaction) { m_created_transactions.append(transaction); }
-
-    // A connection has an object store set, which is initialized to the set of object stores in the associated database
-    [[nodiscard]] ReadonlySpan<GC::Ref<IDBObjectStore>> object_store_set() { return this->associated_database()->object_stores(); }
+    [[nodiscard]] ReadonlySpan<GC::Ref<ObjectStore>> object_store_set() { return m_object_store_set; }
+    void remove_from_object_store_set(GC::Ref<ObjectStore> object_store)
+    {
+        m_object_store_set.remove_first_matching([&](auto& entry) { return entry == object_store; });
+    }
 
     WebIDL::ExceptionOr<GC::Ref<IDBObjectStore>> create_object_store(String const&, IDBObjectStoreParameters const&);
     WebIDL::ExceptionOr<void> delete_object_store(String const&);
-    
+
     WebIDL::ExceptionOr<GC::Ref<IDBTransaction>> transaction(Variant<String, Vector<String>>, Bindings::IDBTransactionMode = Bindings::IDBTransactionMode::Readonly, IDBTransactionOptions = { .durability = Bindings::IDBTransactionDurability::Default });
-    
+
     void close();
 
     void set_onabort(WebIDL::CallbackType*);
@@ -96,8 +99,13 @@ private:
 
     // Each connection has a close pending flag which is initially false.
     bool m_close_pending { false };
+
     // When a connection is initially created it is in an opened state.
     ConnectionState m_state { ConnectionState::Open };
+
+    // A connection has an object store set, which is initialized to the set of object stores in the associated database when the connection is created.
+    // The contents of the set will remain constant except when an upgrade transaction is live.
+    Vector<GC::Ref<ObjectStore>> m_object_store_set;
 
     // NOTE: There is an associated database in the spec, but there is no mention where it is assigned, nor where its from
     //       So we stash the one we have when opening a connection.

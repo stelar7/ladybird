@@ -28,11 +28,12 @@
 #include <LibWebView/DOMNodeProperties.h>
 #include <LibWebView/Forward.h>
 #include <LibWebView/PageInfo.h>
+#include <LibWebView/Settings.h>
 #include <LibWebView/WebContentClient.h>
 
 namespace WebView {
 
-class ViewImplementation {
+class ViewImplementation : public SettingsObserver {
 public:
     virtual ~ViewImplementation();
 
@@ -83,8 +84,6 @@ public:
 
     void set_enable_do_not_track(bool);
 
-    void set_enable_autoplay(bool);
-
     ByteString selected_text();
     Optional<String> selected_text_with_whitespace_collapsed();
     void select_all();
@@ -99,10 +98,10 @@ public:
     void inspect_accessibility_tree();
     void get_hovered_node_id();
 
-    void inspect_dom_node(Web::UniqueNodeID node_id, DOMNodeProperties::Type, Optional<Web::CSS::Selector::PseudoElement::Type> pseudo_element);
+    void inspect_dom_node(Web::UniqueNodeID node_id, DOMNodeProperties::Type, Optional<Web::CSS::PseudoElement> pseudo_element);
     void clear_inspected_dom_node();
 
-    void highlight_dom_node(Web::UniqueNodeID node_id, Optional<Web::CSS::Selector::PseudoElement::Type> pseudo_element);
+    void highlight_dom_node(Web::UniqueNodeID node_id, Optional<Web::CSS::PseudoElement> pseudo_element);
     void clear_highlighted_dom_node();
 
     void set_listen_for_dom_mutations(bool);
@@ -212,8 +211,7 @@ public:
     Function<void(Web::CSS::StyleSheetIdentifier const&, URL::URL const&, String const&)> on_received_style_sheet_source;
     Function<void(JsonValue)> on_received_js_console_result;
     Function<void(i32 message_id)> on_console_message_available;
-    Function<void(i32 start_index, Vector<String> const& message_types, Vector<String> const& messages)> on_received_styled_console_messages;
-    Function<void(i32 start_index, Vector<ConsoleOutput>)> on_received_unstyled_console_messages;
+    Function<void(i32 start_index, Vector<ConsoleOutput>)> on_received_console_messages;
     Function<void(i32 count_waiting)> on_resource_status_change;
     Function<void()> on_restore_window;
     Function<void(Gfx::IntPoint)> on_reposition_window;
@@ -265,6 +263,8 @@ protected:
         Yes,
     };
     void handle_web_content_process_crash(LoadErrorPage = LoadErrorPage::Yes);
+
+    virtual void autoplay_settings_changed() override;
 
     struct SharedBitmap {
         i32 id { -1 };

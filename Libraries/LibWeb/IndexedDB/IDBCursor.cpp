@@ -118,7 +118,7 @@ WebIDL::ExceptionOr<void> IDBCursor::continue_(JS::Value key)
     });
 
     // 11. Run asynchronously execute a request with this's source, operation, and request.
-    asynchronously_execute_a_request(realm, m_source, operation, request);
+    asynchronously_execute_a_request(realm, GC::Ref(*this), operation, request);
     dbgln_if(IDB_DEBUG, "Executing request for cursor continue with uuid {}", request->uuid());
 
     return {};

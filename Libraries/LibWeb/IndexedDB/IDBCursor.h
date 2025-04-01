@@ -14,10 +14,11 @@
 #include <LibWeb/HTML/StructuredSerializeTypes.h>
 #include <LibWeb/IndexedDB/IDBKeyRange.h>
 #include <LibWeb/IndexedDB/Internal/Key.h>
+#include <LibWeb/IndexedDB/Internal/ObjectStore.h>
 
 namespace Web::IndexedDB {
 
-using CursorSource = Variant<GC::Ref<IDBObjectStore>, GC::Ref<IDBIndex>>;
+using CursorSource = Variant<GC::Ref<ObjectStore>, GC::Ref<Index>>;
 
 // https://w3c.github.io/IndexedDB/#cursor-interface
 class IDBCursor : public Bindings::PlatformObject {
@@ -25,7 +26,7 @@ class IDBCursor : public Bindings::PlatformObject {
     GC_DECLARE_ALLOCATOR(IDBCursor);
 
 public:
-    [[nodiscard]] Variant<GC::Ref<IDBObjectStore>, GC::Ref<IDBIndex>> source() { return m_source; }
+    [[nodiscard]] CursorSource source() { return m_source; }
     [[nodiscard]] Bindings::IDBCursorDirection direction() { return m_direction; }
     [[nodiscard]] JS::Value key();
     [[nodiscard]] JS::Value value() { return m_value.value_or(JS::js_undefined()); }

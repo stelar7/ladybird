@@ -31,6 +31,16 @@ void Database::visit_edges(Visitor& visitor)
     visitor.visit(m_object_stores);
 }
 
+GC::Ptr<ObjectStore> Database::object_store_with_name(String const& name) const
+{
+    for (auto const& object_store : m_object_stores) {
+        if (object_store->name() == name)
+            return object_store;
+    }
+
+    return nullptr;
+}
+
 Vector<GC::Root<Database>> Database::for_key(StorageAPI::StorageKey const& key)
 {
     Vector<GC::Root<Database>> databases;
@@ -92,16 +102,6 @@ ErrorOr<void> Database::delete_for_key_and_name(StorageAPI::StorageKey& key, Str
     m_databases.set(key, database_mapping);
 
     return {};
-}
-
-GC::Ptr<IDBObjectStore> Database::object_store_named(String const& name) const
-{
-    for (auto const& object_store : m_object_stores) {
-        if (object_store->name() == name)
-            return object_store;
-    }
-
-    return nullptr;
 }
 
 }

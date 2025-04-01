@@ -47,6 +47,15 @@ function (generate_css_implementation)
     )
 
     invoke_generator(
+        "PseudoElement.cpp"
+        Lagom::GenerateCSSPseudoElement
+        "${LIBWEB_INPUT_FOLDER}/CSS/PseudoElements.json"
+        "CSS/PseudoElement.h"
+        "CSS/PseudoElement.cpp"
+        arguments -j "${LIBWEB_INPUT_FOLDER}/CSS/PseudoElements.json"
+    )
+
+    invoke_generator(
         "TransformFunctions.cpp"
         Lagom::GenerateCSSTransformFunctions
         "${LIBWEB_INPUT_FOLDER}/CSS/TransformFunctions.json"
@@ -115,6 +124,7 @@ function (generate_css_implementation)
        "CSS/MediaFeatureID.h"
        "CSS/PropertyID.h"
        "CSS/PseudoClass.h"
+       "CSS/PseudoElement.h"
        "CSS/TransformFunctions.h"
     )
     list(TRANSFORM CSS_GENERATED_HEADERS PREPEND "${CMAKE_CURRENT_BINARY_DIR}/")
@@ -129,6 +139,29 @@ function (generate_css_implementation)
     )
     list(APPEND LIBWEB_ALL_GENERATED_IDL ${CSS_GENERATED_IDL})
     set(LIBWEB_ALL_GENERATED_IDL ${LIBWEB_ALL_GENERATED_IDL} PARENT_SCOPE)
+endfunction()
+
+function (generate_html_implementation)
+    set(LIBWEB_INPUT_FOLDER "${CMAKE_CURRENT_SOURCE_DIR}")
+
+    invoke_generator(
+        "NamedCharacterReferences.cpp"
+        Lagom::GenerateNamedCharacterReferences
+        "${LIBWEB_INPUT_FOLDER}/HTML/Parser/Entities.json"
+        "HTML/Parser/NamedCharacterReferences.h"
+        "HTML/Parser/NamedCharacterReferences.cpp"
+        arguments -j "${LIBWEB_INPUT_FOLDER}/HTML/Parser/Entities.json"
+    )
+
+    set(HTML_GENERATED_HEADERS
+       "HTML/Parser/NamedCharacterReferences.h"
+    )
+    list(TRANSFORM HTML_GENERATED_HEADERS PREPEND "${CMAKE_CURRENT_BINARY_DIR}/")
+    if (ENABLE_INSTALL_HEADERS)
+        install(FILES ${HTML_GENERATED_HEADERS} DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/LibWeb/HTML")
+    endif()
+    list(APPEND LIBWEB_ALL_GENERATED_HEADERS ${HTML_GENERATED_HEADERS})
+    set(LIBWEB_ALL_GENERATED_HEADERS ${LIBWEB_ALL_GENERATED_HEADERS} PARENT_SCOPE)
 endfunction()
 
 function (generate_js_bindings target)

@@ -185,6 +185,23 @@ compiled_action("generate_css_pseudo_class") {
   ]
 }
 
+compiled_action("generate_css_pseudo_element") {
+  tool = "//Meta/Lagom/Tools/CodeGenerators/LibWeb:GenerateCSSPseudoElement"
+  inputs = [ "CSS/PseudoElement.json" ]
+  outputs = [
+    "$target_gen_dir/CSS/PseudoElement.h",
+    "$target_gen_dir/CSS/PseudoElement.cpp",
+  ]
+  args = [
+    "-h",
+    rebase_path(outputs[0], root_build_dir),
+    "-c",
+    rebase_path(outputs[1], root_build_dir),
+    "-j",
+    rebase_path(inputs[0], root_build_dir),
+  ]
+}
+
 compiled_action("generate_css_transform_functions") {
   tool =
       "//Meta/Lagom/Tools/CodeGenerators/LibWeb:GenerateCSSTransformFunctions"
@@ -246,6 +263,23 @@ embed_as_string("generate_quirks_mode_stylesheet_source") {
   output = "$target_gen_dir/CSS/QuirksModeStyleSheetSource.cpp"
   variable_name = "quirks_mode_stylesheet_source"
   namespace = "Web::CSS"
+}
+
+compiled_action("generate_named_character_references") {
+  tool = "//Meta/Lagom/Tools/CodeGenerators/LibWeb:GenerateNamedCharacterReferences"
+  inputs = [ "HTML/Parser/Entities.json" ]
+  outputs = [
+    "$target_gen_dir/HTML/Parser/NamedCharacterReferences.h",
+    "$target_gen_dir/HTML/Parser/NamedCharacterReferences.cpp",
+  ]
+  args = [
+    "-h",
+    rebase_path(outputs[0], root_build_dir),
+    "-c",
+    rebase_path(outputs[1], root_build_dir),
+    "-j",
+    rebase_path(inputs[0], root_build_dir),
+  ]
 }
 
 source_set("all_generated") {

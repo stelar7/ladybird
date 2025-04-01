@@ -16,7 +16,8 @@
 
 namespace Web::HTML {
 
-class BrowsingContext final : public JS::Cell {
+class BrowsingContext final : public JS::Cell
+    , public Weakable<BrowsingContext> {
     GC_CELL(BrowsingContext, JS::Cell);
     GC_DECLARE_ALLOCATOR(BrowsingContext);
 
@@ -77,6 +78,7 @@ public:
     void set_opener_browsing_context(GC::Ptr<BrowsingContext> browsing_context) { m_opener_browsing_context = browsing_context; }
 
     void set_is_popup(TokenizedFeature::Popup is_popup) { m_is_popup = is_popup; }
+    [[nodiscard]] TokenizedFeature::Popup is_popup() const { return m_is_popup; }
 
     SandboxingFlagSet popup_sandboxing_flag_set() const { return m_popup_sandboxing_flag_set; }
     void set_popup_sandboxing_flag_set(SandboxingFlagSet value) { m_popup_sandboxing_flag_set = value; }

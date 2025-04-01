@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2024, Shannon Booth <shannon@serenityos.org>
  * Copyright (c) 2024, Jamie Mansfield <jmansfield@cadixdev.org>
- * Copyright (c) 2024, stelar7 <dudedbz@gmail.com>
+ * Copyright (c) 2024-2025, stelar7 <dudedbz@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -23,6 +23,8 @@ class IDBRequest : public DOM::EventTarget {
 public:
     virtual ~IDBRequest() override;
 
+    [[nodiscard]] static GC::Ref<IDBRequest> create(JS::Realm&, IDBRequestSource);
+
     [[nodiscard]] bool done() const { return m_done; }
     [[nodiscard]] bool processed() const { return m_processed; }
     [[nodiscard]] IDBRequestSource source() const { return m_source; }
@@ -43,8 +45,6 @@ public:
     WebIDL::CallbackType* onsuccess();
     void set_onerror(WebIDL::CallbackType*);
     WebIDL::CallbackType* onerror();
-
-    [[nodiscard]] static GC::Ref<IDBRequest> create(JS::Realm&, IDBRequestSource);
 
     [[nodiscard]] String uuid() const { return m_uuid; }
 

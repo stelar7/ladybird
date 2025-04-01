@@ -14,6 +14,7 @@
 #include <AK/Utf8View.h>
 #include <LibGC/Ptr.h>
 #include <LibWeb/Forward.h>
+#include <LibWeb/HTML/Parser/Entities.h>
 #include <LibWeb/HTML/Parser/HTMLToken.h>
 
 namespace Web::HTML {
@@ -211,7 +212,9 @@ private:
     HTMLToken m_current_token;
     StringBuilder m_current_builder;
 
-    Optional<ByteString> m_last_emitted_start_tag_name;
+    NamedCharacterReferenceMatcher m_named_character_reference_matcher;
+
+    Optional<FlyString> m_last_emitted_start_tag_name;
 
     bool m_explicit_eof_inserted { false };
     bool m_has_emitted_eof { false };

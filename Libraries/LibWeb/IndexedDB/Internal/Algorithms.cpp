@@ -21,8 +21,8 @@
 #include <LibJS/Runtime/PropertyKey.h>
 #include <LibJS/Runtime/Realm.h>
 #include <LibJS/Runtime/TypedArray.h>
-#include <LibJS/Runtime/Value.h>
 #include <LibJS/Runtime/VM.h>
+#include <LibJS/Runtime/Value.h>
 #include <LibWeb/Bindings/IDBCursorPrototype.h>
 #include <LibWeb/Bindings/IDBDatabasePrototype.h>
 #include <LibWeb/Bindings/IDBTransactionPrototype.h>
@@ -166,6 +166,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBDatabase>> open_a_database_connection(JS::Realm& 
         }));
 
         // 6. Run upgrade a database using connection, version and request.
+        // AD-HOC: https://github.com/w3c/IndexedDB/issues/433#issuecomment-2512330086
         auto upgrade_transaction = upgrade_a_database(realm, connection, version, request);
 
         // 7. If connection was closed, return a newly created "AbortError" DOMException and abort these steps.
@@ -698,7 +699,7 @@ JS::Value convert_a_key_to_a_value(JS::Realm& realm, GC::Ref<Key> key)
 }
 
 // https://w3c.github.io/IndexedDB/#valid-key-path
-bool is_valid_key_path(KeyPath path)
+bool is_valid_key_path(KeyPath const& path)
 {
     // A valid key path is one of:
     return path.visit(
@@ -876,14 +877,14 @@ WebIDL::ExceptionOr<ErrorOr<JS::Value>> evaluate_key_path_on_a_value(JS::Realm& 
                 return Error::from_string_literal("Value is not an object");
 
             // 2. Let hop be ! HasOwnProperty(value, identifier).
-            auto hop = MUST(value.as_object().has_own_property(identifier.to_byte_string()));
+            auto hop = MUST(value.as_object().has_own_property(identifier));
 
             // 3. If hop is false, return failure.
             if (!hop)
                 return Error::from_string_literal("Property does not exist");
 
             // 4. Let value be ! Get(value, identifier).
-            value = MUST(value.as_object().get(identifier.to_byte_string()));
+            value = MUST(value.as_object().get(identifier));
 
             // 5. If value is undefined, return failure.
             if (value.is_undefined())
@@ -970,14 +971,14 @@ bool check_that_a_key_could_be_injected_into_a_value(JS::Realm& realm, JS::Value
             return false;
 
         // 2. Let hop be ! HasOwnProperty(value, identifier).
-        auto hop = MUST(value.as_object().has_own_property(identifier.to_byte_string()));
+        auto hop = MUST(value.as_object().has_own_property(identifier));
 
         // 3. If hop is false, return true.
         if (!hop)
             return true;
 
         // 4. Let value be ! Get(value, identifier).
-        value = MUST(value.as_object().get(identifier.to_byte_string()));
+        value = MUST(value.as_object().get(identifier));
     }
 
     // 5. Return true if value is an Object or an Array, or false otherwise.
@@ -985,7 +986,7 @@ bool check_that_a_key_could_be_injected_into_a_value(JS::Realm& realm, JS::Value
 }
 
 // https://w3c.github.io/IndexedDB/#generate-a-key
-WebIDL::ExceptionOr<u64> generate_a_key(GC::Ref<IDBObjectStore> store)
+WebIDL::ExceptionOr<u64> generate_a_key(JS::Realm& realm, GC::Ref<ObjectStore> store)
 {
     // 1. Let generator be store’s key generator.
     auto generator = store->key_generator().value();
@@ -995,7 +996,7 @@ WebIDL::ExceptionOr<u64> generate_a_key(GC::Ref<IDBObjectStore> store)
 
     // 3. If key is greater than 2^53 (9007199254740992), then return failure.
     if (key > 9007199254740992)
-        return WebIDL::ConstraintError::create(store->realm(), "Key is greater than 2^53"_string);
+        return WebIDL::ConstraintError::create(realm, "Key is greater than 2^53"_string);
 
     // 4. Increase generator’s current number by 1.
     generator.increment(1);
@@ -1022,7 +1023,7 @@ void inject_a_key_into_a_value_using_a_key_path(JS::Realm& realm, JS::Value valu
         VERIFY(value.is_object() || MUST(value.is_array(realm.vm())));
 
         // 2. Let hop be ! HasOwnProperty(value, identifier).
-        auto hop = MUST(value.as_object().has_own_property(identifier.to_byte_string()));
+        auto hop = MUST(value.as_object().has_own_property(identifier));
 
         // 3. If hop is false, then:
         if (!hop) {
@@ -1030,44 +1031,44 @@ void inject_a_key_into_a_value_using_a_key_path(JS::Realm& realm, JS::Value valu
             auto o = JS::Object::create(realm, realm.intrinsics().object_prototype());
 
             // 2. Let status be CreateDataProperty(value, identifier, o).
-            auto status = MUST(value.as_object().create_data_property(identifier.to_byte_string(), o));
+            auto status = MUST(value.as_object().create_data_property(identifier, o));
 
             // 3. Assert: status is true.
             VERIFY(status);
         }
 
         // 4. Let value be ! Get(value, identifier).
-        value = MUST(value.as_object().get(identifier.to_byte_string()));
+        value = MUST(value.as_object().get(identifier));
     }
 
     // 5. Assert: value is an Object or an Array.
     VERIFY(value.is_object() || MUST(value.is_array(realm.vm())));
 
     // 6. Let keyValue be the result of converting a key to a value with key.
-    auto key_value = convert_a_key_to_a_value(realm, move(key));
+    auto key_value = convert_a_key_to_a_value(realm, key);
 
     // 7. Let status be CreateDataProperty(value, last, keyValue).
-    auto status = MUST(value.as_object().create_data_property(last.to_byte_string(), key_value));
+    auto status = MUST(value.as_object().create_data_property(last, key_value));
 
     // 8. Assert: status is true.
     VERIFY(status);
 }
 
 // https://w3c.github.io/IndexedDB/#possibly-update-the-key-generator
-void possibly_update_the_key_generator(GC::Ref<IDBObjectStore> store, GC::Ref<Key> key)
+void possibly_update_the_key_generator(GC::Ref<ObjectStore> store, GC::Ref<Key> key)
 {
     // 1. If the type of key is not number, abort these steps.
     if (key->type() != Key::KeyType::Number)
         return;
 
     // 2. Let value be the value of key.
-    auto value = key->value_as_double();
+    auto temp_value = key->value_as_double();
 
     // 3. Set value to the minimum of value and 2^53 (9007199254740992).
-    value = min(value, 9007199254740992.0);
+    temp_value = min(temp_value, 9007199254740992.0);
 
     // 4. Set value to the largest integer not greater than value.
-    value = floor(value);
+    u64 value = floor(temp_value);
 
     // 5. Let generator be store’s key generator.
     auto generator = store->key_generator().value();
@@ -1078,24 +1079,24 @@ void possibly_update_the_key_generator(GC::Ref<IDBObjectStore> store, GC::Ref<Ke
 }
 
 // https://w3c.github.io/IndexedDB/#store-a-record-into-an-object-store
-WebIDL::ExceptionOr<GC::Ptr<Key>> store_a_record_into_an_object_store(JS::Realm& realm, GC::Ref<IDBObjectStore> store, JS::Value value, GC::Ptr<Key> key, bool no_overwrite)
+WebIDL::ExceptionOr<GC::Ptr<Key>> store_a_record_into_an_object_store(JS::Realm& realm, GC::Ref<ObjectStore> store, JS::Value value, GC::Ptr<Key> key, bool no_overwrite)
 {
     // 1. If store uses a key generator, then:
     if (store->key_generator().has_value()) {
         // 1. If key is undefined, then:
         if (key == nullptr) {
             // 1. Let key be the result of generating a key for store.
-            auto maybe_key = generate_a_key(store);
+            auto maybe_key = generate_a_key(realm, store);
 
             // 2. If key is failure, then this operation failed with a "ConstraintError" DOMException. Abort this algorithm without taking any further steps.
             if (maybe_key.is_error())
                 return maybe_key.release_error();
 
-            key = Key::create_number(realm, maybe_key.value());
+            key = Key::create_number(realm, static_cast<double>(maybe_key.value()));
 
             // 3. If store also uses in-line keys, then run inject a key into a value using a key path with value, key and store’s key path.
             if (store->uses_inline_keys()) {
-                inject_a_key_into_a_value_using_a_key_path(realm, value, GC::Ref(*key), store->internal_key_path().value());
+                inject_a_key_into_a_value_using_a_key_path(realm, value, GC::Ref(*key), store->key_path().value());
             }
         }
 
@@ -1128,7 +1129,7 @@ WebIDL::ExceptionOr<GC::Ptr<Key>> store_a_record_into_an_object_store(JS::Realm&
     // 5. For each index which references store:
     for (auto const& index : store->index_set()) {
         // 1. Let index key be the result of extracting a key from a value using a key path with value, index’s key path, and index’s multiEntry flag.
-        auto index_key = TRY(extract_a_key_from_a_value_using_a_key_path(realm, value, index->internal_key_path(), index->multi_entry()));
+        auto index_key = TRY(extract_a_key_from_a_value_using_a_key_path(realm, value, index->key_path(), index->multi_entry()));
 
         // 2. If index key is an exception, or invalid, or failure, take no further actions for index, and continue these steps for the next index.
         if (index_key.is_error())
@@ -1145,7 +1146,7 @@ WebIDL::ExceptionOr<GC::Ptr<Key>> store_a_record_into_an_object_store(JS::Realm&
         //    then this operation failed with a "ConstraintError" DOMException.
         //    Abort this algorithm without taking any further steps.
         if ((!index_multi_entry || !index_key_is_array) && index_is_unique && index->has_record_with_key(index_key_value))
-            return WebIDL::ConstraintError::create(store->realm(), "Record already exists in index"_string);
+            return WebIDL::ConstraintError::create(realm, "Record already exists in index"_string);
 
         // 4. If index’s multiEntry flag is true and index key is an array key,
         //    and if index already contains a record with key equal to any of the subkeys of index key,
@@ -1155,7 +1156,7 @@ WebIDL::ExceptionOr<GC::Ptr<Key>> store_a_record_into_an_object_store(JS::Realm&
         if (index_multi_entry && index_key_is_array && index_is_unique) {
             for (auto const& subkey : index_key_value->subkeys()) {
                 if (index->has_record_with_key(*subkey))
-                    return WebIDL::ConstraintError::create(store->realm(), "Record already exists in index"_string);
+                    return WebIDL::ConstraintError::create(realm, "Record already exists in index"_string);
             }
         }
 
@@ -1192,7 +1193,7 @@ WebIDL::ExceptionOr<GC::Ptr<Key>> store_a_record_into_an_object_store(JS::Realm&
 }
 
 // https://w3c.github.io/IndexedDB/#delete-records-from-an-object-store
-void delete_records_from_an_object_store(GC::Ref<IDBObjectStore> store, GC::Ref<IDBKeyRange> range)
+void delete_records_from_an_object_store(GC::Ref<ObjectStore> store, GC::Ref<IDBKeyRange> range)
 {
     // 1. Remove all records, if any, from store’s list of records with key in range.
     store->remove_records_in_range(range);
@@ -1462,7 +1463,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBKeyRange>> convert_a_value_to_a_key_range(JS::Rea
 }
 
 // https://w3c.github.io/IndexedDB/#count-the-records-in-a-range
-JS::Value count_the_records_in_a_range(GC::Ref<IDBObjectStore> source, GC::Ref<IDBKeyRange> range)
+JS::Value count_the_records_in_a_range(GC::Ref<ObjectStore> source, GC::Ref<IDBKeyRange> range)
 {
     // 1. Let count be the number of records, if any, in source’s list of records with key in range.
     auto count = source->count_records_in_range(range);
@@ -1481,17 +1482,17 @@ GC::Ptr<IDBCursor> iterate_a_cursor(JS::Realm& realm, GC::Ref<IDBCursor> cursor,
     auto direction = cursor->direction();
 
     // 3. Assert: if primaryKey is given, source is an index and direction is "next" or "prev".
-    auto source_is_an_index = source.has<GC::Ref<IDBIndex>>();
-    auto source_is_an_object_store = source.has<GC::Ref<IDBObjectStore>>();
+    auto source_is_an_index = source.has<GC::Ref<Index>>();
+    auto source_is_an_object_store = source.has<GC::Ref<ObjectStore>>();
     auto direction_is_next_or_prev = direction == Bindings::IDBCursorDirection::Next || direction == Bindings::IDBCursorDirection::Prev;
     VERIFY(!primary_key || (source_is_an_index && direction_is_next_or_prev));
 
     // 4. Let records be the list of records in source.
     auto records = source.visit(
-        [](GC::Ref<IDBObjectStore> object_store) -> Vector<Record> {
+        [](GC::Ref<ObjectStore> object_store) -> Vector<Record> {
             return object_store->records();
         },
-        [](GC::Ref<IDBIndex>) -> Vector<Record> {
+        [](GC::Ref<Index>) -> Vector<Record> {
             VERIFY_NOT_REACHED();
             // FIXME: return index->records();
         });
@@ -1624,7 +1625,7 @@ GC::Ptr<IDBCursor> iterate_a_cursor(JS::Realm& realm, GC::Ref<IDBCursor> cursor,
 }
 
 // https://w3c.github.io/IndexedDB/#retrieve-a-value-from-an-object-store
-WebIDL::ExceptionOr<JS::Value> retrieve_a_value_from_an_object_store(JS::Realm& realm, GC::Ref<IDBObjectStore> store, GC::Ref<IDBKeyRange> range)
+WebIDL::ExceptionOr<JS::Value> retrieve_a_value_from_an_object_store(JS::Realm& realm, GC::Ref<ObjectStore> store, GC::Ref<IDBKeyRange> range)
 {
     // 1. Let record be the first record in store’s list of records whose key is in range, if any.
     auto record = store->first_in_range(range);

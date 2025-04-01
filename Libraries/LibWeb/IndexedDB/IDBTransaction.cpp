@@ -8,6 +8,7 @@
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Crypto/Crypto.h>
 #include <LibWeb/HTML/EventNames.h>
+#include <LibWeb/IndexedDB/IDBObjectStore.h>
 #include <LibWeb/IndexedDB/IDBTransaction.h>
 #include <LibWeb/IndexedDB/Internal/Algorithms.h>
 
@@ -17,7 +18,7 @@ GC_DEFINE_ALLOCATOR(IDBTransaction);
 
 IDBTransaction::~IDBTransaction() = default;
 
-IDBTransaction::IDBTransaction(JS::Realm& realm, GC::Ref<IDBDatabase> connection, Bindings::IDBTransactionMode mode, Bindings::IDBTransactionDurability durability, Vector<GC::Root<IDBObjectStore>> scopes)
+IDBTransaction::IDBTransaction(JS::Realm& realm, GC::Ref<IDBDatabase> connection, Bindings::IDBTransactionMode mode, Bindings::IDBTransactionDurability durability, Vector<GC::Root<ObjectStore>> scopes)
     : EventTarget(realm)
     , m_connection(connection)
     , m_mode(mode)
@@ -28,7 +29,7 @@ IDBTransaction::IDBTransaction(JS::Realm& realm, GC::Ref<IDBDatabase> connection
     m_uuid = MUST(Crypto::generate_random_uuid());
 }
 
-GC::Ref<IDBTransaction> IDBTransaction::create(JS::Realm& realm, GC::Ref<IDBDatabase> connection, Bindings::IDBTransactionMode mode, Bindings::IDBTransactionDurability durability = Bindings::IDBTransactionDurability::Default, Vector<GC::Root<IDBObjectStore>> scopes = {})
+GC::Ref<IDBTransaction> IDBTransaction::create(JS::Realm& realm, GC::Ref<IDBDatabase> connection, Bindings::IDBTransactionMode mode, Bindings::IDBTransactionDurability durability = Bindings::IDBTransactionDurability::Default, Vector<GC::Root<ObjectStore>> scopes = {})
 {
     return realm.create<IDBTransaction>(realm, connection, mode, durability, move(scopes));
 }
@@ -93,7 +94,7 @@ WebIDL::ExceptionOr<void> IDBTransaction::abort()
     return {};
 }
 
-GC::Ptr<IDBObjectStore> IDBTransaction::object_store_named(String const& name) const
+GC::Ptr<ObjectStore> IDBTransaction::object_store_named(String const& name) const
 {
     for (auto const& store : m_scope) {
         if (store->name() == name)
@@ -118,9 +119,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBObjectStore>> IDBTransaction::object_store(String
         return WebIDL::NotFoundError::create(realm, "Object store not found"_string);
 
     // 3. Return an object store handle associated with store and this.
-    auto store_handle = GC::Ref(*store);
-    store_handle->set_transaction(*this);
-    return store_handle;
+    return IDBObjectStore::create(realm, *store, *this);
 }
 
 // https://w3c.github.io/IndexedDB/#dom-idbtransaction-objectstorenames

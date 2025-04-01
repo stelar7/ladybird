@@ -32,6 +32,7 @@
 #include <WebContent/PageHost.h>
 #include <WebContent/WebContentClientEndpoint.h>
 #include <WebContent/WebDriverConnection.h>
+#include <WebContent/WebUIConnection.h>
 
 namespace WebContent {
 
@@ -95,6 +96,8 @@ void PageClient::visit_edges(JS::Cell::Visitor& visitor)
 
     if (m_webdriver)
         m_webdriver->visit_edges(visitor);
+    if (m_web_ui)
+        m_web_ui->visit_edges(visitor);
 }
 
 ConnectionFromClient& PageClient::client() const
@@ -202,15 +205,17 @@ void PageClient::process_screenshot_requests()
             }
             auto rect = page().enclosing_device_rect(dom_node->paintable_box()->absolute_border_box_rect());
             auto bitmap = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, rect.size().to_type<int>()).release_value_but_fixme_should_propagate_errors();
-            auto backing_store = Web::Painting::BitmapBackingStore(*bitmap);
-            paint(rect, backing_store, { .paint_overlay = Web::PaintOptions::PaintOverlay::No });
-            client().async_did_take_screenshot(m_id, bitmap->to_shareable_bitmap());
+            auto backing_store = Web::Painting::BitmapBackingStore::create(*bitmap);
+            start_display_list_rendering(rect, backing_store, { .paint_overlay = Web::PaintOptions::PaintOverlay::No }, [this, backing_store] {
+                client().async_did_take_screenshot(m_id, backing_store->bitmap().to_shareable_bitmap());
+            });
         } else {
             Web::DevicePixelRect rect { { 0, 0 }, content_size() };
             auto bitmap = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, rect.size().to_type<int>()).release_value_but_fixme_should_propagate_errors();
-            auto backing_store = Web::Painting::BitmapBackingStore(*bitmap);
-            paint(rect, backing_store);
-            client().async_did_take_screenshot(m_id, bitmap->to_shareable_bitmap());
+            auto backing_store = Web::Painting::BitmapBackingStore::create(*bitmap);
+            start_display_list_rendering(rect, backing_store, {}, [this, backing_store] {
+                client().async_did_take_screenshot(m_id, backing_store->bitmap().to_shareable_bitmap());
+            });
         }
     }
 }
@@ -221,20 +226,23 @@ void PageClient::paint_next_frame()
     if (!back_store)
         return;
 
-    auto viewport_rect = page().css_to_device_rect(page().top_level_traversable()->viewport_rect());
-    paint(viewport_rect, *back_store);
-
-    m_backing_store_manager.swap_back_and_front();
-
     m_paint_state = PaintState::WaitingForClient;
-    client().async_did_paint(m_id, viewport_rect.to_type<int>(), m_backing_store_manager.front_id());
+
+    auto viewport_rect = page().css_to_device_rect(page().top_level_traversable()->viewport_rect());
+    start_display_list_rendering(viewport_rect, *back_store, {}, [this, viewport_rect]() {
+        m_backing_store_manager.swap_back_and_front();
+        client().async_did_paint(m_id, viewport_rect.to_type<int>(), m_backing_store_manager.front_id());
+    });
 }
 
-void PageClient::paint(Web::DevicePixelRect const& content_rect, Web::Painting::BackingStore& target, Web::PaintOptions paint_options)
+void PageClient::start_display_list_rendering(Web::DevicePixelRect const& content_rect, Web::Painting::BackingStore& target, Web::PaintOptions paint_options, Function<void()>&& callback)
 {
     paint_options.should_show_line_box_borders = m_should_show_line_box_borders;
     paint_options.has_focus = m_has_focus;
-    page().top_level_traversable()->paint(content_rect, target, paint_options);
+    auto& traversable = *page().top_level_traversable();
+    auto display_list = traversable.record_display_list(content_rect, paint_options);
+    auto painting_surface = traversable.painting_surface_for_backing_store(target);
+    traversable.start_display_list_rendering(display_list, painting_surface, move(callback));
 }
 
 Queue<Web::QueuedInputEvent>& PageClient::input_event_queue()
@@ -371,6 +379,8 @@ void PageClient::page_did_create_new_document(Web::DOM::Document& document)
 void PageClient::page_did_change_active_document_in_top_level_browsing_context(Web::DOM::Document& document)
 {
     auto& realm = document.realm();
+
+    m_web_ui.clear();
 
     if (auto console_client = document.console_client()) {
         auto& web_content_console_client = as<WebContentConsoleClient>(*console_client);
@@ -699,17 +709,30 @@ void PageClient::page_did_mutate_dom(FlyString const& type, Web::DOM::Node const
     client().async_did_mutate_dom(m_id, { type.to_string(), target.unique_id(), move(serialized_target), mutation.release_value() });
 }
 
-void PageClient::update_process_statistics()
-{
-    client().async_update_process_statistics(m_id);
-}
-
 ErrorOr<void> PageClient::connect_to_webdriver(ByteString const& webdriver_ipc_path)
 {
     VERIFY(!m_webdriver);
     m_webdriver = TRY(WebDriverConnection::connect(*this, webdriver_ipc_path));
 
     return {};
+}
+
+ErrorOr<void> PageClient::connect_to_web_ui(IPC::File web_ui_socket)
+{
+    auto* active_document = page().top_level_browsing_context().active_document();
+    if (!active_document || !active_document->window())
+        return {};
+
+    VERIFY(!m_web_ui);
+    m_web_ui = TRY(WebUIConnection::connect(move(web_ui_socket), *active_document));
+
+    return {};
+}
+
+void PageClient::received_message_from_web_ui(String const& name, JS::Value data)
+{
+    if (m_web_ui)
+        m_web_ui->received_message_from_web_ui(name, data);
 }
 
 void PageClient::initialize_js_console(Web::DOM::Document& document)
@@ -778,14 +801,9 @@ void PageClient::console_peer_did_misbehave(char const* reason)
     client().did_misbehave(reason);
 }
 
-void PageClient::did_get_styled_js_console_messages(i32 start_index, ReadonlySpan<String> message_types, ReadonlySpan<String> messages)
+void PageClient::did_get_js_console_messages(i32 start_index, ReadonlySpan<WebView::ConsoleOutput> console_output)
 {
-    client().async_did_get_styled_js_console_messages(m_id, start_index, message_types, messages);
-}
-
-void PageClient::did_get_unstyled_js_console_messages(i32 start_index, ReadonlySpan<WebView::ConsoleOutput> console_output)
-{
-    client().async_did_get_unstyled_js_console_messages(m_id, start_index, console_output);
+    client().async_did_get_js_console_messages(m_id, start_index, console_output);
 }
 
 static void gather_style_sheets(Vector<Web::CSS::StyleSheetIdentifier>& results, Web::CSS::CSSStyleSheet& sheet)
@@ -890,4 +908,5 @@ void PageClient::queue_screenshot_task(Optional<Web::UniqueNodeID> node_id)
     m_screenshot_tasks.enqueue({ node_id });
     page().top_level_traversable()->set_needs_repaint();
 }
+
 }

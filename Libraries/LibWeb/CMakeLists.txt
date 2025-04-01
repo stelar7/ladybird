@@ -183,6 +183,7 @@ set(SOURCES
     CSS/StyleValues/StyleValueList.cpp
     CSS/StyleValues/TransformationStyleValue.cpp
     CSS/StyleValues/TransitionStyleValue.cpp
+    CSS/StyleValues/UnicodeRangeStyleValue.cpp
     CSS/StyleValues/UnresolvedStyleValue.cpp
     CSS/Supports.cpp
     CSS/SyntaxHighlighter/SyntaxHighlighter.cpp
@@ -214,6 +215,7 @@ set(SOURCES
     DOM/DocumentType.cpp
     DOM/EditingHostManager.cpp
     DOM/Element.cpp
+    DOM/ElementByIdMap.cpp
     DOM/ElementFactory.cpp
     DOM/Event.cpp
     DOM/EventDispatcher.cpp
@@ -312,6 +314,7 @@ set(SOURCES
     HTML/AudioTrack.cpp
     HTML/AudioTrackList.cpp
     HTML/AutocompleteElement.cpp
+    HTML/BarProp.cpp
     HTML/BeforeUnloadEvent.cpp
     HTML/BroadcastChannel.cpp
     HTML/BrowsingContext.cpp
@@ -481,6 +484,7 @@ set(SOURCES
     HTML/PotentialCORSRequest.cpp
     HTML/PromiseRejectionEvent.cpp
     HTML/RadioNodeList.cpp
+    HTML/RenderingThread.cpp
     HTML/Scripting/Agent.cpp
     HTML/Scripting/ClassicScript.cpp
     HTML/Scripting/Environments.cpp
@@ -559,11 +563,13 @@ set(SOURCES
     IndexedDB/Internal/Algorithms.cpp
     IndexedDB/Internal/Database.cpp
     IndexedDB/Internal/Key.cpp
+    IndexedDB/Internal/ObjectStore.cpp
+    IndexedDB/Internal/Index.cpp
     IndexedDB/Internal/RequestList.cpp
     Internals/InternalAnimationTimeline.cpp
     Internals/Internals.cpp
     Internals/InternalsBase.cpp
-    Internals/Processes.cpp
+    Internals/WebUI.cpp
     IntersectionObserver/IntersectionObserver.cpp
     IntersectionObserver/IntersectionObserverEntry.cpp
     Layout/AudioBox.cpp
@@ -918,6 +924,8 @@ invoke_generator(
 
 generate_css_implementation()
 
+generate_html_implementation()
+
 invoke_generator(
     "WebGLRenderingContextImpl.cpp"
     Lagom::GenerateWebGLRenderingContext
@@ -953,6 +961,7 @@ set(GENERATED_SOURCES
     CSS/MediaFeatureID.cpp
     CSS/PropertyID.cpp
     CSS/PseudoClass.cpp
+    CSS/PseudoElement.cpp
     CSS/QuirksModeStyleSheetSource.cpp
     CSS/TransformFunctions.cpp
     MathML/MathMLStyleSheetSource.cpp
@@ -961,11 +970,12 @@ set(GENERATED_SOURCES
     WebGL/WebGLRenderingContextImpl.cpp
     Worker/WebWorkerClientEndpoint.h
     Worker/WebWorkerServerEndpoint.h
+    HTML/Parser/NamedCharacterReferences.cpp
 )
 
 serenity_lib(LibWeb web)
 
-target_link_libraries(LibWeb PRIVATE LibCore LibCompress LibCrypto LibJS LibHTTP LibGfx LibIPC LibRegex LibSyntax LibTextCodec LibUnicode LibMedia LibWasm LibXML LibIDL LibURL LibTLS LibRequests LibGC skia)
+target_link_libraries(LibWeb PRIVATE LibCore LibCompress LibCrypto LibJS LibHTTP LibGfx LibIPC LibRegex LibSyntax LibTextCodec LibUnicode LibMedia LibWasm LibXML LibIDL LibURL LibTLS LibRequests LibGC LibThreading skia)
 
 if (APPLE)
     target_link_libraries(LibWeb PRIVATE unofficial::angle::libEGL unofficial::angle::libGLESv2)
