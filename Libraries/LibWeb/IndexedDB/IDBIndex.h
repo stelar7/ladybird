@@ -26,13 +26,12 @@ public:
     virtual ~IDBIndex() override;
     [[nodiscard]] static GC::Ref<IDBIndex> create(JS::Realm&, GC::Ref<Index>, GC::Ref<IDBObjectStore>);
 
-    GC::Ref<IDBObjectStore> object_store() { return m_object_store_handle; }
-    JS::Value key_path() const;
-    bool unique() const { return m_index->unique(); }
-    bool multi_entry() const { return m_index->multi_entry(); }
-
     WebIDL::ExceptionOr<void> set_name(String const& value);
     String name() const { return m_name; }
+    GC::Ref<IDBObjectStore> object_store() { return m_object_store_handle; }
+    JS::Value key_path() const;
+    bool multi_entry() const { return m_index->multi_entry(); }
+    bool unique() const { return m_index->unique(); }
 
     // The transaction of an index handle is the transaction of its associated object store handle.
     GC::Ref<IDBTransaction> transaction() { return m_object_store_handle->transaction(); }

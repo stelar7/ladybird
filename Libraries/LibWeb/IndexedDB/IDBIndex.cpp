@@ -4,14 +4,11 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/QuickSort.h>
-#include <LibGC/Ptr.h>
 #include <LibJS/Runtime/Array.h>
 #include <LibWeb/Bindings/IDBIndexPrototype.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/HTML/EventNames.h>
 #include <LibWeb/IndexedDB/IDBIndex.h>
-#include <LibWeb/IndexedDB/Internal/Key.h>
 
 namespace Web::IndexedDB {
 

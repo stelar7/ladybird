@@ -19,7 +19,7 @@ public:
 
 private:
     // A key generator has a current number.
-    // The current number is always a positive integer less than or equal to 253 (9007199254740992) + 1.
+    // The current number is always a positive integer less than or equal to 25^3 (9007199254740992) + 1.
     // The initial value of a key generator's current number is 1, set when the associated object store is created.
     // The current number is incremented as keys are generated, and may be updated to a specific value by using explicit keys.
     // FIXME: Implement support for KeyGenerator in ObjectStore.

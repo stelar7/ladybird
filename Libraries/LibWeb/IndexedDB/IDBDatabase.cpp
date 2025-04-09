@@ -24,7 +24,6 @@ IDBDatabase::IDBDatabase(JS::Realm& realm, Database& db)
     , m_name(db.name())
     , m_associated_database(db)
 {
-    m_uuid = MUST(Crypto::generate_random_uuid());
     db.associate(*this);
     m_uuid = MUST(Crypto::generate_random_uuid());
     m_object_store_set = Vector<GC::Ref<ObjectStore>> { db.object_stores() };
