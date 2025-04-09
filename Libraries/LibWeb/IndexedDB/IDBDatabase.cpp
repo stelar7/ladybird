@@ -225,7 +225,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBTransaction>> IDBDatabase::transaction(Variant<St
         return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid transaction mode"_string };
 
     // 7. Let transaction be a newly created transaction with this connection, mode, options’ durability member, and the set of object stores named in scope.
-    Vector<GC::Root<ObjectStore>> scope_stores;
+    Vector<GC::Ref<ObjectStore>> scope_stores;
     for (auto const& store_name : scope) {
         auto store = database->object_store_with_name(store_name);
         scope_stores.append(*store);

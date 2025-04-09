@@ -87,8 +87,6 @@ public:
     void set_onversionchange(WebIDL::CallbackType*);
     WebIDL::CallbackType* onversionchange();
 
-    [[nodiscard]] String uuid() const { return m_uuid; }
-
 protected:
     explicit IDBDatabase(JS::Realm&, Database&);
 

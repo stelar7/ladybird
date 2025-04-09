@@ -23,7 +23,7 @@ private:
     // The initial value of a key generator's current number is 1, set when the associated object store is created.
     // The current number is incremented as keys are generated, and may be updated to a specific value by using explicit keys.
     // FIXME: Implement support for KeyGenerator in ObjectStore.
-    [[maybe_unused]] u64 current_number { 1 };
+    [[maybe_unused]] u64 m_current_number { 1 };
 };
 
 }

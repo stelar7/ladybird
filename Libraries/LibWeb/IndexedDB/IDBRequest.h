@@ -48,8 +48,6 @@ public:
     void set_onerror(WebIDL::CallbackType*);
     WebIDL::CallbackType* onerror();
 
-    [[nodiscard]] String uuid() const { return m_uuid; }
-
 protected:
     explicit IDBRequest(JS::Realm&, IDBRequestSource);
 

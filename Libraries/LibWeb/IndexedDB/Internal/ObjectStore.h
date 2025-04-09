@@ -49,9 +49,6 @@ public:
     GC::Ref<Database> database() const { return m_database; }
     Vector<Record> const& records() const { return m_records; }
 
-    void add_index(GC::Ref<Index> index) { m_indexes.append(index); }
-    ReadonlySpan<GC::Ref<Index>> index_set() const { return m_indexes; }
-
     Optional<Record> first_in_range(GC::Ref<IDBKeyRange> range);
     u64 count_records_in_range(GC::Ref<IDBKeyRange> range);
     bool has_record_with_key(GC::Ref<Key> key);

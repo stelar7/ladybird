@@ -65,7 +65,6 @@ public:
 
     void add_to_scope(GC::Ref<ObjectStore> object_store) { m_scope.append(object_store); }
     [[nodiscard]] GC::Ptr<ObjectStore> object_store_named(String const& name) const;
-    [[nodiscard]] String uuid() const { return m_uuid; }
 
     WebIDL::ExceptionOr<void> abort();
     WebIDL::ExceptionOr<void> commit();

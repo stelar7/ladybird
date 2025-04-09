@@ -57,19 +57,14 @@ public:
     bool auto_increment() const;
     JS::Value key_path() const;
 
-    // If the object store has a key path it is said to use in-line keys. Otherwise it is said to use out-of-line keys.
     bool uses_inline_keys() const;
     bool uses_out_of_line_keys() const;
 
     void set_transaction(GC::Ref<IDBTransaction> transaction) { m_transaction = transaction; }
     GC::Ref<IDBTransaction> transaction() { return m_transaction; }
     GC::Ref<ObjectStore> store() { return m_store; }
-    AK::ReadonlySpan<GC::Ref<Index>> index_set() const { return m_indexes; }
-    void add_index(GC::Ref<Index> index) { m_indexes.append(index); }
 
     [[nodiscard]] WebIDL::ExceptionOr<GC::Ref<IDBRequest>> count(Optional<JS::Value>);
-    WebIDL::ExceptionOr<GC::Ref<IDBIndex>> create_index(String const&, KeyPath, IDBIndexParameters options = {});
-    [[nodiscard]] GC::Ref<HTML::DOMStringList> index_names();
     [[nodiscard]] WebIDL::ExceptionOr<GC::Ref<IDBRequest>> add_or_put(GC::Ref<IDBObjectStore>, JS::Value, Optional<JS::Value> const&, bool);
     [[nodiscard]] WebIDL::ExceptionOr<GC::Ref<IDBRequest>> add(JS::Value value, Optional<JS::Value> const& key);
     [[nodiscard]] WebIDL::ExceptionOr<GC::Ref<IDBRequest>> put(JS::Value value, Optional<JS::Value> const& key);
@@ -89,9 +84,6 @@ protected:
     virtual void visit_edges(Visitor& visitor) override;
 
 private:
-    // An object store handle has an index set
-    Vector<GC::Ref<Index>> m_indexes;
-
     // An object store handle has an associated object store and an associated transaction.
     GC::Ref<ObjectStore> m_store;
     GC::Ref<IDBTransaction> m_transaction;

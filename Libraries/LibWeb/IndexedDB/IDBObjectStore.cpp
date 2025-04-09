@@ -80,69 +80,6 @@ bool IDBObjectStore::auto_increment() const
     return m_store->key_generator().has_value();
 }
 
-WebIDL::ExceptionOr<GC::Ref<IDBIndex>> IDBObjectStore::create_index(String const& name, KeyPath key_path, IDBIndexParameters options)
-{
-    auto& realm = this->realm();
-
-    // 1. Let transaction be this's transaction.
-    auto transaction = this->transaction();
-
-    // 2. Let store be this's object store.
-    auto store = this->store();
-
-    // 3. If transaction is not an upgrade transaction, throw an "InvalidStateError" DOMException.
-    if (transaction->mode() != Bindings::IDBTransactionMode::Versionchange)
-        return WebIDL::InvalidStateError::create(realm, "Transaction is not an upgrade transaction"_string);
-
-    // FIXME: 4. If store has been deleted, throw an "InvalidStateError" DOMException.
-
-    // 5. If transaction’s state is not active, then throw a "TransactionInactiveError" DOMException.
-    if (transaction->state() != IDBTransaction::TransactionState::Active)
-        return WebIDL::TransactionInactiveError::create(realm, "Transaction is not active while creating index"_string);
-
-    // 6. If an index named name already exists in store, throw a "ConstraintError" DOMException.
-    for (auto const& index : store->index_set()) {
-        if (index->name() == name)
-            return WebIDL::ConstraintError::create(realm, "An index with the given name already exists"_string);
-    }
-
-    // 7. If keyPath is not a valid key path, throw a "SyntaxError" DOMException.
-    if (!is_valid_key_path(key_path))
-        return WebIDL::SyntaxError::create(realm, "Key path is not valid"_string);
-
-    // 8. Let unique be options’s unique member.
-    auto unique = options.unique;
-
-    // 9. Let multiEntry be options’s multiEntry member.
-    auto multi_entry = options.multi_entry;
-
-    // 10. If keyPath is a sequence and multiEntry is true, throw an "InvalidAccessError" DOMException.
-    if (key_path.has<Vector<String>>() && multi_entry)
-        return WebIDL::InvalidAccessError::create(realm, "Key path is a sequence and multiEntry is true"_string);
-
-    // 11. Let index be a new index in store.
-    //     Set index’s name to name, key path to keyPath, unique flag to unique, and multiEntry flag to multiEntry.
-    auto index = Index::create(realm, store, name, key_path, unique, multi_entry);
-
-    // 12. Add index to this's index set.
-    this->add_index(index);
-
-    // 13. Return a new index handle associated with index and this.
-    return IDBIndex::create(realm, index, *this);
-}
-
-// https://w3c.github.io/IndexedDB/#dom-idbobjectstore-indexnames
-GC::Ref<HTML::DOMStringList> IDBObjectStore::index_names()
-{
-    // 1. Let names be a list of the names of the indexes in this's index set.
-    Vector<String> names;
-    for (auto const& index : m_indexes)
-        names.append(index->name());
-
-    // 2. Return the result (a DOMStringList) of creating a sorted name list with names.
-    return create_a_sorted_name_list(realm(), names);
-}
-
 // https://w3c.github.io/IndexedDB/#add-or-put
 WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::add_or_put(GC::Ref<IDBObjectStore> handle, JS::Value value, Optional<JS::Value> const& key, bool no_overwrite)
 {

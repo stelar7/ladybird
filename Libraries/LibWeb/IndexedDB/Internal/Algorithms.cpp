@@ -1139,7 +1139,7 @@ WebIDL::ExceptionOr<GC::Ptr<Key>> store_a_record_into_an_object_store(JS::Realm&
     store->store_a_record(record);
 
     // 5. For each index which references store:
-    for (auto const& index : store->index_set()) {
+    for (auto const& [name, index] : store->index_set()) {
         // 1. Let index key be the result of extracting a key from a value using a key path with value, index’s key path, and index’s multiEntry flag.
         auto index_key = TRY(extract_a_key_from_a_value_using_a_key_path(realm, value, index->key_path(), index->multi_entry()));
 
