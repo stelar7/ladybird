@@ -21,6 +21,12 @@
 
 namespace Web::IndexedDB {
 
+// https://w3c.github.io/IndexedDB/#object-store-record
+struct Record {
+    GC::Ref<Key> key;
+    HTML::SerializationRecord value;
+};
+
 using KeyPath = Variant<String, Vector<String>>;
 
 // https://w3c.github.io/IndexedDB/#object-store-construct
@@ -41,6 +47,13 @@ public:
     AK::HashMap<String, GC::Ref<Index>>& index_set() { return m_indexes; }
 
     GC::Ref<Database> database() const { return m_database; }
+    Vector<Record> const& records() const { return m_records; }
+
+    Optional<Record> first_in_range(GC::Ref<IDBKeyRange> range);
+    u64 count_records_in_range(GC::Ref<IDBKeyRange> range);
+    bool has_record_with_key(GC::Ref<Key> key);
+    void remove_records_in_range(GC::Ref<IDBKeyRange> range);
+    void store_a_record(Record const& record);
 
 protected:
     virtual void visit_edges(Visitor&) override;
@@ -62,6 +75,9 @@ private:
 
     // An object store optionally has a key generator.
     Optional<KeyGenerator> m_key_generator;
+
+    // An object store has a list of records
+    Vector<Record> m_records;
 };
 
 }

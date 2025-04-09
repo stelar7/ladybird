@@ -11,6 +11,7 @@
 #include <AK/Variant.h>
 #include <AK/Vector.h>
 #include <LibGC/Ptr.h>
+#include <LibGC/Root.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibJS/Runtime/Realm.h>
 #include <LibWeb/Bindings/PlatformObject.h>
@@ -29,6 +30,7 @@ class Key : public JS::Cell {
     // * a list of other keys if type is array.
     using KeyValue = Variant<double, AK::String, ByteBuffer, Vector<GC::Root<Key>>>;
 
+public:
     // A key has an associated type which is one of: number, date, string, binary, or array.
     enum KeyType {
         Number,
@@ -38,7 +40,6 @@ class Key : public JS::Cell {
         Array,
     };
 
-public:
     [[nodiscard]] static GC::Ref<Key> create(JS::Realm&, KeyType, KeyValue);
     virtual ~Key();
 

@@ -628,6 +628,9 @@ class IDBVersionChangeEvent;
 class Index;
 class ObjectStore;
 class RequestList;
+struct IDBTransactionOptions;
+struct IndexRecord;
+struct Record;
 }
 
 namespace Web::Internals {

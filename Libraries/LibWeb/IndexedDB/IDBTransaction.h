@@ -6,8 +6,10 @@
 
 #pragma once
 
+#include <AK/Optional.h>
 #include <AK/Vector.h>
 #include <LibGC/Ptr.h>
+#include <LibGC/Root.h>
 #include <LibWeb/Bindings/IDBDatabasePrototype.h>
 #include <LibWeb/Bindings/IDBTransactionPrototype.h>
 #include <LibWeb/DOM/Event.h>
@@ -44,6 +46,7 @@ public:
     [[nodiscard]] GC::Ptr<IDBRequest> associated_request() const { return m_associated_request; }
     [[nodiscard]] bool aborted() const { return m_aborted; }
     [[nodiscard]] GC::Ref<HTML::DOMStringList> object_store_names();
+    [[nodiscard]] RequestList& request_list() { return m_request_list; }
     [[nodiscard]] ReadonlySpan<GC::Ref<ObjectStore>> scope() const { return m_scope; }
     [[nodiscard]] String uuid() const { return m_uuid; }
 
@@ -52,12 +55,20 @@ public:
     void set_error(GC::Ptr<WebIDL::DOMException> error) { m_error = error; }
     void set_associated_request(GC::Ptr<IDBRequest> request) { m_associated_request = request; }
     void set_aborted(bool aborted) { m_aborted = aborted; }
+    void set_cleanup_event_loop(GC::Ptr<HTML::EventLoop> event_loop) { m_cleanup_event_loop = event_loop; }
 
     [[nodiscard]] bool is_upgrade_transaction() const { return m_mode == Bindings::IDBTransactionMode::Versionchange; }
     [[nodiscard]] bool is_readonly() const { return m_mode == Bindings::IDBTransactionMode::Readonly; }
     [[nodiscard]] bool is_readwrite() const { return m_mode == Bindings::IDBTransactionMode::Readwrite; }
+    [[nodiscard]] bool is_finished() const { return m_state == TransactionState::Finished; }
+    [[nodiscard]] bool is_complete() const { return is_finished(); }
+
+    void add_to_scope(GC::Ref<ObjectStore> object_store) { m_scope.append(object_store); }
+    [[nodiscard]] GC::Ptr<ObjectStore> object_store_named(String const& name) const;
 
     WebIDL::ExceptionOr<void> abort();
+    WebIDL::ExceptionOr<void> commit();
+    WebIDL::ExceptionOr<GC::Ref<IDBObjectStore>> object_store(String const& name);
 
     void set_onabort(WebIDL::CallbackType*);
     WebIDL::CallbackType* onabort();

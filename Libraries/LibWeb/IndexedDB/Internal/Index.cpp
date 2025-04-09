@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/QuickSort.h>
 #include <LibWeb/IndexedDB/Internal/Index.h>
 #include <LibWeb/IndexedDB/Internal/ObjectStore.h>
 
@@ -37,6 +38,30 @@ void Index::visit_edges(Visitor& visitor)
         visitor.visit(record.key);
         visitor.visit(record.value);
     }
+}
+
+void Index::store_a_record(IndexRecord const& record)
+{
+    m_records.append(record);
+
+    // The records are stored in index’s list of records such that the list is sorted primarily on the records keys, and secondarily on the records values, in ascending order.
+    AK::quick_sort(m_records, [](IndexRecord const& a, IndexRecord const& b) {
+        auto key_compare = Key::compare_two_keys(a.key, b.key);
+
+        if (key_compare != 0)
+            return key_compare < 0;
+
+        return Key::compare_two_keys(a.value, b.value) < 0;
+    });
+}
+
+bool Index::has_record_with_key(GC::Ref<Key> key)
+{
+    auto index = m_records.find_if([&key](auto const& record) {
+        return record.key == key;
+    });
+
+    return index != m_records.end();
 }
 
 void Index::set_name(String name)

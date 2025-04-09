@@ -4,9 +4,11 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibWeb/Bindings/IDBDatabasePrototype.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Crypto/Crypto.h>
 #include <LibWeb/HTML/EventNames.h>
+#include <LibWeb/IndexedDB/IDBObjectStore.h>
 #include <LibWeb/IndexedDB/IDBTransaction.h>
 #include <LibWeb/IndexedDB/Internal/Algorithms.h>
 
@@ -23,6 +25,7 @@ IDBTransaction::IDBTransaction(JS::Realm& realm, GC::Ref<IDBDatabase> connection
     , m_durability(durability)
     , m_scope(move(scopes))
 {
+    connection->add_created_transaction(*this);
     m_uuid = MUST(Crypto::generate_random_uuid());
 }
 
@@ -44,6 +47,7 @@ void IDBTransaction::visit_edges(Visitor& visitor)
     visitor.visit(m_error);
     visitor.visit(m_associated_request);
     visitor.visit(m_scope);
+    visitor.visit(m_request_list);
     visitor.visit(m_cleanup_event_loop);
 }
 
@@ -90,6 +94,34 @@ WebIDL::ExceptionOr<void> IDBTransaction::abort()
     return {};
 }
 
+GC::Ptr<ObjectStore> IDBTransaction::object_store_named(String const& name) const
+{
+    for (auto const& store : m_scope) {
+        if (store->name() == name)
+            return GC::Ref(*store);
+    }
+
+    return nullptr;
+}
+
+// https://w3c.github.io/IndexedDB/#dom-idbtransaction-objectstore
+WebIDL::ExceptionOr<GC::Ref<IDBObjectStore>> IDBTransaction::object_store(String const& name)
+{
+    auto& realm = this->realm();
+
+    // 1. If this's state is finished, then throw an "InvalidStateError" DOMException.
+    if (m_state == TransactionState::Finished)
+        return WebIDL::InvalidStateError::create(realm, "Transaction is finished"_string);
+
+    // 2. Let store be the object store named name in this's scope, or throw a "NotFoundError" DOMException if none.
+    auto store = object_store_named(name);
+    if (!store)
+        return WebIDL::NotFoundError::create(realm, "Object store not found"_string);
+
+    // 3. Return an object store handle associated with store and this.
+    return IDBObjectStore::create(realm, *store, *this);
+}
+
 // https://w3c.github.io/IndexedDB/#dom-idbtransaction-objectstorenames
 GC::Ref<HTML::DOMStringList> IDBTransaction::object_store_names()
 {
@@ -100,6 +132,18 @@ GC::Ref<HTML::DOMStringList> IDBTransaction::object_store_names()
 
     // 2. Return the result (a DOMStringList) of creating a sorted name list with names.
     return create_a_sorted_name_list(realm(), names);
+}
+
+// https://w3c.github.io/IndexedDB/#dom-idbtransaction-commit
+WebIDL::ExceptionOr<void> IDBTransaction::commit()
+{
+    // 1. If this's state is not active, then throw an "InvalidStateError" DOMException.
+    if (m_state != TransactionState::Active)
+        return WebIDL::InvalidStateError::create(realm(), "Transaction is not active while commiting"_string);
+
+    // 2. Run commit a transaction with this.
+    commit_a_transaction(realm(), *this);
+    return {};
 }
 
 }

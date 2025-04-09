@@ -7,11 +7,15 @@
 #pragma once
 
 #include <LibGC/Heap.h>
+#include <LibGC/Ptr.h>
 #include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/IndexedDB/IDBObjectStore.h>
+#include <LibWeb/IndexedDB/Internal/Algorithms.h>
 #include <LibWeb/IndexedDB/Internal/Index.h>
 
 namespace Web::IndexedDB {
+
+using KeyPath = Variant<String, Vector<String>>;
 
 // https://w3c.github.io/IndexedDB/#index-interface
 class IDBIndex : public Bindings::PlatformObject {
@@ -32,7 +36,6 @@ public:
     // The transaction of an index handle is the transaction of its associated object store handle.
     GC::Ref<IDBTransaction> transaction() { return m_object_store_handle->transaction(); }
     GC::Ref<Index> index() { return m_index; }
-    GC::Ref<IDBObjectStore> store() { return m_object_store_handle; }
 
 protected:
     explicit IDBIndex(JS::Realm&, GC::Ref<Index>, GC::Ref<IDBObjectStore>);
