@@ -5,6 +5,7 @@
  */
 
 #include <AK/ByteString.h>
+#include <AK/Find.h>
 #include <AK/JsonArray.h>
 #include <AK/JsonObject.h>
 #include <AK/JsonValue.h>
@@ -14,6 +15,7 @@
 #include <LibCore/File.h>
 #include <LibCore/StandardPaths.h>
 #include <LibURL/Parser.h>
+#include <LibUnicode/Locale.h>
 #include <LibWebView/Application.h>
 #include <LibWebView/Settings.h>
 
@@ -21,13 +23,23 @@ namespace WebView {
 
 static constexpr auto new_tab_page_url_key = "newTabPageURL"sv;
 
+static constexpr auto languages_key = "languages"sv;
+static auto default_language = "en"_string;
+
 static constexpr auto search_engine_key = "searchEngine"sv;
+static constexpr auto search_engine_custom_key = "custom"sv;
 static constexpr auto search_engine_name_key = "name"sv;
+static constexpr auto search_engine_url_key = "url"sv;
+
+static constexpr auto autocomplete_engine_key = "autocompleteEngine"sv;
+static constexpr auto autocomplete_engine_name_key = "name"sv;
 
 static constexpr auto site_setting_enabled_globally_key = "enabledGlobally"sv;
 static constexpr auto site_setting_site_filters_key = "siteFilters"sv;
 
 static constexpr auto autoplay_key = "autoplay"sv;
+
+static constexpr auto do_not_track_key = "doNotTrack"sv;
 
 static ErrorOr<JsonObject> read_settings_file(StringView settings_path)
 {
@@ -76,9 +88,27 @@ Settings Settings::create(Badge<Application>)
             settings.m_new_tab_page_url = parsed_new_tab_page_url.release_value();
     }
 
+    if (auto languages = settings_json.value().get(languages_key); languages.has_value())
+        settings.m_languages = parse_json_languages(*languages);
+
     if (auto search_engine = settings_json.value().get_object(search_engine_key); search_engine.has_value()) {
+        if (auto custom_engines = search_engine->get_array(search_engine_custom_key); custom_engines.has_value()) {
+            custom_engines->for_each([&](JsonValue const& engine) {
+                auto custom_engine = parse_custom_search_engine(engine);
+                if (!custom_engine.has_value() || settings.find_search_engine_by_name(custom_engine->name).has_value())
+                    return;
+
+                settings.m_custom_search_engines.append(custom_engine.release_value());
+            });
+        }
+
         if (auto search_engine_name = search_engine->get_string(search_engine_name_key); search_engine_name.has_value())
-            settings.m_search_engine = find_search_engine_by_name(*search_engine_name);
+            settings.m_search_engine = settings.find_search_engine_by_name(*search_engine_name);
+    }
+
+    if (auto autocomplete_engine = settings_json.value().get_object(autocomplete_engine_key); autocomplete_engine.has_value()) {
+        if (auto autocomplete_engine_name = autocomplete_engine->get_string(autocomplete_engine_name_key); autocomplete_engine_name.has_value())
+            settings.m_autocomplete_engine = find_autocomplete_engine_by_name(*autocomplete_engine_name);
     }
 
     auto load_site_setting = [&](SiteSetting& site_setting, StringView key) {
@@ -101,12 +131,16 @@ Settings Settings::create(Badge<Application>)
 
     load_site_setting(settings.m_autoplay, autoplay_key);
 
+    if (auto do_not_track = settings_json.value().get_bool(do_not_track_key); do_not_track.has_value())
+        settings.m_do_not_track = *do_not_track ? DoNotTrack::Yes : DoNotTrack::No;
+
     return settings;
 }
 
 Settings::Settings(ByteString settings_path)
     : m_settings_path(move(settings_path))
     , m_new_tab_page_url(URL::about_newtab())
+    , m_languages({ default_language })
 {
 }
 
@@ -115,11 +149,39 @@ JsonValue Settings::serialize_json() const
     JsonObject settings;
     settings.set(new_tab_page_url_key, m_new_tab_page_url.serialize());
 
-    if (m_search_engine.has_value()) {
+    JsonArray languages;
+    languages.ensure_capacity(m_languages.size());
+
+    for (auto const& language : m_languages)
+        languages.must_append(language);
+
+    settings.set(languages_key, move(languages));
+
+    JsonArray custom_search_engines;
+    custom_search_engines.ensure_capacity(m_custom_search_engines.size());
+
+    for (auto const& engine : m_custom_search_engines) {
         JsonObject search_engine;
+        search_engine.set(search_engine_name_key, engine.name);
+        search_engine.set(search_engine_url_key, engine.query_url);
+
+        custom_search_engines.must_append(move(search_engine));
+    }
+
+    JsonObject search_engine;
+    if (!custom_search_engines.is_empty())
+        search_engine.set(search_engine_custom_key, move(custom_search_engines));
+    if (m_search_engine.has_value())
         search_engine.set(search_engine_name_key, m_search_engine->name);
 
+    if (!search_engine.is_empty())
         settings.set(search_engine_key, move(search_engine));
+
+    if (m_autocomplete_engine.has_value()) {
+        JsonObject autocomplete_engine;
+        autocomplete_engine.set(autocomplete_engine_name_key, m_autocomplete_engine->name);
+
+        settings.set(autocomplete_engine_key, move(autocomplete_engine));
     }
 
     auto save_site_setting = [&](SiteSetting const& site_setting, StringView key) {
@@ -138,19 +200,31 @@ JsonValue Settings::serialize_json() const
 
     save_site_setting(m_autoplay, autoplay_key);
 
+    settings.set(do_not_track_key, m_do_not_track == DoNotTrack::Yes);
+
     return settings;
 }
 
 void Settings::restore_defaults()
 {
     m_new_tab_page_url = URL::about_newtab();
+    m_languages = { default_language };
     m_search_engine.clear();
+    m_custom_search_engines.clear();
+    m_autocomplete_engine.clear();
     m_autoplay = SiteSetting {};
+    m_do_not_track = DoNotTrack::No;
 
     persist_settings();
 
-    for (auto& observer : m_observers)
+    for (auto& observer : m_observers) {
         observer.new_tab_page_url_changed();
+        observer.languages_changed();
+        observer.search_engine_changed();
+        observer.autocomplete_engine_changed();
+        observer.autoplay_settings_changed();
+        observer.do_not_track_changed();
+    }
 }
 
 void Settings::set_new_tab_page_url(URL::URL new_tab_page_url)
@@ -160,6 +234,34 @@ void Settings::set_new_tab_page_url(URL::URL new_tab_page_url)
 
     for (auto& observer : m_observers)
         observer.new_tab_page_url_changed();
+}
+
+Vector<String> Settings::parse_json_languages(JsonValue const& languages)
+{
+    if (!languages.is_array())
+        return { default_language };
+
+    Vector<String> parsed_languages;
+    parsed_languages.ensure_capacity(languages.as_array().size());
+
+    languages.as_array().for_each([&](JsonValue const& language) {
+        if (language.is_string() && Unicode::is_locale_available(language.as_string()))
+            parsed_languages.append(language.as_string());
+    });
+
+    if (parsed_languages.is_empty())
+        return { default_language };
+
+    return parsed_languages;
+}
+
+void Settings::set_languages(Vector<String> languages)
+{
+    m_languages = move(languages);
+    persist_settings();
+
+    for (auto& observer : m_observers)
+        observer.languages_changed();
 }
 
 void Settings::set_search_engine(Optional<StringView> search_engine_name)
@@ -173,6 +275,75 @@ void Settings::set_search_engine(Optional<StringView> search_engine_name)
 
     for (auto& observer : m_observers)
         observer.search_engine_changed();
+}
+
+Optional<SearchEngine> Settings::parse_custom_search_engine(JsonValue const& search_engine)
+{
+    if (!search_engine.is_object())
+        return {};
+
+    auto name = search_engine.as_object().get_string(search_engine_name_key);
+    auto url = search_engine.as_object().get_string(search_engine_url_key);
+    if (!name.has_value() || !url.has_value())
+        return {};
+
+    auto parsed_url = URL::Parser::basic_parse(*url);
+    if (!parsed_url.has_value())
+        return {};
+
+    return SearchEngine { .name = name.release_value(), .query_url = url.release_value() };
+}
+
+void Settings::add_custom_search_engine(SearchEngine search_engine)
+{
+    if (find_search_engine_by_name(search_engine.name).has_value())
+        return;
+
+    m_custom_search_engines.append(move(search_engine));
+    persist_settings();
+}
+
+void Settings::remove_custom_search_engine(SearchEngine const& search_engine)
+{
+    auto reset_default_search_engine = m_search_engine.has_value() && m_search_engine->name == search_engine.name;
+    if (reset_default_search_engine)
+        m_search_engine.clear();
+
+    m_custom_search_engines.remove_all_matching([&](auto const& engine) {
+        return engine.name == search_engine.name;
+    });
+
+    persist_settings();
+
+    if (reset_default_search_engine) {
+        for (auto& observer : m_observers)
+            observer.search_engine_changed();
+    }
+}
+
+Optional<SearchEngine> Settings::find_search_engine_by_name(StringView name)
+{
+    auto comparator = [&](auto const& engine) { return engine.name == name; };
+
+    if (auto result = find_value(builtin_search_engines(), comparator); result.has_value())
+        return result.copy();
+    if (auto result = find_value(m_custom_search_engines, comparator); result.has_value())
+        return result.copy();
+
+    return {};
+}
+
+void Settings::set_autocomplete_engine(Optional<StringView> autocomplete_engine_name)
+{
+    if (autocomplete_engine_name.has_value())
+        m_autocomplete_engine = find_autocomplete_engine_by_name(*autocomplete_engine_name);
+    else
+        m_autocomplete_engine.clear();
+
+    persist_settings();
+
+    for (auto& observer : m_observers)
+        observer.autocomplete_engine_changed();
 }
 
 void Settings::set_autoplay_enabled_globally(bool enabled_globally)
@@ -213,6 +384,15 @@ void Settings::remove_all_autoplay_site_filters()
 
     for (auto& observer : m_observers)
         observer.autoplay_settings_changed();
+}
+
+void Settings::set_do_not_track(DoNotTrack do_not_track)
+{
+    m_do_not_track = do_not_track;
+    persist_settings();
+
+    for (auto& observer : m_observers)
+        observer.do_not_track_changed();
 }
 
 void Settings::persist_settings()

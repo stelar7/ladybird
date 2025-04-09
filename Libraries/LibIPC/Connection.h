@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018-2024, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2025, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
  * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -12,7 +13,9 @@
 #include <LibCore/EventReceiver.h>
 #include <LibIPC/File.h>
 #include <LibIPC/Forward.h>
+#include <LibIPC/Message.h>
 #include <LibIPC/Transport.h>
+#include <LibIPC/UnprocessedFileDescriptors.h>
 #include <LibThreading/ConditionVariable.h>
 #include <LibThreading/MutexProtected.h>
 #include <LibThreading/Thread.h>
@@ -27,56 +30,42 @@ public:
 
     [[nodiscard]] bool is_open() const;
     ErrorOr<void> post_message(Message const&);
-    ErrorOr<void> post_message(MessageBuffer);
+    ErrorOr<void> post_message(u32 endpoint_magic, MessageBuffer);
 
     void shutdown();
     virtual void die() { }
 
-    Transport& transport() { return m_transport; }
+    Transport& transport() const { return *m_transport; }
 
 protected:
-    explicit ConnectionBase(IPC::Stub&, Transport, u32 local_endpoint_magic);
+    explicit ConnectionBase(IPC::Stub&, NonnullOwnPtr<Transport>, u32 local_endpoint_magic);
 
     virtual void may_have_become_unresponsive() { }
     virtual void did_become_responsive() { }
     virtual void shutdown_with_error(Error const&);
-    virtual OwnPtr<Message> try_parse_message(ReadonlyBytes, Queue<IPC::File>&) = 0;
+    virtual OwnPtr<Message> try_parse_message(ReadonlyBytes, UnprocessedFileDescriptors&) = 0;
 
     OwnPtr<IPC::Message> wait_for_specific_endpoint_message_impl(u32 endpoint_magic, int message_id);
     void wait_for_transport_to_become_readable();
-    ErrorOr<Vector<u8>> read_as_much_as_possible_from_transport_without_blocking();
     ErrorOr<void> drain_messages_from_peer();
-    void try_parse_messages(Vector<u8> const& bytes, size_t& index);
 
     void handle_messages();
 
     IPC::Stub& m_local_stub;
 
-    Transport m_transport;
+    NonnullOwnPtr<Transport> m_transport;
 
     RefPtr<Core::Timer> m_responsiveness_timer;
 
     Vector<NonnullOwnPtr<Message>> m_unprocessed_messages;
-    Queue<IPC::File> m_unprocessed_fds; // unused on Windows
-    ByteBuffer m_unprocessed_bytes;
 
     u32 m_local_endpoint_magic { 0 };
-
-    struct SendQueue : public AtomicRefCounted<SendQueue> {
-        AK::SinglyLinkedList<MessageBuffer> messages;
-        Threading::Mutex mutex;
-        Threading::ConditionVariable condition { mutex };
-        bool running { true };
-    };
-
-    RefPtr<Threading::Thread> m_send_thread;
-    RefPtr<SendQueue> m_send_queue;
 };
 
 template<typename LocalEndpoint, typename PeerEndpoint>
 class Connection : public ConnectionBase {
 public:
-    Connection(IPC::Stub& local_stub, Transport transport)
+    Connection(IPC::Stub& local_stub, NonnullOwnPtr<Transport> transport)
         : ConnectionBase(local_stub, move(transport), LocalEndpoint::static_magic())
     {
     }
@@ -113,7 +102,7 @@ protected:
         return {};
     }
 
-    virtual OwnPtr<Message> try_parse_message(ReadonlyBytes bytes, Queue<IPC::File>& fds) override
+    virtual OwnPtr<Message> try_parse_message(ReadonlyBytes bytes, UnprocessedFileDescriptors& fds) override
     {
         auto local_message = LocalEndpoint::decode_message(bytes, fds);
         if (!local_message.is_error())

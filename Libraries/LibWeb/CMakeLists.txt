@@ -70,6 +70,7 @@ set(SOURCES
     CSS/CSSImportRule.cpp
     CSS/CSSKeyframeRule.cpp
     CSS/CSSKeyframesRule.cpp
+    CSS/CSSFontFaceDescriptors.cpp
     CSS/CSSFontFaceRule.cpp
     CSS/CSSLayerBlockRule.cpp
     CSS/CSSLayerStatementRule.cpp
@@ -89,6 +90,7 @@ set(SOURCES
     CSS/CSSTransition.cpp
     CSS/CascadedProperties.cpp
     CSS/ComputedProperties.cpp
+    CSS/Descriptor.cpp
     CSS/Display.cpp
     CSS/EdgeRect.cpp
     CSS/Fetch.cpp
@@ -108,6 +110,7 @@ set(SOURCES
     CSS/MediaQueryListEvent.cpp
     CSS/Number.cpp
     CSS/Parser/ComponentValue.cpp
+    CSS/Parser/DescriptorParsing.cpp
     CSS/Parser/GradientParsing.cpp
     CSS/Parser/Helpers.cpp
     CSS/Parser/MediaParsing.cpp
@@ -150,7 +153,7 @@ set(SOURCES
     CSS/StyleValues/ContentStyleValue.cpp
     CSS/StyleValues/CounterDefinitionsStyleValue.cpp
     CSS/StyleValues/CounterStyleValue.cpp
-    CSS/StyleValues/CSSColor.cpp
+    CSS/StyleValues/ColorFunctionStyleValue.cpp
     CSS/StyleValues/CSSColorValue.cpp
     CSS/StyleValues/CSSHSL.cpp
     CSS/StyleValues/CSSHWB.cpp
@@ -164,6 +167,7 @@ set(SOURCES
     CSS/StyleValues/EasingStyleValue.cpp
     CSS/StyleValues/EdgeStyleValue.cpp
     CSS/StyleValues/FilterValueListStyleValue.cpp
+    CSS/StyleValues/FontSourceStyleValue.cpp
     CSS/StyleValues/GridAutoFlowStyleValue.cpp
     CSS/StyleValues/GridTemplateAreaStyleValue.cpp
     CSS/StyleValues/GridTrackPlacementStyleValue.cpp
@@ -191,6 +195,7 @@ set(SOURCES
     CSS/Time.cpp
     CSS/Transformation.cpp
     CSS/TransitionEvent.cpp
+    CSS/URL.cpp
     CSS/VisualViewport.cpp
     Cookie/Cookie.cpp
     Cookie/ParsedCookie.cpp
@@ -562,6 +567,7 @@ set(SOURCES
     IndexedDB/IDBVersionChangeEvent.cpp
     IndexedDB/Internal/Algorithms.cpp
     IndexedDB/Internal/Database.cpp
+    IndexedDB/Internal/Index.cpp
     IndexedDB/Internal/Key.cpp
     IndexedDB/Internal/ObjectStore.cpp
     IndexedDB/Internal/Index.cpp
@@ -861,6 +867,7 @@ set(SOURCES
     WebDriver/TimeoutsConfiguration.cpp
     WebDriver/UserPrompt.cpp
     WebGL/Extensions/ANGLEInstancedArrays.cpp
+    WebGL/Extensions/EXTBlendMinMax.cpp
     WebGL/Extensions/EXTColorBufferFloat.cpp
     WebGL/Extensions/OESVertexArrayObject.cpp
     WebGL/Extensions/WebGLCompressedTextureS3tc.cpp
@@ -953,6 +960,7 @@ invoke_generator(
 set(GENERATED_SOURCES
     ARIA/AriaRoles.cpp
     CSS/DefaultStyleSheetSource.cpp
+    CSS/DescriptorID.cpp
     CSS/Enums.cpp
     CSS/GeneratedCSSStyleProperties.cpp
     CSS/GeneratedCSSStyleProperties.idl
@@ -1000,7 +1008,8 @@ if (ENABLE_SWIFT)
         HTML/Parser/HTMLToken.swift
         HTML/Parser/HTMLTokenizer.swift
         HTML/Parser/HTMLTokenizerHelpers.cpp
+        HTML/Parser/SpeculativeHTMLParser.swift
     )
     target_link_libraries(LibWeb PRIVATE AK Collections)
-    add_swift_target_properties(LibWeb LAGOM_LIBRARIES AK LibGfx)
+    add_swift_target_properties(LibWeb LAGOM_LIBRARIES AK LibGfx LibGC)
 endif()

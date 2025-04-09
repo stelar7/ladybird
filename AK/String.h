@@ -60,7 +60,7 @@ public:
     [[nodiscard]] static String from_utf8_with_replacement_character(StringView, WithBOMHandling = WithBOMHandling::Yes);
 
     template<typename T>
-    requires(IsOneOf<RemoveCVReference<T>, ByteString, DeprecatedFlyString, FlyString, String>)
+    requires(IsOneOf<RemoveCVReference<T>, ByteString, FlyString, String>)
     static ErrorOr<String> from_utf8(T&&) = delete;
 
     [[nodiscard]] static String from_utf8_without_validation(ReadonlyBytes);
@@ -112,6 +112,7 @@ public:
 
     [[nodiscard]] String to_ascii_lowercase() const;
     [[nodiscard]] String to_ascii_uppercase() const;
+    [[nodiscard]] bool is_ascii() const { return bytes_as_string_view().is_ascii(); }
 
     // Compare this String against another string with caseless matching. Using this method requires linking LibUnicode into your application.
     [[nodiscard]] bool equals_ignoring_case(String const&) const;
@@ -353,5 +354,6 @@ struct ASCIICaseInsensitiveStringTraits : public Traits<String> {
 
 [[nodiscard]] ALWAYS_INLINE AK::String operator""_string(char const* cstring, size_t length)
 {
-    return AK::String::from_utf8(AK::StringView(cstring, length)).release_value();
+    ASSERT(Utf8View(AK::StringView(cstring, length)).validate());
+    return AK::String::from_utf8_without_validation({ cstring, length });
 }

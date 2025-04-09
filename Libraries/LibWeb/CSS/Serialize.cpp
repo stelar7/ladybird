@@ -117,16 +117,6 @@ void serialize_a_url(StringBuilder& builder, StringView url)
     builder.append(')');
 }
 
-// https://www.w3.org/TR/cssom-1/#serialize-a-local
-void serialize_a_local(StringBuilder& builder, StringView path)
-{
-    // To serialize a LOCAL means to create a string represented by "local(",
-    // followed by the serialization of the LOCAL as a string, followed by ")".
-    builder.append("local("sv);
-    serialize_a_string(builder, path);
-    builder.append(')');
-}
-
 // NOTE: No spec currently exists for serializing a <'unicode-range'>.
 void serialize_unicode_ranges(StringBuilder& builder, Vector<Gfx::UnicodeRange> const& unicode_ranges)
 {
@@ -188,11 +178,11 @@ void serialize_a_srgb_value(StringBuilder& builder, Color color)
     // (depending on whether the alpha is exactly 1, or not), with lowercase letters for the function name.
     // NOTE: Since we use Gfx::Color, having an "alpha of 1" means its value is 255.
     if (color.alpha() == 0)
-        builder.appendff("rgba({}, {}, {}, 0)"sv, color.red(), color.green(), color.blue());
+        builder.appendff("rgba({}, {}, {}, 0)", color.red(), color.green(), color.blue());
     else if (color.alpha() == 255)
-        builder.appendff("rgb({}, {}, {})"sv, color.red(), color.green(), color.blue());
+        builder.appendff("rgb({}, {}, {})", color.red(), color.green(), color.blue());
     else
-        builder.appendff("rgba({}, {}, {}, 0.{})"sv, color.red(), color.green(), color.blue(), format_to_8bit_compatible(color.alpha()).data());
+        builder.appendff("rgba({}, {}, {}, 0.{})", color.red(), color.green(), color.blue(), format_to_8bit_compatible(color.alpha()).data());
 }
 
 String serialize_an_identifier(StringView ident)

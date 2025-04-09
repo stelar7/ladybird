@@ -75,9 +75,8 @@ void LineBuilder::begin_new_line(bool increment_y, bool is_first_break_in_sequen
     m_last_line_needs_update = true;
 
     // FIXME: Support text-indent with "each-line".
-    if (m_containing_block_used_values.line_boxes.size() <= 1) {
+    if (m_containing_block_used_values.line_boxes.size() <= 1)
         ensure_last_line_box().m_inline_length += m_text_indent;
-    }
 }
 
 LineBox& LineBuilder::ensure_last_line_box()
@@ -133,14 +132,12 @@ CSSPixels LineBuilder::y_for_float_to_be_inserted_here(Box const& box)
     HashMap<CSSPixels, AvailableSize> available_space_cache;
     for (;;) {
         Optional<CSSPixels> highest_intersection_bottom;
-
-        auto candidate_block_top_in_root = box_in_root_rect.y() + candidate_block_offset;
-        auto candidate_block_bottom_in_root = candidate_block_top_in_root + height;
+        auto candidate_block_bottom = candidate_block_offset + height;
 
         m_context.parent().for_each_floating_box([&](auto const& float_box) {
-            auto float_box_top = float_box.margin_box_rect_in_root_coordinate_space.top();
-            auto float_box_bottom = float_box.margin_box_rect_in_root_coordinate_space.bottom();
-            if (float_box_bottom <= candidate_block_top_in_root)
+            auto float_box_top = float_box.margin_box_rect_in_root_coordinate_space.top() - box_in_root_rect.y();
+            auto float_box_bottom = float_box.margin_box_rect_in_root_coordinate_space.bottom() - box_in_root_rect.y();
+            if (float_box_bottom <= candidate_block_offset)
                 return IterationDecision::Continue;
 
             auto intersection_test = [&](auto y_coordinate, auto top, auto bottom) {
@@ -149,16 +146,14 @@ CSSPixels LineBuilder::y_for_float_to_be_inserted_here(Box const& box)
                 auto available_space = available_space_cache.ensure(y_coordinate, [&]() {
                     return m_context.available_space_for_line(y_coordinate);
                 });
-                if (width > available_space) {
-                    auto bottom_relative = float_box_bottom - box_in_root_rect.y();
-                    highest_intersection_bottom = min(highest_intersection_bottom.value_or(bottom_relative), bottom_relative);
-                }
+                if (width > available_space)
+                    highest_intersection_bottom = min(highest_intersection_bottom.value_or(float_box_bottom), float_box_bottom);
             };
 
-            intersection_test(float_box_top, candidate_block_top_in_root, candidate_block_bottom_in_root);
-            intersection_test(float_box_bottom, candidate_block_top_in_root, candidate_block_bottom_in_root);
-            intersection_test(candidate_block_top_in_root, float_box_top, float_box_bottom);
-            intersection_test(candidate_block_bottom_in_root, float_box_top, float_box_bottom);
+            intersection_test(float_box_top, candidate_block_offset, candidate_block_bottom);
+            intersection_test(float_box_bottom, candidate_block_offset, candidate_block_bottom);
+            intersection_test(candidate_block_offset, float_box_top, float_box_bottom);
+            intersection_test(candidate_block_bottom, float_box_top, float_box_bottom);
 
             return IterationDecision::Continue;
         });
@@ -167,7 +162,7 @@ CSSPixels LineBuilder::y_for_float_to_be_inserted_here(Box const& box)
         candidate_block_offset = highest_intersection_bottom.value();
     }
 
-    return candidate_block_offset;
+    return max(candidate_block_offset, m_context.vertical_float_clearance());
 }
 
 bool LineBuilder::should_break(CSSPixels next_item_width)
@@ -419,6 +414,24 @@ void LineBuilder::recalculate_available_space()
     m_available_width_for_current_line = min(available_at_bottom_of_line_box, available_at_top_of_line_box);
     if (!m_containing_block_used_values.line_boxes.is_empty())
         m_containing_block_used_values.line_boxes.last().m_original_available_width = m_available_width_for_current_line;
+}
+
+void LineBuilder::did_introduce_clearance(CSSPixels clearance)
+{
+    // If clearance was introduced but our current line box starts beyond it, we don't need to do anything.
+    if (clearance <= m_current_block_offset)
+        return;
+
+    // Increase the height of the previous line box so it matches the clearance, because the element's height is first
+    // determined by the bottom of the last line box (after trimming empty/whitespace boxes).
+    auto& line_boxes = m_containing_block_used_values.line_boxes;
+    if (line_boxes.size() > 1) {
+        auto& previous_line_box = line_boxes[line_boxes.size() - 2];
+        previous_line_box.m_bottom = clearance;
+    }
+
+    // The current line box will start directly after any cleared floats.
+    m_current_block_offset = clearance;
 }
 
 }

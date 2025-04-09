@@ -488,7 +488,7 @@ ByteString to_snakecase(StringView str)
     return builder.to_byte_string();
 }
 
-ByteString to_titlecase(StringView str)
+String to_titlecase(StringView str)
 {
     StringBuilder builder;
     bool next_is_upper = true;
@@ -501,21 +501,7 @@ ByteString to_titlecase(StringView str)
         next_is_upper = ch == ' ';
     }
 
-    return builder.to_byte_string();
-}
-
-ByteString invert_case(StringView str)
-{
-    StringBuilder builder(str.length());
-
-    for (auto ch : str) {
-        if (is_ascii_lower_alpha(ch))
-            builder.append(to_ascii_uppercase(ch));
-        else
-            builder.append(to_ascii_lowercase(ch));
-    }
-
-    return builder.to_byte_string();
+    return MUST(builder.to_string());
 }
 
 // Finishes the replacing algorithm once it is known that ita least one

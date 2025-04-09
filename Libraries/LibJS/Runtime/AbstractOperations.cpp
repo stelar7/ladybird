@@ -426,7 +426,7 @@ GC::Ref<FunctionEnvironment> new_function_environment(ECMAScriptFunctionObject& 
     env->set_function_object(function);
 
     // 3. If F.[[ThisMode]] is lexical, set env.[[ThisBindingStatus]] to lexical.
-    if (function.this_mode() == ECMAScriptFunctionObject::ThisMode::Lexical)
+    if (function.this_mode() == ThisMode::Lexical)
         env->set_this_binding_status(FunctionEnvironment::ThisBindingStatus::Lexical);
     // 4. Else, set env.[[ThisBindingStatus]] to uninitialized.
     else
@@ -555,7 +555,7 @@ ThrowCompletionOr<Value> perform_eval(VM& vm, Value x, CallerMode strict_caller,
             in_method = this_function_environment_record.has_super_binding();
 
             // iv. If F.[[ConstructorKind]] is derived, set inDerivedConstructor to true.
-            if (function.constructor_kind() == ECMAScriptFunctionObject::ConstructorKind::Derived)
+            if (function.constructor_kind() == ConstructorKind::Derived)
                 in_derived_constructor = true;
 
             // v. Let classFieldInitializerName be F.[[ClassFieldInitializerName]].
@@ -699,9 +699,7 @@ ThrowCompletionOr<Value> perform_eval(VM& vm, Value x, CallerMode strict_caller,
     if (result_or_error.value.is_error())
         return result_or_error.value.release_error();
 
-    auto& result = result_or_error.return_register_value;
-    if (!result.is_empty())
-        eval_result = result;
+    eval_result = result_or_error.return_register_value;
 
     // 30. If result.[[Type]] is normal and result.[[Value]] is empty, then
     //     a. Set result to NormalCompletion(undefined).
@@ -974,8 +972,12 @@ ThrowCompletionOr<void> eval_declaration_instantiation(VM& vm, Program const& pr
     for (auto& declaration : functions_to_initialize.in_reverse()) {
         // a. Let fn be the sole element of the BoundNames of f.
         // b. Let fo be InstantiateFunctionObject of f with arguments lexEnv and privateEnv.
-        auto function = ECMAScriptFunctionObject::create(realm, declaration.name(), declaration.source_text(), declaration.body(), declaration.parameters(), declaration.function_length(), declaration.local_variables_names(), lexical_environment, private_environment, declaration.kind(), declaration.is_strict_mode(),
-            declaration.parsing_insights());
+        auto function = ECMAScriptFunctionObject::create_from_function_node(
+            declaration,
+            declaration.name(),
+            realm,
+            lexical_environment,
+            private_environment);
 
         // c. If varEnv is a global Environment Record, then
         if (global_var_environment) {
@@ -1631,10 +1633,10 @@ Completion dispose_resources(VM& vm, DisposeCapability& dispose_capability, Comp
                 // 1. If completion is a throw completion, then
                 if (completion.type() == Completion::Type::Throw) {
                     // a. Set result to result.[[Value]].
-                    auto result_value = result.error().value().value();
+                    auto result_value = result.error().value();
 
                     // b. Let suppressed be completion.[[Value]].
-                    auto suppressed = completion.value().value();
+                    auto suppressed = completion.value();
 
                     // c. Let error be a newly created SuppressedError object.
                     auto error = SuppressedError::create(*vm.current_realm());

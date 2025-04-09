@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/Forward.h>
+#include <AK/HashMap.h>
 #include <AK/Optional.h>
 #include <AK/String.h>
 #include <LibGC/Heap.h>
@@ -44,6 +45,14 @@ public:
 
     String name() const { return m_name; }
     WebIDL::ExceptionOr<void> set_name(String const& value);
+    GC::Ref<IDBTransaction> transaction() const { return m_transaction; }
+    GC::Ref<ObjectStore> store() const { return m_store; }
+    AK::HashMap<String, GC::Ref<Index>>& index_set() { return m_indexes; }
+
+    WebIDL::ExceptionOr<GC::Ref<IDBIndex>> create_index(String const&, KeyPath, IDBIndexParameters options);
+    [[nodiscard]] GC::Ref<HTML::DOMStringList> index_names();
+    WebIDL::ExceptionOr<GC::Ref<IDBIndex>> index(String const&);
+    WebIDL::ExceptionOr<void> delete_index(String const&);
 
     bool auto_increment() const;
     JS::Value key_path() const;
@@ -89,6 +98,9 @@ private:
 
     // An object store handle has a name, which is initialized to the name of the associated object store when the object store handle is created.
     String m_name;
+
+    // An object store handle has an index set
+    AK::HashMap<String, GC::Ref<Index>> m_indexes;
 };
 
 }

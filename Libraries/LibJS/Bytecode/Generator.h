@@ -298,7 +298,7 @@ public:
                 emit<Bytecode::Op::PrepareYield>(Operand(Register::saved_return_value()), value);
             else
                 emit<Bytecode::Op::Mov>(Operand(Register::saved_return_value()), value);
-            emit<Bytecode::Op::Mov>(Operand(Register::exception()), add_constant(Value {}));
+            emit<Bytecode::Op::Mov>(Operand(Register::exception()), add_constant(js_special_empty_value()));
             emit<Bytecode::Op::Jump>(Label { *m_current_basic_block->finalizer() });
             return;
         }
@@ -323,6 +323,12 @@ public:
     void emit_get_by_id(ScopedOperand dst, ScopedOperand base, IdentifierTableIndex property_identifier, Optional<IdentifierTableIndex> base_identifier = {});
 
     void emit_get_by_id_with_this(ScopedOperand dst, ScopedOperand base, IdentifierTableIndex, ScopedOperand this_value);
+
+    void emit_get_by_value(ScopedOperand dst, ScopedOperand base, ScopedOperand property, Optional<IdentifierTableIndex> base_identifier = {});
+    void emit_get_by_value_with_this(ScopedOperand dst, ScopedOperand base, ScopedOperand property, ScopedOperand this_value);
+
+    void emit_put_by_value(ScopedOperand base, ScopedOperand property, ScopedOperand src, Bytecode::Op::PropertyKind, Optional<IdentifierTableIndex> base_identifier);
+    void emit_put_by_value_with_this(ScopedOperand base, ScopedOperand property, ScopedOperand this_value, ScopedOperand src, Bytecode::Op::PropertyKind);
 
     void emit_iterator_value(ScopedOperand dst, ScopedOperand result);
     void emit_iterator_complete(ScopedOperand dst, ScopedOperand result);

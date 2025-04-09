@@ -26,7 +26,7 @@ public:
         auto& bytecode = regex.parser_result.bytecode;
         size_t index { 0 };
         for (auto& value : bytecode) {
-            outln(m_file, "OpCode i={:3} [{:#02X}]", index, (u32)value);
+            outln(m_file, "OpCode i={:3} [{:#02X}]", index, value);
             ++index;
         }
     }
@@ -50,6 +50,13 @@ public:
 
             state.instruction_position += opcode.size();
         }
+
+        out(m_file, "String Table:\n");
+        for (auto const& entry : bytecode.string_table().m_table)
+            outln(m_file, "+ {} -> {:x}\n", entry.key, entry.value);
+        out(m_file, "Reverse String Table:\n");
+        for (auto const& entry : bytecode.string_table().m_inverse_table)
+            outln(m_file, "+ {:x} -> {}\n", entry.key, entry.value);
 
         fflush(m_file);
     }

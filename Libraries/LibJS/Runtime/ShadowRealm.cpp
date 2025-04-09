@@ -158,13 +158,13 @@ ThrowCompletionOr<Value> perform_shadow_realm_eval(VM& vm, StringView source_tex
                 result = result_and_return_register.value.release_error();
             } else {
                 // Resulting value is in the accumulator.
-                result = result_and_return_register.return_register_value.value_or(js_undefined());
+                result = result_and_return_register.return_register_value.is_special_empty_value() ? js_undefined() : result_and_return_register.return_register_value;
             }
         }
     }
 
     // 12. If result.[[Type]] is normal and result.[[Value]] is empty, then
-    if (result.type() == Completion::Type::Normal && !result.value().has_value()) {
+    if (result.type() == Completion::Type::Normal && result.value().is_special_empty_value()) {
         // a. Set result to NormalCompletion(undefined).
         result = normal_completion(js_undefined());
     }
@@ -184,7 +184,7 @@ ThrowCompletionOr<Value> perform_shadow_realm_eval(VM& vm, StringView source_tex
     }
 
     // 16. Return ? GetWrappedValue(callerRealm, result.[[Value]]).
-    return get_wrapped_value(vm, caller_realm, *result.value());
+    return get_wrapped_value(vm, caller_realm, result.value());
 
     // NOTE: Also see "Editor's Note" in the spec regarding the TypeError above.
 }

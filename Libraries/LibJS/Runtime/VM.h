@@ -165,21 +165,17 @@ public:
 
     size_t argument_count() const
     {
-        if (m_execution_context_stack.is_empty())
-            return 0;
         return running_execution_context().arguments.size();
     }
 
     Value argument(size_t index) const
     {
-        if (m_execution_context_stack.is_empty())
-            return {};
         return running_execution_context().argument(index);
     }
 
     Value this_value() const
     {
-        return running_execution_context().this_value;
+        return running_execution_context().this_value.value();
     }
 
     ThrowCompletionOr<Value> resolve_this_binding();

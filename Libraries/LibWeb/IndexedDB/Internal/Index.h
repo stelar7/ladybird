@@ -15,6 +15,8 @@
 
 namespace Web::IndexedDB {
 
+using KeyPath = Variant<String, Vector<String>>;
+
 // https://w3c.github.io/IndexedDB/#index-list-of-records
 struct IndexRecord {
     GC::Ref<Key> key;
@@ -30,12 +32,12 @@ public:
     [[nodiscard]] static GC::Ref<Index> create(JS::Realm&, GC::Ref<ObjectStore>, String, KeyPath const&, bool, bool);
     virtual ~Index();
 
-    void set_name(String name) { m_name = move(name); }
+    void set_name(String name);
     [[nodiscard]] String name() const { return m_name; }
     [[nodiscard]] bool unique() const { return m_unique; }
     [[nodiscard]] bool multi_entry() const { return m_multi_entry; }
     [[nodiscard]] GC::Ref<ObjectStore> object_store() const { return m_object_store; }
-    [[nodiscard]] Vector<IndexRecord> records() const { return m_records; }
+    [[nodiscard]] AK::ReadonlySpan<IndexRecord> records() const { return m_records; }
     [[nodiscard]] KeyPath const& key_path() const { return m_key_path; }
 
     void store_a_record(IndexRecord const&);

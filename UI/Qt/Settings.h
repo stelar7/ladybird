@@ -41,28 +41,11 @@ public:
     bool is_maximized();
     void set_is_maximized(bool is_maximized);
 
-    QStringList preferred_languages();
-    void set_preferred_languages(QStringList const& languages);
-
-    struct EngineProvider {
-        QString name;
-        QString url;
-    };
-    EngineProvider autocomplete_engine();
-    void set_autocomplete_engine(EngineProvider const& engine);
-
-    bool enable_autocomplete();
-    void set_enable_autocomplete(bool enable);
-
-    bool enable_do_not_track();
-    void set_enable_do_not_track(bool enable);
-
     bool show_menubar();
     void set_show_menubar(bool show_menubar);
 
 signals:
     void show_menubar_changed(bool show_menubar);
-    void preferred_languages_changed(QStringList const& languages);
     void enable_do_not_track_changed(bool enable);
 
 protected:

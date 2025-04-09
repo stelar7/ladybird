@@ -431,13 +431,13 @@ inline JSFileResult TestRunner::run_file_test(ByteString const& test_path)
         suite.most_severe_test_result = Result::Crashed;
 
         Test::Case test_case { "<top-level>"_string, Test::Result::Fail, {}, 0 };
-        auto error = top_level_result.release_error().release_value().release_value();
+        auto error = top_level_result.release_error().release_value();
         if (error.is_object()) {
             StringBuilder detail_builder;
 
             auto& error_object = error.as_object();
-            auto name = error_object.get_without_side_effects(g_vm->names.name).value_or(JS::js_undefined());
-            auto message = error_object.get_without_side_effects(g_vm->names.message).value_or(JS::js_undefined());
+            auto name = error_object.get_without_side_effects(g_vm->names.name);
+            auto message = error_object.get_without_side_effects(g_vm->names.message);
 
             if (name.is_accessor() || message.is_accessor()) {
                 detail_builder.append(error.to_string_without_side_effects());

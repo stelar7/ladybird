@@ -701,7 +701,10 @@ void dump_rule(StringBuilder& builder, CSS::CSSRule const& rule, int indent_leve
 
 void dump_font_face_rule(StringBuilder& builder, CSS::CSSFontFaceRule const& rule, int indent_levels)
 {
-    auto& font_face = rule.font_face();
+    auto const font_face = rule.font_face();
+    indent(builder, indent_levels + 1);
+    builder.appendff("VALID: {}\n", rule.is_valid());
+
     indent(builder, indent_levels + 1);
     builder.appendff("font-family: {}\n", font_face.font_family());
 
@@ -787,7 +790,7 @@ void dump_font_face_rule(StringBuilder& builder, CSS::CSSFontFaceRule const& rul
 void dump_import_rule(StringBuilder& builder, CSS::CSSImportRule const& rule, int indent_levels)
 {
     indent(builder, indent_levels);
-    builder.appendff("  Document URL: {}\n", rule.url());
+    builder.appendff("  Document URL: {}\n", rule.url().to_string());
 }
 
 void dump_layer_block_rule(StringBuilder& builder, CSS::CSSLayerBlockRule const& layer_block, int indent_levels)

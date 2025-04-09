@@ -17,6 +17,8 @@ endif()
 include(${CMAKE_CURRENT_LIST_DIR}/InitializeSwift.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/GenerateSwiftHeader.cmake)
 
+find_package(SwiftTesting REQUIRED)
+
 # FIXME: https://gitlab.kitware.com/cmake/cmake/-/issues/26174
 if (APPLE)
     set(CMAKE_Swift_COMPILER_TARGET "${SWIFT_TARGET_TRIPLE}")
@@ -40,7 +42,7 @@ function(swizzle_target_properties_for_swift target_name)
 endfunction()
 
 function(add_swift_target_properties target_name)
-    cmake_parse_arguments(PARSE_ARGV 1 SWIFT_TARGET "" "" "LAGOM_LIBRARIES")
+    cmake_parse_arguments(PARSE_ARGV 1 SWIFT_TARGET "" "" "LAGOM_LIBRARIES;COMPILE_DEFINITIONS;COMPILE_OPTIONS")
 
     target_compile_features(${target_name} PUBLIC cxx_std_${CMAKE_CXX_STANDARD})
     target_compile_options(${target_name} PUBLIC "SHELL:$<$<COMPILE_LANGUAGE:Swift>:-Xcc -std=c++23 -cxx-interoperability-mode=default>")
@@ -60,8 +62,21 @@ function(add_swift_target_properties target_name)
     get_target_property(_NATIVE_DIRS ${target_name} INCLUDE_DIRECTORIES)
     list(APPEND _NATIVE_DIRS ${CMAKE_Swift_MODULE_DIRECTORY})
 
+    # Swift-testing in swift.org toolchains on macOS has its .swiftmodule in a testing/ subdirectory of
+    # the swift compiler's built-in lib dirs.
+    get_target_property(DEPENDENCIES ${target_name} LINK_LIBRARIES)
+    if (SwiftTesting::SwiftTesting IN_LIST DEPENDENCIES)
+        get_target_property(SWIFT_TESTING_INCLUDE_DIRS SwiftTesting::SwiftTesting INTERFACE_INCLUDE_DIRECTORIES)
+        list(APPEND _NATIVE_DIRS ${SWIFT_TESTING_INCLUDE_DIRS})
+    endif()
+
+    set(EXTRA_COMPILE_DEFINITIONS "")
+    foreach (compile_definition IN LISTS SWIFT_TARGET_COMPILE_DEFINITIONS)
+        list(APPEND EXTRA_COMPILE_DEFINITIONS "-Xcc" "-D${compile_definition}")
+    endforeach()
+
     _swift_generate_cxx_header(${target_name} "${target_name}-Swift.h"
         SEARCH_PATHS ${_NATIVE_DIRS}
-        COMPILE_OPTIONS ${VFS_OVERLAY_OPTIONS}
+        COMPILE_OPTIONS ${VFS_OVERLAY_OPTIONS} ${EXTRA_COMPILE_DEFINITIONS} ${SWIFT_TARGET_COMPILE_OPTIONS}
     )
 endfunction()

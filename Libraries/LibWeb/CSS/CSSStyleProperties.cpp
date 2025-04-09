@@ -591,6 +591,14 @@ Optional<StyleProperty> CSSStyleProperties::get_property_internal(PropertyID pro
     return property(property_id);
 }
 
+static RefPtr<CSSStyleValue const> resolve_color_style_value(CSSStyleValue const& style_value, Color computed_color)
+{
+    if (style_value.is_color_function())
+        return style_value;
+
+    return CSSColorValue::create_from_color(computed_color, ColorSyntax::Modern);
+}
+
 RefPtr<CSSStyleValue const> CSSStyleProperties::style_value_for_computed_property(Layout::NodeWithStyle const& layout_node, PropertyID property_id) const
 {
     auto used_value_for_property = [&layout_node, property_id](Function<CSSPixels(Painting::PaintableBox const&)>&& used_value_getter) -> Optional<CSSPixels> {
@@ -651,7 +659,7 @@ RefPtr<CSSStyleValue const> CSSStyleProperties::style_value_for_computed_propert
         // -> A resolved value special case property like color defined in another specification
         //    The resolved value is the used value.
     case PropertyID::BackgroundColor:
-        return CSSColorValue::create_from_color(layout_node.computed_values().background_color(), ColorSyntax::Modern);
+        return resolve_color_style_value(get_computed_value(property_id), layout_node.computed_values().background_color());
     case PropertyID::BorderBlockEndColor:
         // FIXME: Honor writing-mode, direction and text-orientation.
         return style_value_for_computed_property(layout_node, PropertyID::BorderBottomColor);
@@ -659,7 +667,7 @@ RefPtr<CSSStyleValue const> CSSStyleProperties::style_value_for_computed_propert
         // FIXME: Honor writing-mode, direction and text-orientation.
         return style_value_for_computed_property(layout_node, PropertyID::BorderTopColor);
     case PropertyID::BorderBottomColor:
-        return CSSColorValue::create_from_color(layout_node.computed_values().border_bottom().color, ColorSyntax::Modern);
+        return resolve_color_style_value(get_computed_value(property_id), layout_node.computed_values().border_bottom().color);
     case PropertyID::BorderInlineEndColor:
         // FIXME: Honor writing-mode, direction and text-orientation.
         return style_value_for_computed_property(layout_node, PropertyID::BorderRightColor);
@@ -667,21 +675,21 @@ RefPtr<CSSStyleValue const> CSSStyleProperties::style_value_for_computed_propert
         // FIXME: Honor writing-mode, direction and text-orientation.
         return style_value_for_computed_property(layout_node, PropertyID::BorderLeftColor);
     case PropertyID::BorderLeftColor:
-        return CSSColorValue::create_from_color(layout_node.computed_values().border_left().color, ColorSyntax::Modern);
+        return resolve_color_style_value(get_computed_value(property_id), layout_node.computed_values().border_left().color);
     case PropertyID::BorderRightColor:
-        return CSSColorValue::create_from_color(layout_node.computed_values().border_right().color, ColorSyntax::Modern);
+        return resolve_color_style_value(get_computed_value(property_id), layout_node.computed_values().border_right().color);
     case PropertyID::BorderTopColor:
-        return CSSColorValue::create_from_color(layout_node.computed_values().border_top().color, ColorSyntax::Modern);
+        return resolve_color_style_value(get_computed_value(property_id), layout_node.computed_values().border_top().color);
     case PropertyID::BoxShadow:
         return style_value_for_shadow(layout_node.computed_values().box_shadow());
     case PropertyID::CaretColor:
-        return CSSColorValue::create_from_color(layout_node.computed_values().caret_color(), ColorSyntax::Modern);
+        return resolve_color_style_value(get_computed_value(property_id), layout_node.computed_values().caret_color());
     case PropertyID::Color:
-        return CSSColorValue::create_from_color(layout_node.computed_values().color(), ColorSyntax::Modern);
+        return resolve_color_style_value(get_computed_value(property_id), layout_node.computed_values().color());
     case PropertyID::OutlineColor:
-        return CSSColorValue::create_from_color(layout_node.computed_values().outline_color(), ColorSyntax::Modern);
+        return resolve_color_style_value(get_computed_value(property_id), layout_node.computed_values().outline_color());
     case PropertyID::TextDecorationColor:
-        return CSSColorValue::create_from_color(layout_node.computed_values().text_decoration_color(), ColorSyntax::Modern);
+        return resolve_color_style_value(get_computed_value(property_id), layout_node.computed_values().text_decoration_color());
         // NB: text-shadow isn't listed, but is computed the same as box-shadow.
     case PropertyID::TextShadow:
         return style_value_for_shadow(layout_node.computed_values().text_shadow());
@@ -944,8 +952,28 @@ RefPtr<CSSStyleValue const> CSSStyleProperties::style_value_for_computed_propert
         // -> Any other property
         //    The resolved value is the computed value.
         //    NOTE: This is handled inside the `default` case.
+    case PropertyID::BorderBottomWidth: {
+        auto border_bottom_width = layout_node.computed_values().border_bottom().width;
+        return LengthStyleValue::create(Length::make_px(border_bottom_width));
+    }
+    case PropertyID::BorderLeftWidth: {
+        auto border_left_width = layout_node.computed_values().border_left().width;
+        return LengthStyleValue::create(Length::make_px(border_left_width));
+    }
+    case PropertyID::BorderRightWidth: {
+        auto border_right_width = layout_node.computed_values().border_right().width;
+        return LengthStyleValue::create(Length::make_px(border_right_width));
+    }
+    case PropertyID::BorderTopWidth: {
+        auto border_top_width = layout_node.computed_values().border_top().width;
+        return LengthStyleValue::create(Length::make_px(border_top_width));
+    }
+    case PropertyID::OutlineWidth: {
+        auto outline_width = layout_node.computed_values().outline_width();
+        return LengthStyleValue::create(outline_width);
+    }
     case PropertyID::WebkitTextFillColor:
-        return CSSColorValue::create_from_color(layout_node.computed_values().webkit_text_fill_color(), ColorSyntax::Modern);
+        return resolve_color_style_value(get_computed_value(property_id), layout_node.computed_values().webkit_text_fill_color());
     case PropertyID::Invalid:
         return CSSKeywordValue::create(Keyword::Invalid);
     case PropertyID::Custom:

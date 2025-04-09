@@ -741,6 +741,10 @@ TEST_CASE(ECMA262_match)
         // Tests nested lookahead with alternation - verifies proper save/restore stack cleanup
         { "a(?=.(?=c)|b)b"sv, "ab"sv, true },
         { "(?=)(?=\\d)"sv, "smart"sv, false },
+        // Backrefs are cleared after lookaheads, the indices should be checked before lookup.
+        { "(?!(b))\\1"sv, "a"sv, false },
+        // String table merge bug: inverse map should be merged regardless of available direct mappings.
+        { "((?<x>a)|(?<x>b))"sv, "aa"sv, false },
     };
 
     for (auto& test : tests) {

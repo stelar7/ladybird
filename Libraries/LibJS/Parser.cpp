@@ -1535,11 +1535,15 @@ NonnullRefPtr<ClassExpression const> Parser::parse_class_expression(bool expect_
                 TemporaryChange class_static_init_block_rollback(m_state.in_class_static_init_block, true);
                 TemporaryChange super_property_access_rollback(m_state.allow_super_property_lookup, true);
 
-                ScopePusher static_init_scope = ScopePusher::static_init_block_scope(*this, *static_init_block);
-                parse_statement_list(static_init_block);
+                {
+                    ScopePusher static_init_scope = ScopePusher::static_init_block_scope(*this, *static_init_block);
+                    static_init_scope.set_function_parameters(FunctionParameters::empty());
+
+                    parse_statement_list(static_init_block);
+                }
 
                 consume(TokenType::CurlyClose);
-                elements.append(create_ast_node<StaticInitializer>({ m_source_code, static_start.position(), position() }, move(static_init_block), static_init_scope.contains_direct_call_to_eval()));
+                elements.append(create_ast_node<StaticInitializer>({ m_source_code, static_start.position(), position() }, move(static_init_block)));
                 continue;
             } else {
                 expected("property key");
@@ -1561,7 +1565,7 @@ NonnullRefPtr<ClassExpression const> Parser::parse_class_expression(bool expect_
         }
 
         if (match(TokenType::ParenOpen)) {
-            u8 parse_options = FunctionNodeParseOptions::AllowSuperPropertyLookup;
+            u16 parse_options = FunctionNodeParseOptions::AllowSuperPropertyLookup;
             if (!super_class.is_null() && !is_static && is_constructor)
                 parse_options |= FunctionNodeParseOptions::AllowSuperConstructorCall;
             if (method_kind == ClassMethod::Kind::Getter)
@@ -1572,6 +1576,8 @@ NonnullRefPtr<ClassExpression const> Parser::parse_class_expression(bool expect_
                 parse_options |= FunctionNodeParseOptions::IsGeneratorFunction;
             if (is_async)
                 parse_options |= FunctionNodeParseOptions::IsAsyncFunction;
+            if (is_constructor)
+                parse_options |= FunctionNodeParseOptions::IsConstructor;
             auto function = parse_function_node<FunctionExpression>(parse_options, function_start);
             if (is_constructor) {
                 constructor = move(function);
@@ -1591,7 +1597,6 @@ NonnullRefPtr<ClassExpression const> Parser::parse_class_expression(bool expect_
                 syntax_error("Class cannot have field named 'constructor'"_string);
 
             RefPtr<Expression const> initializer;
-            bool contains_direct_call_to_eval = false;
 
             if (match(TokenType::Equals)) {
                 consume();
@@ -1602,10 +1607,9 @@ NonnullRefPtr<ClassExpression const> Parser::parse_class_expression(bool expect_
                 auto class_scope_node = create_ast_node<BlockStatement>({ m_source_code, rule_start.position(), position() });
                 auto class_field_scope = ScopePusher::class_field_scope(*this, *class_scope_node);
                 initializer = parse_expression(2);
-                contains_direct_call_to_eval = class_field_scope.contains_direct_call_to_eval();
             }
 
-            elements.append(create_ast_node<ClassField>({ m_source_code, rule_start.position(), position() }, property_key.release_nonnull(), move(initializer), contains_direct_call_to_eval, is_static));
+            elements.append(create_ast_node<ClassField>({ m_source_code, rule_start.position(), position() }, property_key.release_nonnull(), move(initializer), is_static));
             consume_or_insert_semicolon();
         }
     }
@@ -1633,12 +1637,16 @@ NonnullRefPtr<ClassExpression const> Parser::parse_class_expression(bool expect_
             constructor_body->append(create_ast_node<ReturnStatement>({ m_source_code, rule_start.position(), position() }, move(super_call)));
 
             FunctionParsingInsights parsing_insights;
+            parsing_insights.uses_this_from_environment = true;
+            parsing_insights.uses_this = true;
             constructor = create_ast_node<FunctionExpression>(
                 { m_source_code, rule_start.position(), position() }, class_name, "",
                 move(constructor_body), FunctionParameters::create(Vector { FunctionParameter { move(argument_name), nullptr, true } }), 0, FunctionKind::Normal,
                 /* is_strict_mode */ true, parsing_insights, /* local_variables_names */ Vector<FlyString> {});
         } else {
             FunctionParsingInsights parsing_insights;
+            parsing_insights.uses_this_from_environment = true;
+            parsing_insights.uses_this = true;
             constructor = create_ast_node<FunctionExpression>(
                 { m_source_code, rule_start.position(), position() }, class_name, "",
                 move(constructor_body), FunctionParameters::empty(), 0, FunctionKind::Normal,
@@ -2071,7 +2079,7 @@ NonnullRefPtr<ObjectExpression const> Parser::parse_object_expression()
                 invalid_object_literal_property_range = expression->source_range();
         } else if (match(TokenType::ParenOpen)) {
             VERIFY(property_key);
-            u8 parse_options = FunctionNodeParseOptions::AllowSuperPropertyLookup;
+            u16 parse_options = FunctionNodeParseOptions::AllowSuperPropertyLookup;
             if (property_type == ObjectProperty::Type::Getter)
                 parse_options |= FunctionNodeParseOptions::IsGetterFunction;
             if (property_type == ObjectProperty::Type::Setter)
@@ -2990,6 +2998,10 @@ NonnullRefPtr<FunctionNodeType> Parser::parse_function_node(u16 parse_options, O
     auto function_end_offset = position().offset - m_state.current_token.trivia().length();
     auto source_text = ByteString { m_state.lexer.source().substring_view(function_start_offset, function_end_offset - function_start_offset) };
     parsing_insights.might_need_arguments_object = m_state.function_might_need_arguments_object;
+    if (parse_options & FunctionNodeParseOptions::IsConstructor) {
+        parsing_insights.uses_this = true;
+        parsing_insights.uses_this_from_environment = true;
+    }
     return create_ast_node<FunctionNodeType>(
         { m_source_code, rule_start.position(), position() },
         name, move(source_text), move(body), parameters.release_nonnull(), function_length,

@@ -16,6 +16,8 @@
 #include <LibWeb/CSS/BooleanExpression.h>
 #include <LibWeb/CSS/CSSStyleDeclaration.h>
 #include <LibWeb/CSS/CSSStyleValue.h>
+#include <LibWeb/CSS/Descriptor.h>
+#include <LibWeb/CSS/DescriptorID.h>
 #include <LibWeb/CSS/MediaQuery.h>
 #include <LibWeb/CSS/ParsedFontFace.h>
 #include <LibWeb/CSS/Parser/ComponentValue.h>
@@ -30,6 +32,7 @@
 #include <LibWeb/CSS/StyleValues/BasicShapeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CalculatedStyleValue.h>
 #include <LibWeb/CSS/Supports.h>
+#include <LibWeb/CSS/URL.h>
 #include <LibWeb/Forward.h>
 
 namespace Web::CSS::Parser {
@@ -67,13 +70,13 @@ enum class ParsingMode {
 struct ParsingParams {
     explicit ParsingParams(ParsingMode = ParsingMode::Normal);
     explicit ParsingParams(JS::Realm&, ParsingMode = ParsingMode::Normal);
-    explicit ParsingParams(JS::Realm&, URL::URL, ParsingMode = ParsingMode::Normal);
-    explicit ParsingParams(DOM::Document const&, URL::URL, ParsingMode = ParsingMode::Normal);
+    explicit ParsingParams(JS::Realm&, ::URL::URL, ParsingMode = ParsingMode::Normal);
+    explicit ParsingParams(DOM::Document const&, ::URL::URL, ParsingMode = ParsingMode::Normal);
     explicit ParsingParams(DOM::Document const&, ParsingMode = ParsingMode::Normal);
 
     GC::Ptr<JS::Realm> realm;
     GC::Ptr<DOM::Document const> document;
-    URL::URL url;
+    ::URL::URL url;
     ParsingMode mode { ParsingMode::Normal };
 };
 
@@ -87,13 +90,14 @@ class Parser {
 public:
     static Parser create(ParsingParams const&, StringView input, StringView encoding = "utf-8"sv);
 
-    CSSStyleSheet* parse_as_css_stylesheet(Optional<URL::URL> location);
+    CSSStyleSheet* parse_as_css_stylesheet(Optional<::URL::URL> location, Vector<NonnullRefPtr<MediaQuery>> media_query_list = {});
 
     struct PropertiesAndCustomProperties {
         Vector<StyleProperty> properties;
         HashMap<FlyString, StyleProperty> custom_properties;
     };
     PropertiesAndCustomProperties parse_as_style_attribute();
+    Vector<Descriptor> parse_as_list_of_descriptors(AtRuleID);
     CSSRule* parse_as_css_rule();
     Optional<StyleProperty> parse_as_supports_condition();
 
@@ -116,10 +120,9 @@ public:
     RefPtr<Supports> parse_as_supports();
 
     RefPtr<CSSStyleValue> parse_as_css_value(PropertyID);
+    RefPtr<CSSStyleValue> parse_as_descriptor_value(AtRuleID, DescriptorID);
 
     Optional<ComponentValue> parse_as_component_value();
-
-    Vector<ParsedFontFace::Source> parse_as_font_face_src();
 
     Vector<ComponentValue> parse_as_list_of_component_values();
 
@@ -140,11 +143,11 @@ private:
 
     // "Parse a stylesheet" is intended to be the normal parser entry point, for parsing stylesheets.
     struct ParsedStyleSheet {
-        Optional<URL::URL> location;
+        Optional<::URL::URL> location;
         Vector<Rule> rules;
     };
     template<typename T>
-    ParsedStyleSheet parse_a_stylesheet(TokenStream<T>&, Optional<URL::URL> location);
+    ParsedStyleSheet parse_a_stylesheet(TokenStream<T>&, Optional<::URL::URL> location);
 
     // "Parse a stylesheet’s contents" is intended for use by the CSSStyleSheet replace() method, and similar, which parse text into the contents of an existing stylesheet.
     template<typename T>
@@ -222,9 +225,6 @@ private:
 
     OwnPtr<GeneralEnclosed> parse_general_enclosed(TokenStream<ComponentValue>&, MatchResult);
 
-    template<typename T>
-    Vector<ParsedFontFace::Source> parse_font_face_src(TokenStream<T>&);
-
     enum class AllowBlankLayerName {
         No,
         Yes,
@@ -247,6 +247,8 @@ private:
 
     GC::Ref<CSSStyleProperties> convert_to_style_declaration(Vector<Declaration> const&);
     Optional<StyleProperty> convert_to_style_property(Declaration const&);
+
+    Optional<Descriptor> convert_to_descriptor(AtRuleID, Declaration const&);
 
     Optional<Dimension> parse_dimension(ComponentValue const&);
     Optional<AngleOrCalculated> parse_angle(TokenStream<ComponentValue>&);
@@ -275,7 +277,7 @@ private:
     Optional<GridRepeat> parse_repeat(Vector<ComponentValue> const&);
     Optional<ExplicitGridTrack> parse_track_sizing_function(ComponentValue const&);
 
-    Optional<URL::URL> parse_url_function(TokenStream<ComponentValue>&);
+    Optional<URL> parse_url_function(TokenStream<ComponentValue>&);
     RefPtr<CSSStyleValue> parse_url_value(TokenStream<ComponentValue>&);
 
     Optional<ShapeRadius> parse_shape_radius(TokenStream<ComponentValue>&);
@@ -294,6 +296,7 @@ private:
     RefPtr<RadialGradientStyleValue> parse_radial_gradient_function(TokenStream<ComponentValue>&);
 
     ParseErrorOr<NonnullRefPtr<CSSStyleValue>> parse_css_value(PropertyID, TokenStream<ComponentValue>&, Optional<String> original_source_text = {});
+    ParseErrorOr<NonnullRefPtr<CSSStyleValue>> parse_descriptor_value(AtRuleID, DescriptorID, TokenStream<ComponentValue>&);
     RefPtr<CSSStyleValue> parse_css_value_for_property(PropertyID, TokenStream<ComponentValue>&);
     struct PropertyAndValue {
         PropertyID property;
@@ -341,6 +344,7 @@ private:
     RefPtr<PositionStyleValue> parse_position_value(TokenStream<ComponentValue>&, PositionParsingMode = PositionParsingMode::Normal);
     RefPtr<CSSStyleValue> parse_filter_value_list_value(TokenStream<ComponentValue>&);
     RefPtr<StringStyleValue> parse_opentype_tag_value(TokenStream<ComponentValue>&);
+    RefPtr<FontSourceStyleValue> parse_font_source_value(TokenStream<ComponentValue>&);
 
     RefPtr<CSSStyleValue> parse_angle_value(TokenStream<ComponentValue>&);
     RefPtr<CSSStyleValue> parse_angle_percentage_value(TokenStream<ComponentValue>&);
@@ -358,7 +362,7 @@ private:
     RefPtr<CSSStyleValue> parse_time_value(TokenStream<ComponentValue>&);
     RefPtr<CSSStyleValue> parse_time_percentage_value(TokenStream<ComponentValue>&);
 
-    template<typename ParseFunction>
+    using ParseFunction = AK::Function<RefPtr<CSSStyleValue>(TokenStream<ComponentValue>&)>;
     RefPtr<CSSStyleValue> parse_comma_separated_value_list(TokenStream<ComponentValue>&, ParseFunction);
     RefPtr<CSSStyleValue> parse_simple_comma_separated_value_list(PropertyID, TokenStream<ComponentValue>&);
     RefPtr<CSSStyleValue> parse_all_as_single_keyword_value(TokenStream<ComponentValue>&, Keyword);
@@ -468,11 +472,11 @@ private:
     JS::Realm& realm() const;
     bool in_quirks_mode() const;
     bool is_parsing_svg_presentation_attribute() const;
-    Optional<URL::URL> complete_url(StringView) const;
+    Optional<::URL::URL> complete_url(StringView) const;
 
     GC::Ptr<DOM::Document const> m_document;
     GC::Ptr<JS::Realm> m_realm;
-    URL::URL m_url;
+    ::URL::URL m_url;
     ParsingMode m_parsing_mode { ParsingMode::Normal };
 
     Vector<Token> m_tokens;
@@ -481,7 +485,11 @@ private:
     struct FunctionContext {
         StringView name;
     };
-    using ValueParsingContext = Variant<PropertyID, FunctionContext>;
+    struct DescriptorContext {
+        AtRuleID at_rule;
+        DescriptorID descriptor;
+    };
+    using ValueParsingContext = Variant<PropertyID, FunctionContext, DescriptorContext>;
     Vector<ValueParsingContext> m_value_context;
     auto push_temporary_value_parsing_context(ValueParsingContext&& context)
     {
@@ -512,9 +520,11 @@ private:
 
 namespace Web {
 
-CSS::CSSStyleSheet* parse_css_stylesheet(CSS::Parser::ParsingParams const&, StringView, Optional<URL::URL> location = {});
+CSS::CSSStyleSheet* parse_css_stylesheet(CSS::Parser::ParsingParams const&, StringView, Optional<::URL::URL> location = {}, Vector<NonnullRefPtr<CSS::MediaQuery>> = {});
 CSS::Parser::Parser::PropertiesAndCustomProperties parse_css_style_attribute(CSS::Parser::ParsingParams const&, StringView);
+Vector<CSS::Descriptor> parse_css_list_of_descriptors(CSS::Parser::ParsingParams const&, CSS::AtRuleID, StringView);
 RefPtr<CSS::CSSStyleValue> parse_css_value(CSS::Parser::ParsingParams const&, StringView, CSS::PropertyID property_id = CSS::PropertyID::Invalid);
+RefPtr<CSS::CSSStyleValue> parse_css_descriptor(CSS::Parser::ParsingParams const&, CSS::AtRuleID, CSS::DescriptorID, StringView);
 Optional<CSS::SelectorList> parse_selector(CSS::Parser::ParsingParams const&, StringView);
 Optional<CSS::SelectorList> parse_selector_for_nested_style_rule(CSS::Parser::ParsingParams const&, StringView);
 Optional<CSS::Selector::PseudoElementSelector> parse_pseudo_element_selector(CSS::Parser::ParsingParams const&, StringView);

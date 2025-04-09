@@ -459,7 +459,7 @@ Tab::Tab(BrowserWindow* window, RefPtr<WebView::WebContentClient> parent_client,
         if (!search_engine.has_value())
             return;
 
-        auto url_string = MUST(String::formatted(search_engine->query_url, URL::percent_encode(*m_page_context_menu_search_text)));
+        auto url_string = search_engine->format_search_query_for_navigation(*m_page_context_menu_search_text);
         auto url = URL::Parser::basic_parse(url_string);
         VERIFY(url.has_value());
 
@@ -531,7 +531,7 @@ Tab::Tab(BrowserWindow* window, RefPtr<WebView::WebContentClient> parent_client,
         TemporaryChange change_url { m_page_context_menu_search_text, AK::move(selected_text) };
 
         if (m_page_context_menu_search_text.has_value()) {
-            auto action_text = WebView::format_search_query_for_display(search_engine->query_url, *m_page_context_menu_search_text);
+            auto action_text = search_engine->format_search_query_for_display(*m_page_context_menu_search_text);
             search_selected_text_action->setText(qstring_from_ak_string(action_text));
             search_selected_text_action->setVisible(true);
         } else {
@@ -936,16 +936,6 @@ void Tab::set_user_agent_string(ByteString const& user_agent)
 void Tab::set_navigator_compatibility_mode(ByteString const& compatibility_mode)
 {
     debug_request("navigator-compatibility-mode", compatibility_mode);
-}
-
-void Tab::set_preferred_languages(ReadonlySpan<String> preferred_languages)
-{
-    m_view->set_preferred_languages(preferred_languages);
-}
-
-void Tab::set_enable_do_not_track(bool enable)
-{
-    m_view->set_enable_do_not_track(enable);
 }
 
 }

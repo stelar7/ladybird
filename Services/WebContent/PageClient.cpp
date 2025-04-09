@@ -81,12 +81,7 @@ PageClient::~PageClient() = default;
 
 bool PageClient::is_ready_to_paint() const
 {
-    return m_paint_state == PaintState::Ready;
-}
-
-void PageClient::ready_to_paint()
-{
-    m_paint_state = PaintState::Ready;
+    return m_number_of_queued_rasterization_tasks <= 1;
 }
 
 void PageClient::visit_edges(JS::Cell::Visitor& visitor)
@@ -220,18 +215,24 @@ void PageClient::process_screenshot_requests()
     }
 }
 
+void PageClient::ready_to_paint()
+{
+    m_number_of_queued_rasterization_tasks--;
+    VERIFY(m_number_of_queued_rasterization_tasks >= 0 && m_number_of_queued_rasterization_tasks < 2);
+}
+
 void PageClient::paint_next_frame()
 {
-    auto back_store = m_backing_store_manager.back_store();
+    auto [backing_store_id, back_store] = m_backing_store_manager.acquire_store_for_next_frame();
     if (!back_store)
         return;
 
-    m_paint_state = PaintState::WaitingForClient;
+    VERIFY(m_number_of_queued_rasterization_tasks <= 1);
+    m_number_of_queued_rasterization_tasks++;
 
     auto viewport_rect = page().css_to_device_rect(page().top_level_traversable()->viewport_rect());
-    start_display_list_rendering(viewport_rect, *back_store, {}, [this, viewport_rect]() {
-        m_backing_store_manager.swap_back_and_front();
-        client().async_did_paint(m_id, viewport_rect.to_type<int>(), m_backing_store_manager.front_id());
+    start_display_list_rendering(viewport_rect, *back_store, {}, [this, viewport_rect, backing_store_id] {
+        client().async_did_paint(m_id, viewport_rect.to_type<int>(), backing_store_id);
     });
 }
 
@@ -241,8 +242,11 @@ void PageClient::start_display_list_rendering(Web::DevicePixelRect const& conten
     paint_options.has_focus = m_has_focus;
     auto& traversable = *page().top_level_traversable();
     auto display_list = traversable.record_display_list(content_rect, paint_options);
-    auto painting_surface = traversable.painting_surface_for_backing_store(target);
-    traversable.start_display_list_rendering(display_list, painting_surface, move(callback));
+    if (!display_list) {
+        callback();
+        return;
+    }
+    traversable.start_display_list_rendering(*display_list, target, move(callback));
 }
 
 Queue<Web::QueuedInputEvent>& PageClient::input_event_queue()
@@ -830,8 +834,8 @@ static void gather_style_sheets(Vector<Web::CSS::StyleSheetIdentifier>& results,
     }
 
     if (valid) {
-        if (auto location = sheet.location(); location.has_value())
-            identifier.url = location.release_value();
+        if (auto sheet_url = sheet.href(); sheet_url.has_value())
+            identifier.url = sheet_url.release_value();
 
         identifier.rule_count = sheet.rules().length();
         results.append(move(identifier));
@@ -844,7 +848,7 @@ static void gather_style_sheets(Vector<Web::CSS::StyleSheetIdentifier>& results,
             // We can gather this anyway, and hope it loads later
             results.append({
                 .type = Web::CSS::StyleSheetIdentifier::Type::ImportRule,
-                .url = import_rule->url().to_string(),
+                .url = import_rule->href(),
             });
         }
     }

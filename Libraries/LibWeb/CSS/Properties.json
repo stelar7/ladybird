@@ -327,6 +327,14 @@
       "background-attachment"
     ]
   },
+  "background-blend-mode": {
+    "animation-type": "none",
+    "inherited": false,
+    "initial": "normal",
+    "valid-types": [
+      "mix-blend-mode"
+    ]
+  },
   "background-clip": {
     "affects-layout": false,
     "animation-type": "repeatable-list",
@@ -1001,7 +1009,7 @@
     ]
   },
   "clip-path": {
-    "animation-type": "none",
+    "animation-type": "by-computed-value",
     "affects-layout": false,
     "affects-stacking-context": true,
     "inherited": false,
@@ -1952,11 +1960,11 @@
   },
   "list-style": {
     "inherited": true,
-    "initial": "outside disc",
+    "initial": "outside none disc",
     "longhands": [
-      "list-style-type",
       "list-style-position",
-      "list-style-image"
+      "list-style-image",
+      "list-style-type"
     ]
   },
   "list-style-image": {

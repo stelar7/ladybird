@@ -35,13 +35,31 @@ static bool command_is_clip_or_mask(Command const& command)
         });
 }
 
-void DisplayListPlayer::execute(DisplayList& display_list)
+void DisplayListPlayer::execute(DisplayList& display_list, RefPtr<Gfx::PaintingSurface> surface)
 {
+    if (surface) {
+        surface->lock_context();
+    }
+    execute_impl(display_list, surface);
+    if (surface) {
+        surface->unlock_context();
+    }
+}
+
+void DisplayListPlayer::execute_impl(DisplayList& display_list, RefPtr<Gfx::PaintingSurface> surface)
+{
+    if (surface)
+        m_surfaces.append(*surface);
+    ScopeGuard guard = [&surfaces = m_surfaces, pop_surface_from_stack = !!surface] {
+        if (pop_surface_from_stack)
+            (void)surfaces.take_last();
+    };
+
     auto const& commands = display_list.commands();
     auto const& scroll_state = display_list.scroll_state();
     auto device_pixels_per_css_pixel = display_list.device_pixels_per_css_pixel();
 
-    VERIFY(m_surface);
+    VERIFY(!m_surfaces.is_empty());
 
     for (size_t command_index = 0; command_index < commands.size(); command_index++) {
         auto scroll_frame_id = commands[command_index].scroll_frame_id;
@@ -97,6 +115,7 @@ void DisplayListPlayer::execute(DisplayList& display_list)
         else HANDLE_COMMAND(DrawRepeatedImmutableBitmap, draw_repeated_immutable_bitmap)
         else HANDLE_COMMAND(AddClipRect, add_clip_rect)
         else HANDLE_COMMAND(Save, save)
+        else HANDLE_COMMAND(SaveLayer, save_layer)
         else HANDLE_COMMAND(Restore, restore)
         else HANDLE_COMMAND(Translate, translate)
         else HANDLE_COMMAND(PushStackingContext, push_stacking_context)
@@ -131,7 +150,8 @@ void DisplayListPlayer::execute(DisplayList& display_list)
         // clang-format on
     }
 
-    flush();
+    if (surface)
+        flush();
 }
 
 }

@@ -2206,7 +2206,7 @@ GC::Ref<Node> Node::get_root_node(GetRootNodeOptions const& options)
 String Node::debug_description() const
 {
     StringBuilder builder;
-    builder.append(node_name().to_deprecated_fly_string().to_lowercase());
+    builder.append(node_name().to_ascii_lowercase());
     if (is_element()) {
         auto const& element = static_cast<DOM::Element const&>(*this);
         if (element.id().has_value())
@@ -2319,7 +2319,7 @@ void Node::queue_mutation_record(FlyString const& type, Optional<FlyString> cons
     if (interested_observers.is_empty() && !page.listen_for_dom_mutations())
         return;
 
-    // FIXME: The MutationRecord constructor shuld take an Optional<FlyString> attribute name and namespace
+    // FIXME: The MutationRecord constructor should take an Optional<FlyString> attribute name and namespace
     Optional<String> string_attribute_name;
     if (attribute_name.has_value())
         string_attribute_name = attribute_name->to_string();

@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibJS/Runtime/GlobalObject.h>
 #include <LibJS/Runtime/Intl/AbstractOperations.h>
 #include <LibJS/Runtime/Intl/DisplayNames.h>
+#include <LibJS/Runtime/VM.h>
 
 namespace JS::Intl {
 
@@ -14,8 +14,22 @@ GC_DEFINE_ALLOCATOR(DisplayNames);
 
 // 12 DisplayNames Objects, https://tc39.es/ecma402/#intl-displaynames-objects
 DisplayNames::DisplayNames(Object& prototype)
-    : Object(ConstructWithPrototypeTag::Tag, prototype)
+    : IntlObject(ConstructWithPrototypeTag::Tag, prototype)
 {
+}
+
+// 12.2.3 Internal slots, https://tc39.es/ecma402/#sec-Intl.DisplayNames-internal-slots
+ReadonlySpan<StringView> DisplayNames::relevant_extension_keys() const
+{
+    // The value of the [[RelevantExtensionKeys]] internal slot is « ».
+    return {};
+}
+
+// 12.2.3 Internal slots, https://tc39.es/ecma402/#sec-Intl.DisplayNames-internal-slots
+ReadonlySpan<ResolutionOptionDescriptor> DisplayNames::resolution_option_descriptors(VM&) const
+{
+    // The value of the [[ResolutionOptionDescriptors]] internal slot is « ».
+    return {};
 }
 
 void DisplayNames::set_type(StringView type)
@@ -103,7 +117,7 @@ ThrowCompletionOr<Value> canonical_code_for_display_names(VM& vm, DisplayNames::
             return vm.throw_completion<RangeError>(ErrorType::OptionIsNotValidValue, code, "region"sv);
 
         // b. Return the ASCII-uppercase of code.
-        return PrimitiveString::create(vm, code.to_uppercase_string());
+        return PrimitiveString::create(vm, code.to_ascii_uppercase_string());
     }
 
     // 3. If type is "script", then
@@ -119,7 +133,7 @@ ThrowCompletionOr<Value> canonical_code_for_display_names(VM& vm, DisplayNames::
         // c. Let first be the ASCII-uppercase of the substring of code from 0 to 1.
         // d. Let rest be the ASCII-lowercase of the substring of code from 1.
         // e. Return the string-concatenation of first and rest.
-        return PrimitiveString::create(vm, code.to_titlecase_string());
+        return PrimitiveString::create(vm, code.to_ascii_titlecase_string());
     }
 
     // 4. If type is "calendar", then
@@ -133,7 +147,7 @@ ThrowCompletionOr<Value> canonical_code_for_display_names(VM& vm, DisplayNames::
             return vm.throw_completion<RangeError>(ErrorType::OptionIsNotValidValue, code, "calendar"sv);
 
         // c. Return the ASCII-lowercase of code.
-        return PrimitiveString::create(vm, code.to_lowercase_string());
+        return PrimitiveString::create(vm, code.to_ascii_lowercase_string());
     }
 
     // 5. If type is "dateTimeField", then
@@ -154,7 +168,7 @@ ThrowCompletionOr<Value> canonical_code_for_display_names(VM& vm, DisplayNames::
         return vm.throw_completion<RangeError>(ErrorType::OptionIsNotValidValue, code, "currency"sv);
 
     // 8. Return the ASCII-uppercase of code.
-    return PrimitiveString::create(vm, code.to_uppercase_string());
+    return PrimitiveString::create(vm, code.to_ascii_uppercase_string());
 }
 
 // 12.5.2 IsValidDateTimeFieldCode ( field ), https://tc39.es/ecma402/#sec-isvaliddatetimefieldcode

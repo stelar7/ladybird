@@ -26,9 +26,6 @@ public:
     virtual ~IDBIndex() override;
     [[nodiscard]] static GC::Ref<IDBIndex> create(JS::Realm&, GC::Ref<Index>, GC::Ref<IDBObjectStore>);
 
-    // The transaction of an index handle is the transaction of its associated object store handle.
-    GC::Ref<IDBTransaction> transaction() { return m_object_store_handle->transaction(); }
-    GC::Ref<Index> index() { return m_index; }
     GC::Ref<IDBObjectStore> object_store() { return m_object_store_handle; }
     JS::Value key_path() const;
     bool unique() const { return m_index->unique(); }
@@ -36,6 +33,10 @@ public:
 
     WebIDL::ExceptionOr<void> set_name(String const& value);
     String name() const { return m_name; }
+
+    // The transaction of an index handle is the transaction of its associated object store handle.
+    GC::Ref<IDBTransaction> transaction() { return m_object_store_handle->transaction(); }
+    GC::Ref<Index> index() { return m_index; }
 
 protected:
     explicit IDBIndex(JS::Realm&, GC::Ref<Index>, GC::Ref<IDBObjectStore>);

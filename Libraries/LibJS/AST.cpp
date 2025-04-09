@@ -35,6 +35,7 @@
 #include <LibJS/Runtime/RegExpObject.h>
 #include <LibJS/Runtime/Shape.h>
 #include <LibJS/Runtime/ValueInlines.h>
+#include <memory>
 #include <typeinfo>
 
 namespace JS {
@@ -105,8 +106,7 @@ Value FunctionExpression::instantiate_ordinary_function_expression(VM& vm, FlySt
 
     auto private_environment = vm.running_execution_context().private_environment;
 
-    auto closure = ECMAScriptFunctionObject::create(realm, used_name, source_text(), body(), parameters(), function_length(), local_variables_names(), environment, private_environment, kind(), is_strict_mode(),
-        parsing_insights(), is_arrow_function());
+    auto closure = ECMAScriptFunctionObject::create_from_function_node(*this, used_name, realm, environment, private_environment);
 
     // FIXME: 6. Perform SetFunctionName(closure, name).
     // FIXME: 7. Perform MakeConstructor(closure).
@@ -137,7 +137,7 @@ static ThrowCompletionOr<ClassElementName> class_key_to_property_name(VM& vm, Ex
         return ClassElementName { private_environment->resolve_private_identifier(private_identifier.string()) };
     }
 
-    VERIFY(!prop_key.is_empty());
+    VERIFY(!prop_key.is_special_empty_value());
 
     if (prop_key.is_object())
         prop_key = TRY(prop_key.to_primitive(vm, Value::PreferredType::String));
@@ -151,8 +151,12 @@ ThrowCompletionOr<ClassElement::ClassValue> ClassMethod::class_element_evaluatio
 {
     auto property_key_or_private_name = TRY(class_key_to_property_name(vm, *m_key, property_key));
 
-    auto& method_function = *ECMAScriptFunctionObject::create(*vm.current_realm(), m_function->name(), m_function->source_text(), m_function->body(), m_function->parameters(), m_function->function_length(), m_function->local_variables_names(), vm.lexical_environment(), vm.running_execution_context().private_environment, m_function->kind(), m_function->is_strict_mode(),
-        m_function->parsing_insights(), m_function->is_arrow_function());
+    auto& method_function = *ECMAScriptFunctionObject::create_from_function_node(
+        *m_function,
+        m_function->name(),
+        *vm.current_realm(),
+        vm.lexical_environment(),
+        vm.running_execution_context().private_environment);
 
     auto method_value = Value(&method_function);
     method_function.make_method(target);
@@ -194,7 +198,7 @@ ThrowCompletionOr<ClassElement::ClassValue> ClassMethod::class_element_evaluatio
             VERIFY_NOT_REACHED();
         }
 
-        return ClassValue { normal_completion({}) };
+        return ClassValue { normal_completion(js_undefined()) };
     } else {
         auto& private_name = property_key_or_private_name.get<PrivateName>();
         switch (kind()) {
@@ -225,24 +229,35 @@ ThrowCompletionOr<ClassElement::ClassValue> ClassField::class_element_evaluation
     auto& realm = *vm.current_realm();
 
     auto property_key_or_private_name = TRY(class_key_to_property_name(vm, *m_key, property_key));
-    GC::Ptr<ECMAScriptFunctionObject> initializer;
+    Variant<GC::Ref<ECMAScriptFunctionObject>, Value, Empty> initializer;
     if (m_initializer) {
-        auto copy_initializer = m_initializer;
-        auto name = property_key_or_private_name.visit(
-            [&](PropertyKey const& property_key) -> String {
-                return property_key.is_number() ? property_key.to_string() : property_key.to_string_or_symbol().to_display_string();
-            },
-            [&](PrivateName const& private_name) -> String {
-                return private_name.description.to_string();
-            });
+        if (auto const* literal = as_if<NumericLiteral>(*m_initializer)) {
+            initializer = literal->value();
+        } else if (auto const* literal = as_if<BooleanLiteral>(*m_initializer)) {
+            initializer = literal->value();
+        } else if (auto const* literal = as_if<NullLiteral>(*m_initializer)) {
+            initializer = literal->value();
+        } else if (auto const* literal = as_if<StringLiteral>(*m_initializer)) {
+            initializer = Value(PrimitiveString::create(vm, literal->value()));
+        } else {
+            auto copy_initializer = m_initializer;
+            auto name = property_key_or_private_name.visit(
+                [&](PropertyKey const& property_key) -> String {
+                    return property_key.is_number() ? property_key.to_string() : property_key.to_string_or_symbol().to_display_string();
+                },
+                [&](PrivateName const& private_name) -> String {
+                    return private_name.description.to_string();
+                });
 
-        // FIXME: A potential optimization is not creating the functions here since these are never directly accessible.
-        auto function_code = create_ast_node<ClassFieldInitializerStatement>(m_initializer->source_range(), copy_initializer.release_nonnull(), name);
-        FunctionParsingInsights parsing_insights;
-        parsing_insights.uses_this_from_environment = true;
-        parsing_insights.uses_this = true;
-        initializer = ECMAScriptFunctionObject::create(realm, "field"_string, ByteString::empty(), *function_code, FunctionParameters::empty(), 0, {}, vm.lexical_environment(), vm.running_execution_context().private_environment, FunctionKind::Normal, true, parsing_insights, false, property_key_or_private_name);
-        initializer->make_method(target);
+            // FIXME: A potential optimization is not creating the functions here since these are never directly accessible.
+            auto function_code = create_ast_node<ClassFieldInitializerStatement>(m_initializer->source_range(), copy_initializer.release_nonnull(), name);
+            FunctionParsingInsights parsing_insights;
+            parsing_insights.uses_this_from_environment = true;
+            parsing_insights.uses_this = true;
+            auto function = ECMAScriptFunctionObject::create(realm, "field"_string, ByteString::empty(), *function_code, FunctionParameters::empty(), 0, {}, vm.lexical_environment(), vm.running_execution_context().private_environment, FunctionKind::Normal, true, parsing_insights, false, property_key_or_private_name);
+            function->make_method(target);
+            initializer = function;
+        }
     }
 
     return ClassValue {
@@ -335,23 +350,12 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> ClassExpression::create_class_const
 
     // FIXME: Step 14.a is done in the parser. By using a synthetic super(...args) which does not call @@iterator of %Array.prototype%
     auto const& constructor = *m_constructor;
-    auto parsing_insights = constructor.parsing_insights();
-    parsing_insights.uses_this_from_environment = true;
-    parsing_insights.uses_this = true;
-    auto class_constructor = ECMAScriptFunctionObject::create(
-        realm,
+    auto class_constructor = ECMAScriptFunctionObject::create_from_function_node(
+        constructor,
         constructor.name(),
-        constructor.source_text(),
-        constructor.body(),
-        constructor.parameters(),
-        constructor.function_length(),
-        constructor.local_variables_names(),
+        realm,
         vm.lexical_environment(),
-        vm.running_execution_context().private_environment,
-        constructor.kind(),
-        constructor.is_strict_mode(),
-        parsing_insights,
-        constructor.is_arrow_function());
+        vm.running_execution_context().private_environment);
 
     class_constructor->set_name(class_name);
     class_constructor->set_home_object(prototype);
@@ -360,7 +364,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> ClassExpression::create_class_const
     TRY(class_constructor->internal_set_prototype_of(constructor_parent));
 
     if (!m_super_class.is_null())
-        class_constructor->set_constructor_kind(ECMAScriptFunctionObject::ConstructorKind::Derived);
+        class_constructor->set_constructor_kind(ConstructorKind::Derived);
 
     prototype->define_direct_property(vm.names.constructor, class_constructor, Attribute::Writable | Attribute::Configurable);
 
@@ -406,8 +410,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> ClassExpression::create_class_const
                 instance_fields.append(move(*class_field_definition_ptr));
         } else if (element->class_element_kind() == ClassElement::ElementKind::StaticInitializer) {
             // We use Completion to hold the ClassStaticBlockDefinition Record.
-            VERIFY(element_value.has<Completion>() && element_value.get<Completion>().value().has_value());
-            auto& element_object = element_value.get<Completion>().value()->as_object();
+            auto& element_object = element_value.get<Completion>().value().as_object();
             VERIFY(is<ECMAScriptFunctionObject>(element_object));
             static_elements.append(GC::Ref { static_cast<ECMAScriptFunctionObject&>(element_object) });
         }
@@ -821,6 +824,34 @@ void BindingPattern::dump(int indent) const
             entry.initializer->dump(indent + 3);
         }
     }
+}
+
+FunctionNode::FunctionNode(RefPtr<Identifier const> name, ByteString source_text, NonnullRefPtr<Statement const> body, NonnullRefPtr<FunctionParameters const> parameters, i32 function_length, FunctionKind kind, bool is_strict_mode, FunctionParsingInsights parsing_insights, bool is_arrow_function, Vector<FlyString> local_variables_names)
+    : m_name(move(name))
+    , m_source_text(move(source_text))
+    , m_body(move(body))
+    , m_parameters(move(parameters))
+    , m_function_length(function_length)
+    , m_kind(kind)
+    , m_is_strict_mode(is_strict_mode)
+    , m_is_arrow_function(is_arrow_function)
+    , m_parsing_insights(parsing_insights)
+    , m_local_variables_names(move(local_variables_names))
+{
+    if (m_is_arrow_function)
+        VERIFY(!parsing_insights.might_need_arguments_object);
+}
+
+FunctionNode::~FunctionNode() = default;
+
+void FunctionNode::set_shared_data(RefPtr<SharedFunctionInstanceData> shared_data) const
+{
+    m_shared_data = move(shared_data);
+}
+
+RefPtr<SharedFunctionInstanceData> FunctionNode::shared_data() const
+{
+    return m_shared_data;
 }
 
 void FunctionNode::dump(int indent, ByteString const& class_name) const
@@ -1627,8 +1658,12 @@ void ScopeNode::block_declaration_instantiation(VM& vm, Environment* environment
             auto& function_declaration = static_cast<FunctionDeclaration const&>(declaration);
 
             // ii. Let fo be InstantiateFunctionObject of d with arguments env and privateEnv.
-            auto function = ECMAScriptFunctionObject::create(realm, function_declaration.name(), function_declaration.source_text(), function_declaration.body(), function_declaration.parameters(), function_declaration.function_length(), function_declaration.local_variables_names(), environment, private_environment, function_declaration.kind(), function_declaration.is_strict_mode(),
-                function_declaration.parsing_insights());
+            auto function = ECMAScriptFunctionObject::create_from_function_node(
+                function_declaration,
+                function_declaration.name(),
+                realm,
+                environment,
+                private_environment);
 
             // iii. Perform ! env.InitializeBinding(fn, fo). NOTE: This step is replaced in section B.3.2.6.
             if (function_declaration.name_identifier()->is_local()) {
@@ -1835,8 +1870,12 @@ ThrowCompletionOr<void> Program::global_declaration_instantiation(VM& vm, Global
     for (auto& declaration : functions_to_initialize.in_reverse()) {
         // a. Let fn be the sole element of the BoundNames of f.
         // b. Let fo be InstantiateFunctionObject of f with arguments env and privateEnv.
-        auto function = ECMAScriptFunctionObject::create(realm, declaration.name(), declaration.source_text(), declaration.body(), declaration.parameters(), declaration.function_length(), declaration.local_variables_names(), &global_environment, private_environment, declaration.kind(), declaration.is_strict_mode(),
-            declaration.parsing_insights());
+        auto function = ECMAScriptFunctionObject::create_from_function_node(
+            declaration,
+            declaration.name(),
+            realm,
+            &global_environment,
+            private_environment);
 
         // c. Perform ? env.CreateGlobalFunctionBinding(fn, fo, false).
         TRY(global_environment.create_global_function_binding(declaration.name(), function, false));

@@ -52,6 +52,12 @@
                 float: left;
             }
 
+            hr {
+                height: 1px;
+                background-color: var(--border-color);
+                border: none;
+            }
+
             .card {
                 background-color: var(--card-background-color);
 
@@ -72,6 +78,10 @@
                 padding: 20px;
             }
 
+            .card-body > hr {
+                margin: 0 8px 16px 8px;
+            }
+
             .card-group {
                 margin-bottom: 20px;
             }
@@ -80,11 +90,19 @@
                 margin-bottom: 0;
             }
 
-            .permission-container {
+            .inline-container {
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
                 gap: 10px;
+            }
+
+            .button-container {
+                display: flex;
+                justify-content: flex-end;
+                gap: 10px;
+
+                margin-top: 20px;
             }
 
             .forcibly-enabled {
@@ -134,7 +152,6 @@
             }
 
             dialog::backdrop {
-                /* FIXME: This doesn't work in Ladybird. */
                 background-color: rgba(0, 0, 0, 0.5);
             }
 
@@ -152,7 +169,6 @@
                 height: 450px;
 
                 border-top: 1px solid var(--border-color);
-                border-bottom: 1px solid var(--border-color);
 
                 display: flex;
                 flex-direction: column;
@@ -165,16 +181,27 @@
             }
 
             dialog .dialog-body hr {
-                height: 1px;
-                background-color: var(--border-color);
-                border: none;
-
                 margin: 8px 4px 10px 4px;
+            }
+
+            dialog .dialog-form {
+                border-top: 1px solid var(--border-color);
+
+                display: flex;
+                flex-direction: column;
+
+                padding: 15px 20px;
+            }
+
+            dialog .form-group {
+                margin-bottom: 20px;
             }
 
             dialog .dialog-footer {
                 display: flex;
                 justify-content: flex-end;
+
+                border-top: 1px solid var(--border-color);
 
                 padding: 15px 20px;
                 gap: 10px;
@@ -185,7 +212,7 @@
                 font-weight: 500;
             }
 
-            dialog .dialog-close {
+            dialog .dialog-button {
                 background: none;
                 border: none;
                 outline: none;
@@ -198,11 +225,22 @@
                 cursor: pointer;
             }
 
-            dialog .dialog-close:hover {
+            dialog .dialog-button:hover {
                 opacity: 1;
             }
 
-            dialog .dialog-site-list {
+            dialog .dialog-button:disabled {
+                opacity: 0.3;
+            }
+
+            dialog .dialog-description {
+                margin-bottom: 10px;
+
+                font-size: 14px;
+                opacity: 0.7;
+            }
+
+            dialog .dialog-list {
                 outline: 1px solid var(--border-color);
                 border-radius: 4px;
 
@@ -214,7 +252,7 @@
                 flex-grow: 1;
             }
 
-            dialog .dialog-site-item {
+            dialog .dialog-list-item {
                 padding: 10px;
 
                 display: flex;
@@ -222,20 +260,20 @@
                 align-items: center;
             }
 
-            dialog .dialog-site-item:hover {
+            dialog .dialog-list-item:hover {
                 background-color: var(--card-header-background-color);
             }
 
-            dialog .dialog-site-item-placeholder {
+            dialog .dialog-list-item-placeholder {
                 padding: 10px;
                 opacity: 0.6;
             }
 
-            dialog .dialog-site-item .filter {
+            dialog .dialog-list-item-label {
                 flex-grow: 1;
             }
 
-            dialog .dialog-add-site {
+            dialog .dialog-controls {
                 display: flex;
                 justify-content: flex-end;
 
@@ -243,16 +281,14 @@
                 gap: 10px;
             }
 
-            dialog .dialog-add-site input {
-                flex-grow: 1;
+            dialog .dialog-controls button svg {
+                width: 16px;
+                height: 16px;
             }
 
-            .button-container {
-                display: flex;
-                justify-content: flex-end;
-
-                margin-top: 20px;
-                gap: 10px;
+            dialog .dialog-controls input,
+            dialog .dialog-controls select {
+                flex-grow: 1;
             }
         </style>
     </head>
@@ -275,25 +311,44 @@
                     <label for="new-tab-page-url">New Tab Page URL</label>
                     <input id="new-tab-page-url" type="url" placeholder="about:newtab" />
                 </div>
+
+                <hr />
+
+                <div class="card-group inline-container">
+                    <span>Languages</span>
+                    <button id="languages-settings" class="secondary-button">Settings...</button>
+                </div>
             </div>
         </div>
 
         <div class="card">
             <div class="card-header">Search</div>
             <div class="card-body">
-                <div class="card-group">
-                    <div class="toggle-container">
-                        <label for="search-enabled">Enable Search</label>
-                        <label class="toggle">
-                            <input id="search-enabled" type="checkbox" />
-                            <span class="toggle-button"></span>
-                        </label>
+                <div class="card-group inline-container">
+                    <label for="search-toggle">Enable Search</label>
+                    <input id="search-toggle" type="checkbox" switch />
+                </div>
+                <div class="card-group hidden">
+                    <label for="search-engine">Default Search Engine</label>
+                    <div class="inline-container">
+                        <select id="search-engine">
+                            <option value="">Please select a search engine</option>
+                            <hr />
+                        </select>
+                        <button id="search-settings" class="secondary-button">Settings...</button>
                     </div>
                 </div>
-                <div id="search-engine-list" class="card-group hidden">
-                    <label for="search-engine">Default Search Engine</label>
-                    <select id="search-engine">
-                        <option value="">Please Select a Search Engine</option>
+
+                <hr />
+
+                <div class="card-group inline-container">
+                    <label for="autocomplete-toggle">Enable Autocomplete</label>
+                    <input id="autocomplete-toggle" type="checkbox" switch />
+                </div>
+                <div class="card-group hidden">
+                    <label for="autocomplete-engine">Default Autocomplete Engine</label>
+                    <select id="autocomplete-engine">
+                        <option value="">Please select an autocomplete engine</option>
                         <hr />
                     </select>
                 </div>
@@ -303,7 +358,7 @@
         <div class="card">
             <div class="card-header">Permissions</div>
             <div class="card-body">
-                <div class="card-group permission-container">
+                <div class="card-group inline-container">
                     <span>Autoplay</span>
                     <span id="autoplay-forcibly-enabled" class="forcibly-enabled hidden">
                         This setting is controlled via the command line
@@ -313,27 +368,82 @@
             </div>
         </div>
 
+        <div class="card">
+            <div class="card-header">Privacy</div>
+            <div class="card-body">
+                <div class="card-group inline-container">
+                    <label for="do-not-track-toggle">Send websites a "Do Not Track" request</label>
+                    <input id="do-not-track-toggle" type="checkbox" switch />
+                </div>
+            </div>
+        </div>
+
         <div class="button-container">
             <button id="restore-defaults" class="primary-button">Restore&nbsp;Defaults</button>
         </div>
 
+        <dialog id="languages-dialog">
+            <div class="dialog-header">
+                <h3 class="dialog-title">Languages</h3>
+                <button id="languages-close" class="close-button dialog-button">&times;</button>
+            </div>
+            <div class="dialog-body">
+                <p class="dialog-description">
+                    Choose languages for websites in order of preference
+                </p>
+                <div id="languages-list" class="dialog-list"></div>
+                <div class="dialog-controls">
+                    <select id="languages-select">
+                        <option value="">Select a language to add...</option>
+                    </select>
+                    <button id="languages-add" class="primary-button" disabled>Add</button>
+                </div>
+            </div>
+        </dialog>
+
+        <dialog id="search-dialog">
+            <div class="dialog-header">
+                <h3 class="dialog-title">Search Settings</h3>
+                <button id="search-close" class="close-button dialog-button">&times;</button>
+            </div>
+            <div class="dialog-body" style="height: 300px">
+                <p class="dialog-description">Manage custom search engines</p>
+                <div id="search-list" class="dialog-list"></div>
+            </div>
+            <div class="dialog-form">
+                <div class="form-group">
+                    <label for="search-custom-name">Search Engine Name</label>
+                    <input id="search-custom-name" type="text" placeholder="Example" />
+                </div>
+                <div class="form-group">
+                    <label for="search-custom-url">Search URL</label>
+                    <p class="dialog-description">Use %s as a placeholder for the search query</p>
+                    <input
+                        id="search-custom-url"
+                        type="url"
+                        placeholder="https://example.com/search?q=%s"
+                    />
+                </div>
+                <div class="dialog-controls">
+                    <button id="search-custom-add" class="primary-button">Add&nbsp;Engine</button>
+                </div>
+            </div>
+        </dialog>
+
         <dialog id="site-settings">
             <div class="dialog-header">
                 <h3 id="site-settings-title" class="dialog-title"></h3>
-                <button id="site-settings-close" class="close-button dialog-close">&times;</button>
+                <button id="site-settings-close" class="close-button dialog-button">&times;</button>
             </div>
             <div class="dialog-body">
-                <div class="toggle-container">
+                <div class="inline-container">
                     <label for="site-settings-global">Enable on all sites</label>
-                    <label class="toggle">
-                        <input id="site-settings-global" type="checkbox" />
-                        <span class="toggle-button"></span>
-                    </label>
+                    <input id="site-settings-global" type="checkbox" switch />
                 </div>
                 <hr />
                 <label>Allowlist</label>
-                <div id="site-settings-list" class="dialog-site-list"></div>
-                <div class="dialog-add-site">
+                <div id="site-settings-list" class="dialog-list"></div>
+                <div class="dialog-controls">
                     <input id="site-settings-input" type="text" placeholder="example.com" />
                     <button id="site-settings-add" class="primary-button">Add&nbsp;Site</button>
                 </div>
@@ -345,11 +455,27 @@
             </div>
         </dialog>
 
+        <script src="resource://ladybird/about-pages/settings/languages.js"></script>
+
         <script>
             const newTabPageURL = document.querySelector("#new-tab-page-url");
-            const searchEngineList = document.querySelector("#search-engine-list");
-            const searchEnabled = document.querySelector("#search-enabled");
+            const languagesAdd = document.querySelector("#languages-add");
+            const languagesClose = document.querySelector("#languages-close");
+            const languagesDialog = document.querySelector("#languages-dialog");
+            const languagesList = document.querySelector("#languages-list");
+            const languagesSelect = document.querySelector("#languages-select");
+            const languagesSettings = document.querySelector("#languages-settings");
+            const searchClose = document.querySelector("#search-close");
+            const searchCustomAdd = document.querySelector("#search-custom-add");
+            const searchCustomName = document.querySelector("#search-custom-name");
+            const searchCustomURL = document.querySelector("#search-custom-url");
+            const searchDialog = document.querySelector("#search-dialog");
             const searchEngine = document.querySelector("#search-engine");
+            const searchList = document.querySelector("#search-list");
+            const searchSettings = document.querySelector("#search-settings");
+            const searchToggle = document.querySelector("#search-toggle");
+            const autocompleteEngine = document.querySelector("#autocomplete-engine");
+            const autocompleteToggle = document.querySelector("#autocomplete-toggle");
             const autoplaySettings = document.querySelector("#autoplay-settings");
             const siteSettings = document.querySelector("#site-settings");
             const siteSettingsAdd = document.querySelector("#site-settings-add");
@@ -359,9 +485,18 @@
             const siteSettingsInput = document.querySelector("#site-settings-input");
             const siteSettingsRemoveAll = document.querySelector("#site-settings-remove-all");
             const siteSettingsTitle = document.querySelector("#site-settings-title");
+            const doNotTrackToggle = document.querySelector("#do-not-track-toggle");
             const restoreDefaults = document.querySelector("#restore-defaults");
 
+            // FIXME: When we support per-glyph font fallbacks, replace these SVGs with analogous code points.
+            //        https://github.com/LadybirdBrowser/ladybird/issues/864
+            const upwardArrowSVG =
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>';
+            const downwardArrowSVG =
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+
             window.settings = {};
+            window.nativeSearchEngineCount = 0;
 
             const loadSettings = settings => {
                 window.settings = settings;
@@ -372,64 +507,49 @@
                 newTabPageURL.classList.remove("error");
                 newTabPageURL.value = window.settings.newTabPageURL;
 
-                const searchEngineName = window.settings.searchEngine?.name;
-
-                if (searchEngineName) {
-                    searchEnabled.checked = true;
-                    searchEngine.value = searchEngineName;
-                } else {
-                    searchEnabled.checked = false;
+                if (languagesDialog.open) {
+                    showLanguages();
                 }
 
-                renderSearchEngine();
+                const renderEngineSettings = (type, setting) => {
+                    const [name, toggle, engine] = engineForType(type);
+
+                    if (setting?.name) {
+                        toggle.checked = true;
+                        engine.value = setting?.name;
+                    } else {
+                        toggle.checked = false;
+                    }
+
+                    renderEngine(type);
+                };
+
+                loadCustomSearchEngines();
+                renderEngineSettings(Engine.search, window.settings.searchEngine);
+                renderEngineSettings(Engine.autocomplete, window.settings.autocompleteEngine);
+
+                if (searchDialog.open) {
+                    showSearchEngineSettings();
+                }
 
                 const siteSetting = currentSiteSetting();
 
                 if (siteSetting === "autoplay") {
                     showSiteSettings("Autoplay", window.settings.autoplay);
                 }
+
+                doNotTrackToggle.checked = window.settings.doNotTrack;
             };
 
-            const loadSearchEngines = engines => {
-                for (const engine of engines) {
-                    const option = document.createElement("option");
-                    option.text = engine;
-                    option.value = engine;
-
-                    searchEngine.add(option);
-                }
-            };
-
-            const renderSearchEngine = () => {
-                if (searchEnabled.checked) {
-                    searchEngineList.classList.remove("hidden");
-                } else {
-                    searchEngineList.classList.add("hidden");
-                }
-
-                if (searchEnabled.checked && searchEngine.selectedIndex !== 0) {
-                    searchEngine.item(0).disabled = true;
-                } else if (!searchEnabled.checked) {
-                    searchEngine.item(0).disabled = false;
-                    searchEngine.selectedIndex = 0;
-                }
-            };
-
-            const saveSearchEngine = () => {
-                if (searchEnabled.checked && searchEngine.selectedIndex !== 0) {
-                    ladybird.sendMessage("setSearchEngine", searchEngine.value);
-                } else if (!searchEnabled.checked) {
-                    ladybird.sendMessage("setSearchEngine", null);
-                }
-
-                renderSearchEngine();
+            const containsValidURL = input => {
+                return input.value.length !== 0 && input.checkValidity();
             };
 
             newTabPageURL.addEventListener("change", () => {
                 newTabPageURL.classList.remove("success");
                 newTabPageURL.classList.remove("error");
 
-                if (!newTabPageURL.checkValidity()) {
+                if (!containsValidURL(newTabPageURL)) {
                     newTabPageURL.classList.add("error");
                     return;
                 }
@@ -442,8 +562,329 @@
                 }, 1000);
             });
 
-            searchEnabled.addEventListener("change", saveSearchEngine);
-            searchEngine.addEventListener("change", saveSearchEngine);
+            const languageDisplayName = language => {
+                const item = window.languages.find(item => item.language === language);
+                return item.displayName;
+            };
+
+            const saveLanguages = () => {
+                ladybird.sendMessage("setLanguages", window.settings.languages);
+            };
+
+            const moveLanguage = (from, to) => {
+                [window.settings.languages[from], window.settings.languages[to]] = [
+                    window.settings.languages[to],
+                    window.settings.languages[from],
+                ];
+
+                saveLanguages();
+            };
+
+            const removeLanguage = index => {
+                window.settings.languages.splice(index, 1);
+                saveLanguages();
+            };
+
+            const loadLanguages = () => {
+                for (const language of window.languages) {
+                    const option = document.createElement("option");
+                    option.text = language.displayName;
+                    option.value = language.language;
+
+                    languagesSelect.add(option);
+                }
+            };
+
+            const showLanguages = () => {
+                languagesList.innerHTML = "";
+
+                window.settings.languages.forEach((language, index) => {
+                    const name = document.createElement("span");
+                    name.className = "dialog-list-item-label";
+                    name.textContent = languageDisplayName(language);
+
+                    const moveUp = document.createElement("button");
+                    moveUp.className = "dialog-button";
+                    moveUp.innerHTML = upwardArrowSVG;
+                    moveUp.title = "Move up";
+
+                    if (index === 0) {
+                        moveUp.disabled = true;
+                    } else {
+                        moveUp.addEventListener("click", () => {
+                            moveLanguage(index, index - 1);
+                        });
+                    }
+
+                    const moveDown = document.createElement("button");
+                    moveDown.className = "dialog-button";
+                    moveDown.innerHTML = downwardArrowSVG;
+                    moveDown.title = "Move down";
+
+                    if (index === window.settings.languages.length - 1) {
+                        moveDown.disabled = true;
+                    } else {
+                        moveDown.addEventListener("click", () => {
+                            moveLanguage(index, index + 1);
+                        });
+                    }
+
+                    const remove = document.createElement("button");
+                    remove.className = "dialog-button";
+                    remove.innerHTML = "&times;";
+                    remove.title = "Remove";
+
+                    if (window.settings.languages.length <= 1) {
+                        remove.disabled = true;
+                    } else {
+                        remove.addEventListener("click", () => {
+                            removeLanguage(index);
+                        });
+                    }
+
+                    const controls = document.createElement("div");
+                    controls.className = "dialog-controls";
+                    controls.appendChild(moveUp);
+                    controls.appendChild(moveDown);
+                    controls.appendChild(remove);
+
+                    const item = document.createElement("div");
+                    item.className = "dialog-list-item";
+                    item.appendChild(name);
+                    item.appendChild(controls);
+
+                    languagesList.appendChild(item);
+                });
+
+                for (const language of languagesSelect.options) {
+                    language.disabled = window.settings.languages.includes(language.value);
+                }
+
+                if (!languagesDialog.open) {
+                    setTimeout(() => languagesSelect.focus());
+                    languagesDialog.showModal();
+                }
+            };
+
+            languagesAdd.addEventListener("click", () => {
+                const language = languagesSelect.value;
+
+                languagesAdd.disabled = true;
+                languagesSelect.selectedIndex = 0;
+
+                if (!language || window.settings.languages.includes(language)) {
+                    return;
+                }
+
+                window.settings.languages.push(language);
+                saveLanguages();
+            });
+
+            languagesClose.addEventListener("click", () => {
+                languagesDialog.close();
+            });
+
+            languagesSelect.addEventListener("change", () => {
+                languagesAdd.disabled = !languagesSelect.value;
+            });
+
+            languagesSettings.addEventListener("click", event => {
+                showLanguages();
+                event.stopPropagation();
+            });
+
+            const Engine = Object.freeze({
+                search: 1,
+                autocomplete: 2,
+            });
+
+            const engineForType = engine => {
+                if (engine === Engine.search) {
+                    return ["Search", searchToggle, searchEngine];
+                }
+                if (engine === Engine.autocomplete) {
+                    return ["Autocomplete", autocompleteToggle, autocompleteEngine];
+                }
+                throw Error(`Unrecognized engine type ${engine}`);
+            };
+
+            const loadEngines = (type, engines) => {
+                const [name, toggle, engine] = engineForType(type);
+
+                for (const engineName of engines) {
+                    const option = document.createElement("option");
+                    option.text = engineName;
+                    option.value = engineName;
+
+                    engine.add(option);
+                }
+
+                if (type === Engine.search) {
+                    window.nativeSearchEngineCount = engine.length;
+                    engine.appendChild(document.createElement("hr"));
+                }
+            };
+
+            const renderEngine = type => {
+                const [name, toggle, engine] = engineForType(type);
+
+                if (toggle.checked) {
+                    engine.closest(".card-group").classList.remove("hidden");
+                } else {
+                    engine.closest(".card-group").classList.add("hidden");
+                }
+
+                if (toggle.checked && engine.selectedIndex !== 0) {
+                    engine.item(0).disabled = true;
+                } else if (!toggle.checked) {
+                    engine.item(0).disabled = false;
+                    engine.selectedIndex = 0;
+                }
+            };
+
+            const saveEngine = type => {
+                const [name, toggle, engine] = engineForType(type);
+
+                if (toggle.checked && engine.selectedIndex !== 0) {
+                    ladybird.sendMessage(`set${name}Engine`, engine.value);
+                } else if (!toggle.checked) {
+                    ladybird.sendMessage(`set${name}Engine`, null);
+                }
+
+                renderEngine(type);
+            };
+
+            const setSaveEngineListeners = type => {
+                const [name, toggle, engine] = engineForType(type);
+
+                toggle.addEventListener("change", () => {
+                    saveEngine(type);
+                });
+                engine.addEventListener("change", () => {
+                    saveEngine(type);
+                });
+            };
+
+            setSaveEngineListeners(Engine.search);
+            setSaveEngineListeners(Engine.autocomplete);
+
+            const loadCustomSearchEngines = () => {
+                while (searchEngine.length > window.nativeSearchEngineCount) {
+                    searchEngine.remove(window.nativeSearchEngineCount);
+                }
+
+                const custom = window.settings.searchEngine?.custom || [];
+
+                custom.forEach(custom => {
+                    const option = document.createElement("option");
+                    option.text = custom.name;
+                    option.value = custom.name;
+
+                    searchEngine.add(option);
+                });
+            };
+
+            const showSearchEngineSettings = () => {
+                searchCustomName.classList.remove("error");
+                searchCustomURL.classList.remove("error");
+                searchList.innerHTML = "";
+
+                const custom = window.settings.searchEngine?.custom || [];
+
+                if (custom.length === 0) {
+                    const placeholder = document.createElement("div");
+                    placeholder.className = "dialog-list-item-placeholder";
+                    placeholder.textContent = "No custom search engines added";
+
+                    searchList.appendChild(placeholder);
+                }
+
+                custom.forEach(custom => {
+                    const name = document.createElement("span");
+                    name.textContent = custom.name;
+
+                    const url = document.createElement("span");
+                    url.className = "dialog-list-item-placeholder";
+                    url.style = "padding-left: 0";
+                    url.textContent = ` — ${custom.url}`;
+
+                    const engine = document.createElement("span");
+                    engine.className = "dialog-list-item-label";
+                    engine.appendChild(name);
+                    engine.appendChild(url);
+
+                    const remove = document.createElement("button");
+                    remove.className = "dialog-button";
+                    remove.innerHTML = "&times;";
+                    remove.title = `Remove ${custom.name}`;
+
+                    remove.addEventListener("click", () => {
+                        ladybird.sendMessage("removeCustomSearchEngine", custom);
+                    });
+
+                    const item = document.createElement("div");
+                    item.className = "dialog-list-item";
+                    item.appendChild(engine);
+                    item.appendChild(remove);
+
+                    searchList.appendChild(item);
+                });
+
+                if (!searchDialog.open) {
+                    setTimeout(() => searchCustomName.focus());
+                    searchDialog.showModal();
+                }
+            };
+
+            const addCustomSearchEngine = () => {
+                searchCustomName.classList.remove("error");
+                searchCustomURL.classList.remove("error");
+
+                for (const i = 0; i < searchEngine.length; ++i) {
+                    if (searchCustomName.value === searchEngine.item(i).value) {
+                        searchCustomName.classList.add("error");
+                        return;
+                    }
+                }
+
+                if (!containsValidURL(searchCustomURL)) {
+                    searchCustomURL.classList.add("error");
+                    return;
+                }
+
+                ladybird.sendMessage("addCustomSearchEngine", {
+                    name: searchCustomName.value,
+                    url: searchCustomURL.value,
+                });
+
+                searchCustomName.value = "";
+                searchCustomURL.value = "";
+
+                setTimeout(() => searchCustomName.focus());
+            };
+
+            searchCustomAdd.addEventListener("click", addCustomSearchEngine);
+
+            searchCustomName.addEventListener("keydown", event => {
+                if (event.key === "Enter") {
+                    addCustomSearchEngine();
+                }
+            });
+
+            searchCustomURL.addEventListener("keydown", event => {
+                if (event.key === "Enter") {
+                    addCustomSearchEngine();
+                }
+            });
+
+            searchClose.addEventListener("click", () => {
+                searchDialog.close();
+            });
+
+            searchSettings.addEventListener("click", event => {
+                showSearchEngineSettings();
+                event.stopPropagation();
+            });
 
             const forciblyEnableSiteSettings = settings => {
                 settings.forEach(setting => {
@@ -477,7 +918,7 @@
 
                 if (settings.siteFilters.length === 0) {
                     const placeholder = document.createElement("div");
-                    placeholder.className = "dialog-site-item-placeholder";
+                    placeholder.className = "dialog-list-item-placeholder";
                     placeholder.textContent = "No sites added";
 
                     siteSettingsList.appendChild(placeholder);
@@ -485,11 +926,11 @@
 
                 settings.siteFilters.forEach(site => {
                     const filter = document.createElement("span");
-                    filter.className = "filter";
+                    filter.className = "dialog-list-item-label";
                     filter.textContent = site;
 
                     const remove = document.createElement("button");
-                    remove.className = "dialog-close";
+                    remove.className = "dialog-button";
                     remove.innerHTML = "&times;";
                     remove.title = `Remove ${site}`;
 
@@ -501,7 +942,7 @@
                     });
 
                     const item = document.createElement("div");
-                    item.className = "dialog-site-item";
+                    item.className = "dialog-list-item";
                     item.appendChild(filter);
                     item.appendChild(remove);
 
@@ -553,39 +994,43 @@
                 event.stopPropagation();
             });
 
+            doNotTrackToggle.addEventListener("change", () => {
+                ladybird.sendMessage("setDoNotTrack", doNotTrackToggle.checked);
+            });
+
             restoreDefaults.addEventListener("click", () => {
                 ladybird.sendMessage("restoreDefaultSettings");
             });
 
-            // FIXME: Once we support `dialog::backdrop`, this event listener should be on `siteSettings`.
-            document.addEventListener("click", event => {
-                if (!siteSettings.open) {
-                    return;
-                }
+            // FIXME: This should be replaced once we support popover light dismissal.
+            document.querySelectorAll("dialog").forEach((dialog) =>
+                dialog.addEventListener("click", event => {
+                    const rect = dialog.getBoundingClientRect();
 
-                const rect = siteSettings.getBoundingClientRect();
-
-                if (
-                    event.clientX < rect.left ||
-                    event.clientX > rect.right ||
-                    event.clientY < rect.top ||
-                    event.clientY > rect.bottom
-                ) {
-                    siteSettings.close();
+                    if (
+                        event.clientX < rect.left ||
+                        event.clientX > rect.right ||
+                        event.clientY < rect.top ||
+                        event.clientY > rect.bottom
+                    ) {
+                        dialog.close();
+                    }
                 }
-            });
+            ));
 
             document.addEventListener("WebUILoaded", () => {
-                ladybird.sendMessage("loadAvailableSearchEngines");
+                ladybird.sendMessage("loadAvailableEngines");
                 ladybird.sendMessage("loadCurrentSettings");
                 ladybird.sendMessage("loadForciblyEnabledSiteSettings");
+                loadLanguages();
             });
 
             document.addEventListener("WebUIMessage", event => {
                 if (event.detail.name === "loadSettings") {
                     loadSettings(event.detail.data);
-                } else if (event.detail.name === "loadSearchEngines") {
-                    loadSearchEngines(event.detail.data);
+                } else if (event.detail.name === "loadEngines") {
+                    loadEngines(Engine.search, event.detail.data.search);
+                    loadEngines(Engine.autocomplete, event.detail.data.autocomplete);
                 } else if (event.detail.name === "forciblyEnableSiteSettings") {
                     forciblyEnableSiteSettings(event.detail.data);
                 }

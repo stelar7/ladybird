@@ -106,6 +106,7 @@ public:
         FilterValueList,
         FitContent,
         Flex,
+        FontSource,
         FontVariant,
         Frequency,
         GridAutoFlow,
@@ -175,6 +176,7 @@ public:
     bool is_color() const { return type() == Type::Color; }
     CSSColorValue const& as_color() const;
     CSSColorValue& as_color() { return const_cast<CSSColorValue&>(const_cast<CSSStyleValue const&>(*this).as_color()); }
+    virtual bool is_color_function() const { return false; }
 
     bool is_color_scheme() const { return type() == Type::ColorScheme; }
     ColorSchemeStyleValue const& as_color_scheme() const;
@@ -227,6 +229,10 @@ public:
     bool is_flex() const { return type() == Type::Flex; }
     FlexStyleValue const& as_flex() const;
     FlexStyleValue& as_flex() { return const_cast<FlexStyleValue&>(const_cast<CSSStyleValue const&>(*this).as_flex()); }
+
+    bool is_font_source() const { return type() == Type::FontSource; }
+    FontSourceStyleValue const& as_font_source() const;
+    FontSourceStyleValue& as_font_source() { return const_cast<FontSourceStyleValue&>(const_cast<CSSStyleValue const&>(*this).as_font_source()); }
 
     bool is_frequency() const { return type() == Type::Frequency; }
     FrequencyStyleValue const& as_frequency() const;

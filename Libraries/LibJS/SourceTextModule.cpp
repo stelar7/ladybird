@@ -500,8 +500,12 @@ ThrowCompletionOr<void> SourceTextModule::initialize_environment(VM& vm)
                 FlyString function_name = function_declaration.name();
                 if (function_name == ExportStatement::local_name_for_default)
                     function_name = "default"_fly_string;
-                auto function = ECMAScriptFunctionObject::create(realm(), function_name, function_declaration.source_text(), function_declaration.body(), function_declaration.parameters(), function_declaration.function_length(), function_declaration.local_variables_names(), environment, private_environment, function_declaration.kind(), function_declaration.is_strict_mode(),
-                    function_declaration.parsing_insights());
+                auto function = ECMAScriptFunctionObject::create_from_function_node(
+                    function_declaration,
+                    function_name,
+                    realm(),
+                    environment,
+                    private_environment);
 
                 // 2. Perform ! env.InitializeBinding(dn, fo, normal).
                 MUST(environment->initialize_binding(vm, name, function, Environment::InitializeBindingHint::Normal));
@@ -727,7 +731,7 @@ ThrowCompletionOr<void> SourceTextModule::execute_module(VM& vm, GC::Ptr<Promise
                 result = result_and_return_register.value.release_error();
             } else {
                 // Resulting value is in the accumulator.
-                result = result_and_return_register.return_register_value.value_or(js_undefined());
+                result = result_and_return_register.return_register_value.is_special_empty_value() ? js_undefined() : result_and_return_register.return_register_value;
             }
         }
 
@@ -779,7 +783,7 @@ ThrowCompletionOr<void> SourceTextModule::execute_module(VM& vm, GC::Ptr<Promise
 
         // AD-HOC: This is basically analogous to what AsyncBlockStart would do.
         if (result.is_throw_completion()) {
-            MUST(call(vm, *capability->reject(), js_undefined(), result.throw_completion().value().value()));
+            MUST(call(vm, *capability->reject(), js_undefined(), result.throw_completion().value()));
         } else {
             MUST(call(vm, *capability->resolve(), js_undefined(), result.value()));
         }

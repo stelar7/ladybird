@@ -45,14 +45,14 @@ ParsingParams::ParsingParams(JS::Realm& realm, ParsingMode mode)
 {
 }
 
-ParsingParams::ParsingParams(JS::Realm& realm, URL::URL url, ParsingMode mode)
+ParsingParams::ParsingParams(JS::Realm& realm, ::URL::URL url, ParsingMode mode)
     : realm(realm)
     , url(move(url))
     , mode(mode)
 {
 }
 
-ParsingParams::ParsingParams(DOM::Document const& document, URL::URL url, ParsingMode mode)
+ParsingParams::ParsingParams(DOM::Document const& document, ::URL::URL url, ParsingMode mode)
     : realm(const_cast<JS::Realm&>(document.realm()))
     , document(&document)
     , url(move(url))
@@ -86,7 +86,7 @@ Parser::Parser(ParsingParams const& context, Vector<Token> tokens)
 
 // https://drafts.csswg.org/css-syntax/#parse-stylesheet
 template<typename T>
-Parser::ParsedStyleSheet Parser::parse_a_stylesheet(TokenStream<T>& input, Optional<URL::URL> location)
+Parser::ParsedStyleSheet Parser::parse_a_stylesheet(TokenStream<T>& input, Optional<::URL::URL> location)
 {
     // To parse a stylesheet from an input given an optional url location:
 
@@ -119,10 +119,10 @@ Vector<Rule> Parser::parse_a_stylesheets_contents(TokenStream<T>& input)
 }
 
 // https://drafts.csswg.org/css-syntax/#parse-a-css-stylesheet
-CSSStyleSheet* Parser::parse_as_css_stylesheet(Optional<URL::URL> location)
+CSSStyleSheet* Parser::parse_as_css_stylesheet(Optional<::URL::URL> location, Vector<NonnullRefPtr<MediaQuery>> media_query_list)
 {
     // To parse a CSS stylesheet, first parse a stylesheet.
-    auto const& style_sheet = parse_a_stylesheet(m_token_stream, {});
+    auto const& style_sheet = parse_a_stylesheet(m_token_stream, location);
 
     // Interpret all of the resulting top-level qualified rules as style rules, defined below.
     GC::RootVector<CSSRule*> rules(realm().heap());
@@ -138,7 +138,7 @@ CSSStyleSheet* Parser::parse_as_css_stylesheet(Optional<URL::URL> location)
     }
 
     auto rule_list = CSSRuleList::create(realm(), rules);
-    auto media_list = MediaList::create(realm(), {});
+    auto media_list = MediaList::create(realm(), move(media_query_list));
     return CSSStyleSheet::create(realm(), rule_list, media_list, move(location));
 }
 
@@ -1350,6 +1350,36 @@ Parser::PropertiesAndCustomProperties Parser::parse_as_style_attribute()
     return properties;
 }
 
+Vector<Descriptor> Parser::parse_as_list_of_descriptors(AtRuleID at_rule_id)
+{
+    auto context_type = [at_rule_id] {
+        switch (at_rule_id) {
+        case AtRuleID::FontFace:
+            return ContextType::AtFontFace;
+        case AtRuleID::Property:
+            return ContextType::AtProperty;
+        }
+        VERIFY_NOT_REACHED();
+    }();
+
+    m_rule_context.append(context_type);
+    auto declarations_and_at_rules = parse_a_blocks_contents(m_token_stream);
+    m_rule_context.take_last();
+
+    Vector<Descriptor> descriptors;
+    for (auto const& rule_or_list : declarations_and_at_rules) {
+        if (rule_or_list.has<Rule>())
+            continue;
+
+        auto& declarations = rule_or_list.get<Vector<Declaration>>();
+        for (auto const& declaration : declarations) {
+            if (auto descriptor = convert_to_descriptor(at_rule_id, declaration); descriptor.has_value())
+                descriptors.append(descriptor.release_value());
+        }
+    }
+    return descriptors;
+}
+
 bool Parser::is_valid_in_the_current_context(Declaration const&) const
 {
     // TODO: Determine if this *particular* declaration is valid here, not just declarations in general.
@@ -1397,14 +1427,18 @@ bool Parser::is_valid_in_the_current_context(AtRule const& at_rule) const
     if (m_rule_context.is_empty())
         return true;
 
+    // Only grouping rules can be nested within style rules
+    if (m_rule_context.contains_slow(ContextType::Style))
+        return first_is_one_of(at_rule.name, "layer", "media", "supports");
+
     switch (m_rule_context.last()) {
     case ContextType::Unknown:
         // If the context is an unknown type, we don't accept anything.
         return false;
 
     case ContextType::Style:
-        // Style rules can contain grouping rules
-        return first_is_one_of(at_rule.name, "layer", "media", "supports");
+        // Already handled above
+        VERIFY_NOT_REACHED();
 
     case ContextType::AtLayer:
     case ContextType::AtMedia:
@@ -1574,17 +1608,13 @@ bool Parser::context_allows_quirky_length() const
     for (auto i = 1u; i < m_value_context.size() && unitless_length_allowed; i++) {
         unitless_length_allowed = m_value_context[i].visit(
             [](PropertyID const& property_id) { return property_has_quirk(property_id, Quirk::UnitlessLength); },
-            [top_level_property](Parser::FunctionContext const& function_context) {
+            [top_level_property](FunctionContext const& function_context) {
                 return function_context.name == "rect"sv && top_level_property == PropertyID::Clip;
-            });
+            },
+            [](DescriptorContext const&) { return false; });
     }
 
     return unitless_length_allowed;
-}
-
-Vector<ParsedFontFace::Source> Parser::parse_as_font_face_src()
-{
-    return parse_font_face_src(m_token_stream);
 }
 
 Vector<ComponentValue> Parser::parse_as_list_of_component_values()
@@ -1597,6 +1627,16 @@ RefPtr<CSSStyleValue> Parser::parse_as_css_value(PropertyID property_id)
     auto component_values = parse_a_list_of_component_values(m_token_stream);
     auto tokens = TokenStream(component_values);
     auto parsed_value = parse_css_value(property_id, tokens);
+    if (parsed_value.is_error())
+        return nullptr;
+    return parsed_value.release_value();
+}
+
+RefPtr<CSSStyleValue> Parser::parse_as_descriptor_value(AtRuleID at_rule_id, DescriptorID descriptor_id)
+{
+    auto component_values = parse_a_list_of_component_values(m_token_stream);
+    auto tokens = TokenStream(component_values);
+    auto parsed_value = parse_descriptor_value(at_rule_id, descriptor_id, tokens);
     if (parsed_value.is_error())
         return nullptr;
     return parsed_value.release_value();
@@ -1732,8 +1772,8 @@ Parser::ContextType Parser::context_type_for_at_rule(FlyString const& name)
     return ContextType::Unknown;
 }
 
-template Parser::ParsedStyleSheet Parser::parse_a_stylesheet(TokenStream<Token>&, Optional<URL::URL>);
-template Parser::ParsedStyleSheet Parser::parse_a_stylesheet(TokenStream<ComponentValue>&, Optional<URL::URL>);
+template Parser::ParsedStyleSheet Parser::parse_a_stylesheet(TokenStream<Token>&, Optional<::URL::URL>);
+template Parser::ParsedStyleSheet Parser::parse_a_stylesheet(TokenStream<ComponentValue>&, Optional<::URL::URL>);
 
 template Vector<Rule> Parser::parse_a_stylesheets_contents(TokenStream<Token>& input);
 template Vector<Rule> Parser::parse_a_stylesheets_contents(TokenStream<ComponentValue>& input);
@@ -1813,10 +1853,10 @@ bool Parser::is_parsing_svg_presentation_attribute() const
 
 // https://www.w3.org/TR/css-values-4/#relative-urls
 // FIXME: URLs shouldn't be completed during parsing, but when used.
-Optional<URL::URL> Parser::complete_url(StringView relative_url) const
+Optional<::URL::URL> Parser::complete_url(StringView relative_url) const
 {
     if (!m_url.is_valid())
-        return URL::Parser::basic_parse(relative_url);
+        return ::URL::Parser::basic_parse(relative_url);
     return m_url.complete_url(relative_url);
 }
 

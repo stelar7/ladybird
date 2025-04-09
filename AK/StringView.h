@@ -51,15 +51,13 @@ public:
     StringView(String const&);
     StringView(FlyString const&);
     StringView(ByteString const&);
-    StringView(DeprecatedFlyString const&);
 
     explicit StringView(ByteBuffer&&) = delete;
     explicit StringView(String&&) = delete;
     explicit StringView(FlyString&&) = delete;
     explicit StringView(ByteString&&) = delete;
-    explicit StringView(DeprecatedFlyString&&) = delete;
 
-    template<OneOf<String, FlyString, ByteString, DeprecatedFlyString, ByteBuffer> StringType>
+    template<OneOf<String, FlyString, ByteString, ByteBuffer> StringType>
     StringView& operator=(StringType&&) = delete;
 
     [[nodiscard]] constexpr bool is_null() const
@@ -102,13 +100,14 @@ public:
     [[nodiscard]] bool contains(u32) const;
     [[nodiscard]] bool contains(StringView, CaseSensitivity = CaseSensitivity::CaseSensitive) const;
     [[nodiscard]] bool equals_ignoring_ascii_case(StringView) const;
+    [[nodiscard]] bool is_ascii() const;
 
     [[nodiscard]] StringView trim(StringView characters, TrimMode mode = TrimMode::Both) const { return StringUtils::trim(*this, characters, mode); }
     [[nodiscard]] StringView trim_whitespace(TrimMode mode = TrimMode::Both) const { return StringUtils::trim_whitespace(*this, mode); }
 
-    [[nodiscard]] ByteString to_lowercase_string() const;
-    [[nodiscard]] ByteString to_uppercase_string() const;
-    [[nodiscard]] ByteString to_titlecase_string() const;
+    [[nodiscard]] String to_ascii_lowercase_string() const;
+    [[nodiscard]] String to_ascii_uppercase_string() const;
+    [[nodiscard]] String to_ascii_titlecase_string() const;
 
     [[nodiscard]] Optional<size_t> find(char needle, size_t start = 0) const
     {

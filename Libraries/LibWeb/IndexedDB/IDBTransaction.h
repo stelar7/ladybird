@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024, stelar7 <dudedbz@gmail.com>
+ * Copyright (c) 2024-2025, stelar7 <dudedbz@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -37,7 +37,7 @@ class IDBTransaction : public DOM::EventTarget {
 public:
     virtual ~IDBTransaction() override;
 
-    [[nodiscard]] static GC::Ref<IDBTransaction> create(JS::Realm&, GC::Ref<IDBDatabase>, Bindings::IDBTransactionMode, Bindings::IDBTransactionDurability, Vector<GC::Root<ObjectStore>>);
+    [[nodiscard]] static GC::Ref<IDBTransaction> create(JS::Realm&, GC::Ref<IDBDatabase>, Bindings::IDBTransactionMode, Bindings::IDBTransactionDurability, Vector<GC::Ref<ObjectStore>>);
     [[nodiscard]] Bindings::IDBTransactionMode mode() const { return m_mode; }
     [[nodiscard]] TransactionState state() const { return m_state; }
     [[nodiscard]] GC::Ptr<WebIDL::DOMException> error() const { return m_error; }
@@ -46,8 +46,9 @@ public:
     [[nodiscard]] GC::Ptr<IDBRequest> associated_request() const { return m_associated_request; }
     [[nodiscard]] bool aborted() const { return m_aborted; }
     [[nodiscard]] GC::Ref<HTML::DOMStringList> object_store_names();
-    [[nodiscard]] Vector<GC::Root<ObjectStore>> scope() const { return m_scope; }
     [[nodiscard]] RequestList& request_list() { return m_request_list; }
+    [[nodiscard]] ReadonlySpan<GC::Ref<ObjectStore>> scope() const { return m_scope; }
+    [[nodiscard]] String uuid() const { return m_uuid; }
 
     void set_mode(Bindings::IDBTransactionMode mode) { m_mode = mode; }
     void set_state(TransactionState state) { m_state = state; }
@@ -78,12 +79,12 @@ public:
     WebIDL::CallbackType* onerror();
 
 protected:
-    explicit IDBTransaction(JS::Realm&, GC::Ref<IDBDatabase>, Bindings::IDBTransactionMode, Bindings::IDBTransactionDurability, Vector<GC::Root<ObjectStore>>);
+    explicit IDBTransaction(JS::Realm&, GC::Ref<IDBDatabase>, Bindings::IDBTransactionMode, Bindings::IDBTransactionDurability, Vector<GC::Ref<ObjectStore>>);
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Visitor& visitor) override;
 
 private:
-    // Returns the transaction’s connection.
+    // AD-HOC: The transaction has a connection
     GC::Ref<IDBDatabase> m_connection;
 
     // A transaction has a mode that determines which types of interactions can be performed upon that transaction.
@@ -101,11 +102,11 @@ private:
     // A transaction has an associated upgrade request
     GC::Ptr<IDBRequest> m_associated_request;
 
-    // Ad-hoc, we need to track abort state separately, since we cannot rely on only the error.
+    // AD-HOC: We need to track abort state separately, since we cannot rely on only the error.
     bool m_aborted { false };
 
     // A transaction has a scope which is a set of object stores that the transaction may interact with.
-    Vector<GC::Root<ObjectStore>> m_scope;
+    Vector<GC::Ref<ObjectStore>> m_scope;
 
     // A transaction has a request list of pending requests which have been made against the transaction.
     RequestList m_request_list;
@@ -113,7 +114,7 @@ private:
     // A transaction optionally has a cleanup event loop which is an event loop.
     GC::Ptr<HTML::EventLoop> m_cleanup_event_loop;
 
-    // Note: Used for debug purposes
+    // NOTE: Used for debug purposes
     String m_uuid;
 };
 }

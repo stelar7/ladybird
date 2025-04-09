@@ -26,7 +26,7 @@ public:
     static ErrorOr<FlyString> from_utf8(StringView);
     static FlyString from_utf8_without_validation(ReadonlyBytes);
     template<typename T>
-    requires(IsOneOf<RemoveCVReference<T>, ByteString, DeprecatedFlyString, FlyString, String>)
+    requires(IsOneOf<RemoveCVReference<T>, ByteString, FlyString, String>)
     static ErrorOr<String> from_utf8(T&&) = delete;
 
     FlyString(String const&);
@@ -55,9 +55,6 @@ public:
     // This is primarily interesting to unit tests.
     [[nodiscard]] static size_t number_of_fly_strings();
 
-    // FIXME: Remove these once all code has been ported to FlyString
-    [[nodiscard]] DeprecatedFlyString to_deprecated_fly_string() const;
-    static ErrorOr<FlyString> from_deprecated_fly_string(DeprecatedFlyString const&);
     template<typename T>
     requires(IsSame<RemoveCVReference<T>, StringView>)
     static ErrorOr<String> from_deprecated_fly_string(T&&) = delete;
@@ -220,7 +217,8 @@ struct ASCIICaseInsensitiveFlyStringTraits : public Traits<String> {
 
 [[nodiscard]] ALWAYS_INLINE AK::FlyString operator""_fly_string(char const* cstring, size_t length)
 {
-    return AK::FlyString::from_utf8(AK::StringView(cstring, length)).release_value();
+    ASSERT(Utf8View(AK::StringView(cstring, length)).validate());
+    return AK::FlyString::from_utf8_without_validation({ cstring, length });
 }
 
 #if USING_AK_GLOBALLY

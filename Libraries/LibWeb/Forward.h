@@ -159,6 +159,7 @@ class CounterStyleValue;
 class CSSAnimation;
 class CSSColorValue;
 class CSSConditionRule;
+class CSSFontFaceDescriptors;
 class CSSFontFaceRule;
 class CSSGroupingRule;
 class CSSHSL;
@@ -198,6 +199,7 @@ class FlexOrCalculated;
 class FlexStyleValue;
 class FontFace;
 class FontFaceSet;
+class FontSourceStyleValue;
 class Frequency;
 class FrequencyOrCalculated;
 class FrequencyPercentage;
@@ -267,6 +269,7 @@ class TransformationStyleValue;
 class TransitionStyleValue;
 class UnicodeRangeStyleValue;
 class UnresolvedStyleValue;
+class URL;
 class URLStyleValue;
 class VisualViewport;
 
@@ -927,6 +930,7 @@ class WebGLVertexArrayObject;
 
 namespace Web::WebGL::Extensions {
 class ANGLEInstancedArrays;
+class EXTBlendMinMax;
 class EXTColorBufferFloat;
 class OESVertexArrayObject;
 class WebGLCompressedTextureS3tc;

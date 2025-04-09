@@ -32,10 +32,10 @@ Generator::Generator(VM& vm, GC::Ptr<ECMAScriptFunctionObject const> function, M
 
 CodeGenerationErrorOr<void> Generator::emit_function_declaration_instantiation(ECMAScriptFunctionObject const& function)
 {
-    if (function.m_has_parameter_expressions) {
+    if (function.shared_data().m_has_parameter_expressions) {
         bool has_non_local_parameters = false;
-        for (auto const& parameter_name : function.m_parameter_names) {
-            if (parameter_name.value == ECMAScriptFunctionObject::ParameterIsLocal::No) {
+        for (auto const& parameter_name : function.shared_data().m_parameter_names) {
+            if (parameter_name.value == SharedFunctionInstanceData::ParameterIsLocal::No) {
                 has_non_local_parameters = true;
                 break;
             }
@@ -44,32 +44,32 @@ CodeGenerationErrorOr<void> Generator::emit_function_declaration_instantiation(E
             emit<Op::CreateLexicalEnvironment>();
     }
 
-    for (auto const& parameter_name : function.m_parameter_names) {
-        if (parameter_name.value == ECMAScriptFunctionObject::ParameterIsLocal::No) {
+    for (auto const& parameter_name : function.shared_data().m_parameter_names) {
+        if (parameter_name.value == SharedFunctionInstanceData::ParameterIsLocal::No) {
             auto id = intern_identifier(parameter_name.key);
             emit<Op::CreateVariable>(id, Op::EnvironmentMode::Lexical, false);
-            if (function.m_has_duplicates) {
+            if (function.shared_data().m_has_duplicates) {
                 emit<Op::InitializeLexicalBinding>(id, add_constant(js_undefined()));
             }
         }
     }
 
-    if (function.m_arguments_object_needed) {
+    if (function.shared_data().m_arguments_object_needed) {
         Optional<Operand> dst;
-        auto local_var_index = function.m_local_variables_names.find_first_index("arguments"_fly_string);
+        auto local_var_index = function.shared_data().m_local_variables_names.find_first_index("arguments"_fly_string);
         if (local_var_index.has_value())
             dst = local(local_var_index.value());
 
-        if (function.m_strict || !function.has_simple_parameter_list()) {
-            emit<Op::CreateArguments>(dst, Op::CreateArguments::Kind::Unmapped, function.m_strict);
+        if (function.is_strict_mode() || !function.has_simple_parameter_list()) {
+            emit<Op::CreateArguments>(dst, Op::CreateArguments::Kind::Unmapped, function.is_strict_mode());
         } else {
-            emit<Op::CreateArguments>(dst, Op::CreateArguments::Kind::Mapped, function.m_strict);
+            emit<Op::CreateArguments>(dst, Op::CreateArguments::Kind::Mapped, function.is_strict_mode());
         }
     }
 
     auto const& formal_parameters = function.formal_parameters();
-    for (u32 param_index = 0; param_index < formal_parameters->size(); ++param_index) {
-        auto const& parameter = formal_parameters->parameters()[param_index];
+    for (u32 param_index = 0; param_index < formal_parameters.size(); ++param_index) {
+        auto const& parameter = formal_parameters.parameters()[param_index];
 
         if (parameter.is_rest) {
             auto argument_reg = allocate_register();
@@ -104,7 +104,7 @@ CodeGenerationErrorOr<void> Generator::emit_function_declaration_instantiation(E
                 auto id = intern_identifier((*identifier)->string());
                 auto argument_reg = allocate_register();
                 emit<Op::GetArgument>(argument_reg.operand(), param_index);
-                if (function.m_has_duplicates) {
+                if (function.shared_data().m_has_duplicates) {
                     emit<Op::SetLexicalBinding>(id, argument_reg.operand());
                 } else {
                     emit<Op::InitializeLexicalBinding>(id, argument_reg.operand());
@@ -113,18 +113,18 @@ CodeGenerationErrorOr<void> Generator::emit_function_declaration_instantiation(E
         } else if (auto const* binding_pattern = parameter.binding.get_pointer<NonnullRefPtr<BindingPattern const>>(); binding_pattern) {
             auto input_operand = allocate_register();
             emit<Op::GetArgument>(input_operand.operand(), param_index);
-            auto init_mode = function.m_has_duplicates ? Op::BindingInitializationMode::Set : Bytecode::Op::BindingInitializationMode::Initialize;
+            auto init_mode = function.shared_data().m_has_duplicates ? Op::BindingInitializationMode::Set : Bytecode::Op::BindingInitializationMode::Initialize;
             TRY((*binding_pattern)->generate_bytecode(*this, init_mode, input_operand, false));
         }
     }
 
     ScopeNode const* scope_body = nullptr;
-    if (is<ScopeNode>(*function.m_ecmascript_code))
-        scope_body = static_cast<ScopeNode const*>(function.m_ecmascript_code.ptr());
+    if (is<ScopeNode>(function.ecmascript_code()))
+        scope_body = &static_cast<ScopeNode const&>(function.ecmascript_code());
 
-    if (!function.m_has_parameter_expressions) {
+    if (!function.shared_data().m_has_parameter_expressions) {
         if (scope_body) {
-            for (auto const& variable_to_initialize : function.m_var_names_to_initialize_binding) {
+            for (auto const& variable_to_initialize : function.shared_data().m_var_names_to_initialize_binding) {
                 auto const& id = variable_to_initialize.identifier;
                 if (id.is_local()) {
                     emit<Op::Mov>(local(id.local_variable_index()), add_constant(js_undefined()));
@@ -138,7 +138,7 @@ CodeGenerationErrorOr<void> Generator::emit_function_declaration_instantiation(E
     } else {
         bool has_non_local_parameters = false;
         if (scope_body) {
-            for (auto const& variable_to_initialize : function.m_var_names_to_initialize_binding) {
+            for (auto const& variable_to_initialize : function.shared_data().m_var_names_to_initialize_binding) {
                 auto const& id = variable_to_initialize.identifier;
                 if (!id.is_local()) {
                     has_non_local_parameters = true;
@@ -148,10 +148,10 @@ CodeGenerationErrorOr<void> Generator::emit_function_declaration_instantiation(E
         }
 
         if (has_non_local_parameters)
-            emit<Op::CreateVariableEnvironment>(function.m_var_environment_bindings_count);
+            emit<Op::CreateVariableEnvironment>(function.shared_data().m_var_environment_bindings_count);
 
         if (scope_body) {
-            for (auto const& variable_to_initialize : function.m_var_names_to_initialize_binding) {
+            for (auto const& variable_to_initialize : function.shared_data().m_var_names_to_initialize_binding) {
                 auto const& id = variable_to_initialize.identifier;
                 auto initial_value = allocate_register();
                 if (!variable_to_initialize.parameter_binding || variable_to_initialize.function_name) {
@@ -175,18 +175,18 @@ CodeGenerationErrorOr<void> Generator::emit_function_declaration_instantiation(E
         }
     }
 
-    if (!function.m_strict && scope_body) {
-        for (auto const& function_name : function.m_function_names_to_initialize_binding) {
+    if (!function.is_strict_mode() && scope_body) {
+        for (auto const& function_name : function.shared_data().m_function_names_to_initialize_binding) {
             auto intern_id = intern_identifier(function_name);
             emit<Op::CreateVariable>(intern_id, Op::EnvironmentMode::Var, false);
             emit<Op::InitializeVariableBinding>(intern_id, add_constant(js_undefined()));
         }
     }
 
-    if (!function.m_strict) {
+    if (!function.is_strict_mode()) {
         bool can_elide_lexical_environment = !scope_body || !scope_body->has_non_local_lexical_declarations();
         if (!can_elide_lexical_environment) {
-            emit<Op::CreateLexicalEnvironment>(function.m_lex_environment_bindings_count);
+            emit<Op::CreateLexicalEnvironment>(function.shared_data().m_lex_environment_bindings_count);
         }
     }
 
@@ -206,7 +206,7 @@ CodeGenerationErrorOr<void> Generator::emit_function_declaration_instantiation(E
         }));
     }
 
-    for (auto const& declaration : function.m_functions_to_initialize) {
+    for (auto const& declaration : function.shared_data().m_functions_to_initialize) {
         auto const& identifier = *declaration.name_identifier();
         if (identifier.is_local()) {
             auto local_index = identifier.local_variable_index();
@@ -687,7 +687,7 @@ CodeGenerationErrorOr<Generator::ReferenceOperands> Generator::emit_load_from_re
         if (super_reference.referenced_name.has_value()) {
             // 5. Let propertyKey be ? ToPropertyKey(propertyNameValue).
             // FIXME: This does ToPropertyKey out of order, which is observable by Symbol.toPrimitive!
-            emit<Bytecode::Op::GetByValueWithThis>(dst, *super_reference.base, *super_reference.referenced_name, *super_reference.this_value);
+            emit_get_by_value_with_this(dst, *super_reference.base, *super_reference.referenced_name, *super_reference.this_value);
         } else {
             // 3. Let propertyKey be StringValue of IdentifierName.
             auto identifier_table_ref = intern_identifier(as<Identifier>(expression.property()).string());
@@ -706,7 +706,7 @@ CodeGenerationErrorOr<Generator::ReferenceOperands> Generator::emit_load_from_re
         auto saved_property = allocate_register();
         emit<Bytecode::Op::Mov>(saved_property, property);
         auto dst = preferred_dst.has_value() ? preferred_dst.value() : allocate_register();
-        emit<Bytecode::Op::GetByValue>(dst, base, property, move(base_identifier));
+        emit_get_by_value(dst, base, property, move(base_identifier));
         return ReferenceOperands {
             .base = base,
             .referenced_name = saved_property,
@@ -760,7 +760,7 @@ CodeGenerationErrorOr<void> Generator::emit_store_to_reference(JS::ASTNode const
             if (super_reference.referenced_name.has_value()) {
                 // 5. Let propertyKey be ? ToPropertyKey(propertyNameValue).
                 // FIXME: This does ToPropertyKey out of order, which is observable by Symbol.toPrimitive!
-                emit<Bytecode::Op::PutByValueWithThis>(*super_reference.base, *super_reference.referenced_name, *super_reference.this_value, value);
+                emit_put_by_value_with_this(*super_reference.base, *super_reference.referenced_name, *super_reference.this_value, value, Op::PropertyKind::KeyValue);
             } else {
                 // 3. Let propertyKey be StringValue of IdentifierName.
                 auto identifier_table_ref = intern_identifier(as<Identifier>(expression.property()).string());
@@ -771,7 +771,7 @@ CodeGenerationErrorOr<void> Generator::emit_store_to_reference(JS::ASTNode const
 
             if (expression.is_computed()) {
                 auto property = TRY(expression.property().generate_bytecode(*this)).value();
-                emit<Bytecode::Op::PutByValue>(object, property, value);
+                emit_put_by_value(object, property, value, Op::PropertyKind::KeyValue, {});
             } else if (expression.property().is_identifier()) {
                 auto identifier_table_ref = intern_identifier(as<Identifier>(expression.property()).string());
                 emit<Bytecode::Op::PutById>(object, identifier_table_ref, value, Bytecode::Op::PropertyKind::KeyValue, next_property_lookup_cache());
@@ -809,9 +809,9 @@ CodeGenerationErrorOr<void> Generator::emit_store_to_reference(ReferenceOperands
         return {};
     }
     if (reference.base == reference.this_value)
-        emit<Bytecode::Op::PutByValue>(*reference.base, *reference.referenced_name, value);
+        emit_put_by_value(*reference.base, *reference.referenced_name, value, Op::PropertyKind::KeyValue, {});
     else
-        emit<Bytecode::Op::PutByValueWithThis>(*reference.base, *reference.referenced_name, *reference.this_value, value);
+        emit_put_by_value_with_this(*reference.base, *reference.referenced_name, *reference.this_value, value, Op::PropertyKind::KeyValue);
     return {};
 }
 
@@ -926,14 +926,14 @@ static Optional<String> expression_identifier(Expression const& expression)
         auto const& member_expression = static_cast<MemberExpression const&>(expression);
         StringBuilder builder;
 
-        if (auto identifer = expression_identifier(member_expression.object()); identifer.has_value())
-            builder.append(*identifer);
+        if (auto identifier = expression_identifier(member_expression.object()); identifier.has_value())
+            builder.append(*identifier);
 
-        if (auto identifer = expression_identifier(member_expression.property()); identifer.has_value()) {
+        if (auto identifier = expression_identifier(member_expression.property()); identifier.has_value()) {
             if (member_expression.is_computed())
-                builder.appendff("[{}]", *identifer);
+                builder.appendff("[{}]", *identifier);
             else
-                builder.appendff(".{}", *identifer);
+                builder.appendff(".{}", *identifier);
         }
 
         return builder.to_string_without_validation();
@@ -944,8 +944,8 @@ static Optional<String> expression_identifier(Expression const& expression)
 
 Optional<IdentifierTableIndex> Generator::intern_identifier_for_expression(Expression const& expression)
 {
-    if (auto identifer = expression_identifier(expression); identifer.has_value())
-        return intern_identifier(identifer.release_value());
+    if (auto identifier = expression_identifier(expression); identifier.has_value())
+        return intern_identifier(identifier.release_value());
     return {};
 }
 
@@ -1116,10 +1116,59 @@ void Generator::emit_get_by_id(ScopedOperand dst, ScopedOperand base, Identifier
 void Generator::emit_get_by_id_with_this(ScopedOperand dst, ScopedOperand base, IdentifierTableIndex id, ScopedOperand this_value)
 {
     if (m_identifier_table->get(id) == "length"sv) {
+        m_length_identifier = id;
         emit<Op::GetLengthWithThis>(dst, base, this_value, m_next_property_lookup_cache++);
         return;
     }
     emit<Op::GetByIdWithThis>(dst, base, id, this_value, m_next_property_lookup_cache++);
+}
+
+void Generator::emit_get_by_value(ScopedOperand dst, ScopedOperand base, ScopedOperand property, Optional<IdentifierTableIndex> base_identifier)
+{
+    if (property.operand().is_constant() && get_constant(property).is_string()) {
+        auto property_key = MUST(get_constant(property).to_property_key(vm()));
+        if (property_key.is_string()) {
+            emit_get_by_id(dst, base, intern_identifier(property_key.as_string()), base_identifier);
+            return;
+        }
+    }
+    emit<Op::GetByValue>(dst, base, property, base_identifier);
+}
+
+void Generator::emit_get_by_value_with_this(ScopedOperand dst, ScopedOperand base, ScopedOperand property, ScopedOperand this_value)
+{
+    if (property.operand().is_constant() && get_constant(property).is_string()) {
+        auto property_key = MUST(get_constant(property).to_property_key(vm()));
+        if (property_key.is_string()) {
+            emit_get_by_id_with_this(dst, base, intern_identifier(property_key.as_string()), this_value);
+            return;
+        }
+    }
+    emit<Op::GetByValueWithThis>(dst, base, property, this_value);
+}
+
+void Generator::emit_put_by_value(ScopedOperand base, ScopedOperand property, ScopedOperand src, Bytecode::Op::PropertyKind kind, Optional<IdentifierTableIndex> base_identifier)
+{
+    if (property.operand().is_constant() && get_constant(property).is_string()) {
+        auto property_key = MUST(get_constant(property).to_property_key(vm()));
+        if (property_key.is_string()) {
+            emit<Op::PutById>(base, intern_identifier(property_key.as_string()), src, kind, m_next_property_lookup_cache++, base_identifier);
+            return;
+        }
+    }
+    emit<Op::PutByValue>(base, property, src, kind, base_identifier);
+}
+
+void Generator::emit_put_by_value_with_this(ScopedOperand base, ScopedOperand property, ScopedOperand this_value, ScopedOperand src, Bytecode::Op::PropertyKind kind)
+{
+    if (property.operand().is_constant() && get_constant(property).is_string()) {
+        auto property_key = MUST(get_constant(property).to_property_key(vm()));
+        if (property_key.is_string()) {
+            emit<Op::PutByIdWithThis>(base, this_value, intern_identifier(property_key.as_string()), src, kind, m_next_property_lookup_cache++);
+            return;
+        }
+    }
+    emit<Bytecode::Op::PutByValueWithThis>(base, property, this_value, src, kind);
 }
 
 void Generator::emit_iterator_value(ScopedOperand dst, ScopedOperand result)
@@ -1256,7 +1305,7 @@ ScopedOperand Generator::add_constant(Value value)
             m_null_constant = append_new_constant();
         return m_null_constant.value();
     }
-    if (value.is_empty()) {
+    if (value.is_special_empty_value()) {
         if (!m_empty_constant.has_value())
             m_empty_constant = append_new_constant();
         return m_empty_constant.value();

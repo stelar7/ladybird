@@ -80,10 +80,6 @@ public:
     void set_preferred_contrast(Web::CSS::PreferredContrast);
     void set_preferred_motion(Web::CSS::PreferredMotion);
 
-    void set_preferred_languages(ReadonlySpan<String>);
-
-    void set_enable_do_not_track(bool);
-
     ByteString selected_text();
     Optional<String> selected_text_with_whitespace_collapsed();
     void select_all();
@@ -205,7 +201,7 @@ public:
     Function<void(JsonObject)> on_received_accessibility_tree;
     Function<void(Web::UniqueNodeID)> on_received_hovered_node_id;
     Function<void(Mutation)> on_dom_mutation_received;
-    Function<void(Optional<Web::UniqueNodeID> const& node_id)> on_finshed_editing_dom_node;
+    Function<void(Optional<Web::UniqueNodeID> const& node_id)> on_finished_editing_dom_node;
     Function<void(String)> on_received_dom_node_html;
     Function<void(Vector<Web::CSS::StyleSheetIdentifier>)> on_received_style_sheet_list;
     Function<void(Web::CSS::StyleSheetIdentifier const&, URL::URL const&, String const&)> on_received_style_sheet_source;
@@ -264,7 +260,9 @@ protected:
     };
     void handle_web_content_process_crash(LoadErrorPage = LoadErrorPage::Yes);
 
+    virtual void languages_changed() override;
     virtual void autoplay_settings_changed() override;
+    virtual void do_not_track_changed() override;
 
     struct SharedBitmap {
         i32 id { -1 };

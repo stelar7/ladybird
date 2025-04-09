@@ -10,6 +10,7 @@
 
 #include <LibWeb/Bindings/IDBRequestPrototype.h>
 #include <LibWeb/DOM/EventTarget.h>
+#include <LibWeb/IndexedDB/Internal/RequestList.h>
 
 namespace Web::IndexedDB {
 
@@ -29,6 +30,7 @@ public:
     [[nodiscard]] bool processed() const { return m_processed; }
     [[nodiscard]] IDBRequestSource source() const { return m_source; }
     [[nodiscard]] GC::Ptr<IDBTransaction> transaction() const { return m_transaction; }
+    [[nodiscard]] String uuid() const { return m_uuid; }
 
     [[nodiscard]] Bindings::IDBRequestReadyState ready_state() const;
     [[nodiscard]] GC::Ptr<WebIDL::DOMException> error() const;
@@ -71,7 +73,7 @@ private:
     // A request has a transaction which is initially null.
     GC::Ptr<IDBTransaction> m_transaction;
 
-    // Note: Used for debug purposes
+    // NOTE: Used for debug purposes
     String m_uuid;
 };
 

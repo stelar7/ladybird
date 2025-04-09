@@ -27,6 +27,8 @@ public:
     static ThrowCompletionOr<Value> exp_impl(VM&, Value);
     static ThrowCompletionOr<Value> abs_impl(VM&, Value);
     static ThrowCompletionOr<Value> sum_precise_impl(VM&, Value);
+    static ThrowCompletionOr<Value> imul_impl(VM&, Value, Value);
+    static Value random_impl();
 
 private:
     explicit MathObject(Realm&);

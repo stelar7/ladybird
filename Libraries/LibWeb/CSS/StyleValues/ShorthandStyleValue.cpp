@@ -194,8 +194,6 @@ String ShorthandStyleValue::to_string(SerializationMode mode) const
     }
     case PropertyID::Flex:
         return MUST(String::formatted("{} {} {}", longhand(PropertyID::FlexGrow)->to_string(mode), longhand(PropertyID::FlexShrink)->to_string(mode), longhand(PropertyID::FlexBasis)->to_string(mode)));
-    case PropertyID::FlexFlow:
-        return MUST(String::formatted("{} {}", longhand(PropertyID::FlexDirection)->to_string(mode), longhand(PropertyID::FlexWrap)->to_string(mode)));
     case PropertyID::Font: {
         auto font_style = longhand(PropertyID::FontStyle);
         auto font_variant = longhand(PropertyID::FontVariant);
@@ -279,6 +277,13 @@ String ShorthandStyleValue::to_string(SerializationMode mode) const
             return "normal"_string;
         return MUST(String::join(' ', values));
     }
+    case PropertyID::Gap: {
+        auto row_gap = longhand(PropertyID::RowGap);
+        auto column_gap = longhand(PropertyID::ColumnGap);
+        if (row_gap == column_gap)
+            return row_gap->to_string(mode);
+        return MUST(String::formatted("{} {}", row_gap->to_string(mode), column_gap->to_string(mode)));
+    }
     case PropertyID::GridArea: {
         auto& row_start = longhand(PropertyID::GridRowStart)->as_grid_track_placement();
         auto& column_start = longhand(PropertyID::GridColumnStart)->as_grid_track_placement();
@@ -343,8 +348,6 @@ String ShorthandStyleValue::to_string(SerializationMode mode) const
             return start->to_string(mode);
         return MUST(String::formatted("{} / {}", start->to_string(mode), end->to_string(mode)));
     }
-    case PropertyID::ListStyle:
-        return MUST(String::formatted("{} {} {}", longhand(PropertyID::ListStylePosition)->to_string(mode), longhand(PropertyID::ListStyleImage)->to_string(mode), longhand(PropertyID::ListStyleType)->to_string(mode)));
     case PropertyID::Overflow: {
         auto overflow_x = longhand(PropertyID::OverflowX);
         auto overflow_y = longhand(PropertyID::OverflowY);
@@ -411,13 +414,21 @@ String ShorthandStyleValue::to_string(SerializationMode mode) const
 
         StringBuilder builder;
         auto first = true;
-        for (auto& value : m_properties.values) {
+        for (size_t i = 0; i < m_properties.values.size(); ++i) {
+            auto value = m_properties.values[i];
+            auto value_string = value->to_string(mode);
+            auto initial_value_string = property_initial_value(m_properties.sub_properties[i])->to_string(mode);
+            if (value_string == initial_value_string)
+                continue;
             if (first)
                 first = false;
             else
                 builder.append(' ');
             builder.append(value->to_string(mode));
         }
+        if (builder.is_empty())
+            return m_properties.values.first()->to_string(mode);
+
         return MUST(builder.to_string());
     }
 }

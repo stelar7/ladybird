@@ -80,30 +80,6 @@ RefPtr<CSSStyleValue> Parser::parse_all_as_single_keyword_value(TokenStream<Comp
     return keyword_value;
 }
 
-template<typename ParseFunction>
-RefPtr<CSSStyleValue> Parser::parse_comma_separated_value_list(TokenStream<ComponentValue>& tokens, ParseFunction parse_one_value)
-{
-    auto first = parse_one_value(tokens);
-    if (!first || !tokens.has_next_token())
-        return first;
-
-    StyleValueVector values;
-    values.append(first.release_nonnull());
-
-    while (tokens.has_next_token()) {
-        if (!tokens.consume_a_token().is(Token::Type::Comma))
-            return nullptr;
-
-        if (auto maybe_value = parse_one_value(tokens)) {
-            values.append(maybe_value.release_nonnull());
-            continue;
-        }
-        return nullptr;
-    }
-
-    return StyleValueList::create(move(values), StyleValueList::Separator::Comma);
-}
-
 RefPtr<CSSStyleValue> Parser::parse_simple_comma_separated_value_list(PropertyID property_id, TokenStream<ComponentValue>& tokens)
 {
     return parse_comma_separated_value_list(tokens, [this, property_id](auto& tokens) -> RefPtr<CSSStyleValue> {
@@ -443,6 +419,7 @@ Parser::ParseErrorOr<NonnullRefPtr<CSSStyleValue>> Parser::parse_css_value(Prope
             return parsed_value.release_nonnull();
         return ParseError::SyntaxError;
     case PropertyID::BackgroundAttachment:
+    case PropertyID::BackgroundBlendMode:
     case PropertyID::BackgroundClip:
     case PropertyID::BackgroundImage:
     case PropertyID::BackgroundOrigin:
@@ -2586,7 +2563,7 @@ RefPtr<CSSStyleValue> Parser::parse_font_feature_settings_value(TokenStream<Comp
         if (!opentype_tag || !value || tag_tokens.has_next_token())
             return nullptr;
 
-        feature_tags_map.set(opentype_tag->string_value(), OpenTypeTaggedStyleValue::create(opentype_tag->string_value(), value.release_nonnull()));
+        feature_tags_map.set(opentype_tag->string_value(), OpenTypeTaggedStyleValue::create(OpenTypeTaggedStyleValue::Mode::FontFeatureSettings, opentype_tag->string_value(), value.release_nonnull()));
     }
 
     // "The computed value contains the de-duplicated feature tags, sorted in ascending order by code unit."
@@ -2632,7 +2609,7 @@ RefPtr<CSSStyleValue> Parser::parse_font_variation_settings_value(TokenStream<Co
         if (!opentype_tag || !number || tag_tokens.has_next_token())
             return nullptr;
 
-        axis_tags_map.set(opentype_tag->string_value(), OpenTypeTaggedStyleValue::create(opentype_tag->string_value(), number.release_nonnull()));
+        axis_tags_map.set(opentype_tag->string_value(), OpenTypeTaggedStyleValue::create(OpenTypeTaggedStyleValue::Mode::FontVariationSettings, opentype_tag->string_value(), number.release_nonnull()));
     }
 
     // "The computed value contains the de-duplicated axis names, sorted in ascending order by code unit."
@@ -4455,8 +4432,14 @@ RefPtr<CSSStyleValue> Parser::parse_filter_value_list_value(TokenStream<Componen
                     return {};
                 if (amount->is_number() && amount->number().value() < 0)
                     return {};
+                if (first_is_one_of(filter_token, FilterToken::Grayscale, FilterToken::Invert, FilterToken::Opacity, FilterToken::Sepia)) {
+                    if (amount->is_percentage() && amount->percentage().value() > 100)
+                        amount = Percentage { 100 };
+                    if (amount->is_number() && amount->number().value() > 1)
+                        amount = Number { Number::Type::Integer, 1.0 };
+                }
             }
-            return if_no_more_tokens_return(FilterOperation::Color { filter_token_to_operation(filter_token), amount });
+            return if_no_more_tokens_return(FilterOperation::Color { filter_token_to_operation(filter_token), amount.value_or(Number { Number::Type::Integer, 1 }) });
         }
     };
 

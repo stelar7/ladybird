@@ -32,7 +32,7 @@ void MathObject::initialize(Realm& realm)
     Base::initialize(realm);
     u8 attr = Attribute::Writable | Attribute::Configurable;
     define_native_function(realm, vm.names.abs, abs, 1, attr, Bytecode::Builtin::MathAbs);
-    define_native_function(realm, vm.names.random, random, 0, attr);
+    define_native_function(realm, vm.names.random, random, 0, attr, Bytecode::Builtin::MathRandom);
     define_native_function(realm, vm.names.sqrt, sqrt, 1, attr, Bytecode::Builtin::MathSqrt);
     define_native_function(realm, vm.names.floor, floor, 1, attr, Bytecode::Builtin::MathFloor);
     define_native_function(realm, vm.names.ceil, ceil, 1, attr, Bytecode::Builtin::MathCeil);
@@ -60,7 +60,7 @@ void MathObject::initialize(Realm& realm)
     define_native_function(realm, vm.names.fround, fround, 1, attr);
     define_native_function(realm, vm.names.f16round, f16round, 1, attr);
     define_native_function(realm, vm.names.hypot, hypot, 2, attr);
-    define_native_function(realm, vm.names.imul, imul, 2, attr);
+    define_native_function(realm, vm.names.imul, imul, 2, attr, Bytecode::Builtin::MathImul);
     define_native_function(realm, vm.names.log, log, 1, attr, Bytecode::Builtin::MathLog);
     define_native_function(realm, vm.names.log2, log2, 1, attr);
     define_native_function(realm, vm.names.log10, log10, 1, attr);
@@ -587,17 +587,23 @@ JS_DEFINE_NATIVE_FUNCTION(MathObject::hypot)
 }
 
 // 21.3.2.19 Math.imul ( x, y ), https://tc39.es/ecma262/#sec-math.imul
-JS_DEFINE_NATIVE_FUNCTION(MathObject::imul)
+ThrowCompletionOr<Value> MathObject::imul_impl(VM& vm, Value arg_a, Value arg_b)
 {
     // 1. Let a be ℝ(? ToUint32(x)).
-    auto a = TRY(vm.argument(0).to_u32(vm));
+    auto const a = TRY(arg_a.to_u32(vm));
 
     // 2. Let b be ℝ(? ToUint32(y)).
-    auto b = TRY(vm.argument(1).to_u32(vm));
+    auto const b = TRY(arg_b.to_u32(vm));
 
     // 3. Let product be (a × b) modulo 2^32.
     // 4. If product ≥ 2^31, return 𝔽(product - 2^32); otherwise return 𝔽(product).
     return Value(static_cast<i32>(a * b));
+}
+
+// 21.3.2.19 Math.imul ( x, y ), https://tc39.es/ecma262/#sec-math.imul
+JS_DEFINE_NATIVE_FUNCTION(MathObject::imul)
+{
+    return imul_impl(vm, vm.argument(0), vm.argument(1));
 }
 
 // 21.3.2.20 Math.log ( x ), https://tc39.es/ecma262/#sec-math.log
@@ -793,14 +799,60 @@ JS_DEFINE_NATIVE_FUNCTION(MathObject::pow)
     return pow_impl(vm, vm.argument(0), vm.argument(1));
 }
 
-// 21.3.2.27 Math.random ( ), https://tc39.es/ecma262/#sec-math.random
-JS_DEFINE_NATIVE_FUNCTION(MathObject::random)
+class XorShift128PlusPlusRNG {
+public:
+    XorShift128PlusPlusRNG()
+    {
+        u64 seed = get_random<u32>();
+        m_low = splitmix64(seed);
+        m_high = splitmix64(seed);
+    }
+
+    double get()
+    {
+        u64 value = advance() & ((1ULL << 53) - 1);
+        return value * (1.0 / (1ULL << 53));
+    }
+
+private:
+    u64 splitmix64(u64& state)
+    {
+        u64 z = (state += 0x9e3779b97f4a7c15ULL);
+        z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+        z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+        return z ^ (z >> 31);
+    }
+
+    u64 advance()
+    {
+        u64 s1 = m_low;
+        u64 const s0 = m_high;
+        u64 const result = s0 + s1;
+        m_low = s0;
+        s1 ^= s1 << 23;
+        s1 ^= s1 >> 17;
+        s1 ^= s0 ^ (s0 >> 26);
+        m_high = s1;
+        return result + s1;
+    }
+
+    u64 m_low { 0 };
+    u64 m_high { 0 };
+};
+
+Value MathObject::random_impl()
 {
     // This function returns a Number value with positive sign, greater than or equal to +0𝔽 but strictly less than 1𝔽,
     // chosen randomly or pseudo randomly with approximately uniform distribution over that range, using an
     // implementation-defined algorithm or strategy.
-    double r = (double)get_random<u32>() / (double)UINT32_MAX;
-    return Value(r);
+    static XorShift128PlusPlusRNG rng;
+    return Value(rng.get());
+}
+
+// 21.3.2.27 Math.random ( ), https://tc39.es/ecma262/#sec-math.random
+JS_DEFINE_NATIVE_FUNCTION(MathObject::random)
+{
+    return random_impl();
 }
 
 // 21.3.2.28 Math.round ( x ), https://tc39.es/ecma262/#sec-math.round

@@ -14,6 +14,15 @@ macro(add_cxx_compile_options)
   add_compile_options($<$<COMPILE_LANGUAGE:C,CXX,ASM>:${args}>)
 endmacro()
 
+macro(add_cxx_compile_definitions)
+  set(args "")
+  foreach(arg ${ARGN})
+    string(APPEND args ${arg}$<SEMICOLON>)
+    add_compile_options("SHELL:$<$<COMPILE_LANGUAGE:Swift>:-Xcc -D${arg}>")
+  endforeach()
+  add_compile_definitions($<$<COMPILE_LANGUAGE:C,CXX,ASM>:${args}>)
+endmacro()
+
 macro(add_cxx_link_options)
   set(args "")
   foreach(arg ${ARGN})
@@ -98,6 +107,11 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     add_cxx_compile_options(-Wno-literal-suffix)
     add_cxx_compile_options(-Wno-unqualified-std-cast-call)
     add_cxx_compile_options(-Wvla)
+
+    # FIXME: These warnings trigger on Function and ByteBuffer in GCC (only when LTO is disabled...)
+    #        investigate this and maybe reenable them if they're not false positives/invalid.
+    add_cxx_compile_options(-Wno-array-bounds)
+    add_cxx_compile_options(-Wno-stringop-overflow)
 
     # FIXME: This warning seems useful but has too many false positives with GCC 13.
     add_cxx_compile_options(-Wno-dangling-reference)

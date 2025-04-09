@@ -559,7 +559,7 @@ ThrowCompletionOr<Value> Value::to_primitive_slow_case(VM& vm, PreferredType pre
 ThrowCompletionOr<GC::Ref<Object>> Value::to_object(VM& vm) const
 {
     auto& realm = *vm.current_realm();
-    VERIFY(!is_empty());
+    VERIFY(!is_special_empty_value());
 
     // Number
     if (is_number()) {
@@ -602,6 +602,17 @@ ThrowCompletionOr<GC::Ref<Object>> Value::to_object(VM& vm) const
 // 7.1.3 ToNumeric ( value ), https://tc39.es/ecma262/#sec-tonumeric
 FLATTEN ThrowCompletionOr<Value> Value::to_numeric_slow_case(VM& vm) const
 {
+    // OPTIMIZATION: Fast paths for some trivial common cases.
+    if (is_boolean()) {
+        return Value(as_bool() ? 1 : 0);
+    }
+    if (is_null()) {
+        return Value(0);
+    }
+    if (is_undefined()) {
+        return js_nan();
+    }
+
     // 1. Let primValue be ? ToPrimitive(value, number).
     auto primitive_value = TRY(to_primitive(vm, Value::PreferredType::Number));
 
@@ -701,7 +712,7 @@ double string_to_number(StringView string)
 // 7.1.4 ToNumber ( argument ), https://tc39.es/ecma262/#sec-tonumber
 ThrowCompletionOr<Value> Value::to_number_slow_case(VM& vm) const
 {
-    VERIFY(!is_empty());
+    VERIFY(!is_special_empty_value());
 
     // 1. If argument is a Number, return argument.
     if (is_number())

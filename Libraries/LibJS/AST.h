@@ -41,6 +41,7 @@ class FunctionDeclaration;
 class Identifier;
 class MemberExpression;
 class VariableDeclaration;
+class SharedFunctionInstanceData;
 
 template<class T, class... Args>
 static inline NonnullRefPtr<T>
@@ -94,6 +95,8 @@ public:
     virtual bool is_object_expression() const { return false; }
     virtual bool is_numeric_literal() const { return false; }
     virtual bool is_string_literal() const { return false; }
+    virtual bool is_boolean_literal() const { return false; }
+    virtual bool is_null_literal() const { return false; }
     virtual bool is_update_expression() const { return false; }
     virtual bool is_call_expression() const { return false; }
     virtual bool is_labelled_statement() const { return false; }
@@ -744,25 +747,13 @@ public:
     virtual bool has_name() const = 0;
     virtual Value instantiate_ordinary_function_expression(VM&, FlyString given_name) const = 0;
 
-    virtual ~FunctionNode() { }
+    RefPtr<SharedFunctionInstanceData> shared_data() const;
+    void set_shared_data(RefPtr<SharedFunctionInstanceData>) const;
+
+    virtual ~FunctionNode();
 
 protected:
-    FunctionNode(RefPtr<Identifier const> name, ByteString source_text, NonnullRefPtr<Statement const> body, NonnullRefPtr<FunctionParameters const> parameters, i32 function_length, FunctionKind kind, bool is_strict_mode, FunctionParsingInsights parsing_insights, bool is_arrow_function, Vector<FlyString> local_variables_names)
-        : m_name(move(name))
-        , m_source_text(move(source_text))
-        , m_body(move(body))
-        , m_parameters(move(parameters))
-        , m_function_length(function_length)
-        , m_kind(kind)
-        , m_is_strict_mode(is_strict_mode)
-        , m_is_arrow_function(is_arrow_function)
-        , m_parsing_insights(parsing_insights)
-        , m_local_variables_names(move(local_variables_names))
-    {
-        if (m_is_arrow_function)
-            VERIFY(!parsing_insights.might_need_arguments_object);
-    }
-
+    FunctionNode(RefPtr<Identifier const> name, ByteString source_text, NonnullRefPtr<Statement const> body, NonnullRefPtr<FunctionParameters const> parameters, i32 function_length, FunctionKind kind, bool is_strict_mode, FunctionParsingInsights parsing_insights, bool is_arrow_function, Vector<FlyString> local_variables_names);
     void dump(int indent, ByteString const& class_name) const;
 
     RefPtr<Identifier const> m_name { nullptr };
@@ -778,6 +769,8 @@ private:
     FunctionParsingInsights m_parsing_insights;
 
     Vector<FlyString> m_local_variables_names;
+
+    mutable RefPtr<SharedFunctionInstanceData> m_shared_data;
 };
 
 class FunctionDeclaration final
@@ -1214,6 +1207,8 @@ public:
     virtual Value value() const override { return Value(m_value); }
 
 private:
+    virtual bool is_boolean_literal() const override { return true; }
+
     bool m_value { false };
 };
 
@@ -1281,6 +1276,9 @@ public:
     virtual Bytecode::CodeGenerationErrorOr<Optional<Bytecode::ScopedOperand>> generate_bytecode(Bytecode::Generator&, Optional<Bytecode::ScopedOperand> preferred_dst = {}) const override;
 
     virtual Value value() const override { return js_null(); }
+
+private:
+    virtual bool is_null_literal() const override { return true; }
 };
 
 class RegExpLiteral final : public Expression {
@@ -1390,11 +1388,10 @@ private:
 
 class ClassField final : public ClassElement {
 public:
-    ClassField(SourceRange source_range, NonnullRefPtr<Expression const> key, RefPtr<Expression const> init, bool contains_direct_call_to_eval, bool is_static)
+    ClassField(SourceRange source_range, NonnullRefPtr<Expression const> key, RefPtr<Expression const> init, bool is_static)
         : ClassElement(move(source_range), is_static)
         , m_key(move(key))
         , m_initializer(move(init))
-        , m_contains_direct_call_to_eval(contains_direct_call_to_eval)
     {
     }
 
@@ -1411,15 +1408,13 @@ public:
 private:
     NonnullRefPtr<Expression const> m_key;
     RefPtr<Expression const> m_initializer;
-    bool m_contains_direct_call_to_eval { false };
 };
 
 class StaticInitializer final : public ClassElement {
 public:
-    StaticInitializer(SourceRange source_range, NonnullRefPtr<FunctionBody> function_body, bool contains_direct_call_to_eval)
+    StaticInitializer(SourceRange source_range, NonnullRefPtr<FunctionBody> function_body)
         : ClassElement(move(source_range), true)
         , m_function_body(move(function_body))
-        , m_contains_direct_call_to_eval(contains_direct_call_to_eval)
     {
     }
 
@@ -1430,7 +1425,6 @@ public:
 
 private:
     NonnullRefPtr<FunctionBody> m_function_body;
-    bool m_contains_direct_call_to_eval { false };
 };
 
 class SuperExpression final : public Expression {
@@ -2266,6 +2260,15 @@ inline bool ASTNode::fast_is<ObjectExpression>() const { return is_object_expres
 
 template<>
 inline bool ASTNode::fast_is<ImportCall>() const { return is_import_call(); }
+
+template<>
+inline bool ASTNode::fast_is<NumericLiteral>() const { return is_numeric_literal(); }
+
+template<>
+inline bool ASTNode::fast_is<BooleanLiteral>() const { return is_boolean_literal(); }
+
+template<>
+inline bool ASTNode::fast_is<NullLiteral>() const { return is_null_literal(); }
 
 template<>
 inline bool ASTNode::fast_is<StringLiteral>() const { return is_string_literal(); }

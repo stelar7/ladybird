@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024, stelar7 <dudedbz@gmail.com>
+ * Copyright (c) 2024-2025, stelar7 <dudedbz@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -64,13 +64,16 @@ WebIDL::ExceptionOr<GC::Ref<IDBDatabase>> open_a_database_connection(JS::Realm& 
 
     // 2. Add request to queue.
     queue.append(request);
+    dbgln_if(IDB_DEBUG, "open_a_database_connection: added request {} to queue", request->uuid());
 
     // 3. Wait until all previous requests in queue have been processed.
     HTML::main_thread_event_loop().spin_until(GC::create_function(realm.vm().heap(), [queue, request]() {
-        dbgln_if(IDB_DEBUG, "open_a_database_connection: waiting for step 3");
-        dbgln_if(IDB_DEBUG, "requests in queue:");
-        for (auto const& item : queue) {
-            dbgln_if(IDB_DEBUG, "[{}] - {} = {}", item == request ? "x"sv : " "sv, item->uuid(), item->processed() ? "processed"sv : "not processed"sv);
+        if constexpr (IDB_DEBUG) {
+            dbgln("open_a_database_connection: waiting for step 3");
+            dbgln("requests in queue:");
+            for (auto const& item : queue) {
+                dbgln("[{}] - {} = {}", item == request ? "x"sv : " "sv, item->uuid(), item->processed() ? "processed"sv : "not processed"sv);
+            }
         }
 
         return queue.all_previous_requests_processed(request);
@@ -132,8 +135,10 @@ WebIDL::ExceptionOr<GC::Ref<IDBDatabase>> open_a_database_connection(JS::Realm& 
 
         // 3. Wait for all of the events to be fired.
         HTML::main_thread_event_loop().spin_until(GC::create_function(realm.vm().heap(), [&events_to_fire, &events_fired]() {
-            dbgln_if(IDB_DEBUG, "open_a_database_connection: waiting for step 10.3");
-            dbgln_if(IDB_DEBUG, "events_fired: {}, events_to_fire: {}", events_fired, events_to_fire);
+            if constexpr (IDB_DEBUG) {
+                dbgln("open_a_database_connection: waiting for step 10.3");
+                dbgln("events_fired: {}, events_to_fire: {}", events_fired, events_to_fire);
+            }
 
             return events_fired == events_to_fire;
         }));
@@ -150,10 +155,12 @@ WebIDL::ExceptionOr<GC::Ref<IDBDatabase>> open_a_database_connection(JS::Realm& 
 
         // 5. Wait until all connections in openConnections are closed.
         HTML::main_thread_event_loop().spin_until(GC::create_function(realm.vm().heap(), [open_connections]() {
-            dbgln_if(IDB_DEBUG, "open_a_database_connection: waiting for step 10.5");
-            dbgln_if(IDB_DEBUG, "open connections:");
-            for (auto const& connection : open_connections) {
-                dbgln_if(IDB_DEBUG, "  - {}", connection->uuid());
+            if constexpr (IDB_DEBUG) {
+                dbgln("open_a_database_connection: waiting for step 10.5");
+                dbgln("open connections: {}", open_connections.size());
+                for (auto const& connection : open_connections) {
+                    dbgln("  - {}", connection->uuid());
+                }
             }
 
             for (auto const& entry : open_connections) {
@@ -379,12 +386,9 @@ GC::Ref<IDBTransaction> upgrade_a_database(JS::Realm& realm, GC::Ref<IDBDatabase
     auto db = connection->associated_database();
 
     // 2. Let transaction be a new upgrade transaction with connection used as connection.
-    auto transaction = IDBTransaction::create(realm, connection, Bindings::IDBTransactionMode::Versionchange, Bindings::IDBTransactionDurability::Default, {});
-    dbgln_if(IDB_DEBUG, "Created new upgrade transaction with UUID: {}", transaction->uuid());
-
     // 3. Set transaction’s scope to connection’s object store set.
-    for (auto const& object_store : connection->object_store_set())
-        transaction->add_to_scope(object_store);
+    auto transaction = IDBTransaction::create(realm, connection, Bindings::IDBTransactionMode::Versionchange, Bindings::IDBTransactionDurability::Default, Vector<GC::Ref<ObjectStore>> { connection->object_store_set() });
+    dbgln_if(IDB_DEBUG, "Created new upgrade transaction with UUID: {}", transaction->uuid());
 
     // 4. Set db’s upgrade transaction to transaction.
     db->set_upgrade_transaction(transaction);
@@ -455,13 +459,16 @@ WebIDL::ExceptionOr<u64> delete_a_database(JS::Realm& realm, StorageAPI::Storage
 
     // 2. Add request to queue.
     queue.append(request);
+    dbgln_if(IDB_DEBUG, "delete_a_database: added request {} to queue", request->uuid());
 
     // 3. Wait until all previous requests in queue have been processed.
     HTML::main_thread_event_loop().spin_until(GC::create_function(realm.vm().heap(), [queue, request]() {
-        dbgln_if(IDB_DEBUG, "delete_a_database: waiting for step 3");
-        dbgln_if(IDB_DEBUG, "requests in queue:");
-        for (auto const& item : queue) {
-            dbgln_if(IDB_DEBUG, "[{}] - {} = {}", item == request ? "x"sv : " "sv, item->uuid(), item->processed() ? "processed"sv : "not processed"sv);
+        if constexpr (IDB_DEBUG) {
+            dbgln("delete_a_database: waiting for step 3");
+            dbgln("requests in queue:");
+            for (auto const& item : queue) {
+                dbgln("[{}] - {} = {}", item == request ? "x"sv : " "sv, item->uuid(), item->processed() ? "processed"sv : "not processed"sv);
+            }
         }
 
         return queue.all_previous_requests_processed(request);
@@ -494,8 +501,11 @@ WebIDL::ExceptionOr<u64> delete_a_database(JS::Realm& realm, StorageAPI::Storage
 
     // 7. Wait for all of the events to be fired.
     HTML::main_thread_event_loop().spin_until(GC::create_function(realm.vm().heap(), [&events_to_fire, &events_fired]() {
-        dbgln_if(IDB_DEBUG, "delete_a_database: waiting for step 7");
-        dbgln_if(IDB_DEBUG, "events_fired: {}, events_to_fire: {}", events_fired, events_to_fire);
+        if constexpr (IDB_DEBUG) {
+            dbgln("delete_a_database: waiting for step 7");
+            dbgln("events_fired: {}, events_to_fire: {}", events_fired, events_to_fire);
+        }
+
         return events_fired == events_to_fire;
     }));
 
@@ -510,10 +520,12 @@ WebIDL::ExceptionOr<u64> delete_a_database(JS::Realm& realm, StorageAPI::Storage
 
     // 9. Wait until all connections in openConnections are closed.
     HTML::main_thread_event_loop().spin_until(GC::create_function(realm.vm().heap(), [open_connections]() {
-        dbgln_if(IDB_DEBUG, "delete_a_database: waiting for step 9");
-        dbgln_if(IDB_DEBUG, "open connections:");
-        for (auto const& connection : open_connections) {
-            dbgln_if(IDB_DEBUG, "  - {}", connection->uuid());
+        if constexpr (IDB_DEBUG) {
+            dbgln("delete_a_database: waiting for step 9");
+            dbgln("open connections: {}", open_connections.size());
+            for (auto const& connection : open_connections) {
+                dbgln("  - {}", connection->uuid());
+            }
         }
 
         for (auto const& entry : open_connections) {
@@ -605,7 +617,7 @@ void abort_a_transaction(GC::Ref<IDBTransaction> transaction, GC::Ptr<WebIDL::DO
             request->set_result(JS::js_undefined());
 
             // 4. Set request’s processed flag to false.
-            request->set_processed(false);
+            // FIXME: request->set_processed(false);
 
             // 5. Set request’s done flag to false.
             request->set_done(false);

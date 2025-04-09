@@ -20,16 +20,15 @@ interface SVGSVGElement : SVGGraphicsElement {
 
     undefined deselectAll();
 
-    // FIXME: SVGNumber createSVGNumber();
-    SVGLength createSVGLength();
-    [FIXME] SVGAngle createSVGAngle();
-    DOMPoint createSVGPoint();
-    DOMMatrix createSVGMatrix();
-    DOMRect createSVGRect();
-    SVGTransform createSVGTransform();
-    [FIXME] SVGTransform createSVGTransformFromMatrix(optional DOMMatrix2DInit matrix = {});
+    // FIXME: [NewObject] SVGNumber createSVGNumber();
+    [NewObject] SVGLength createSVGLength();
+    [FIXME, NewObject] SVGAngle createSVGAngle();
+    [NewObject] DOMPoint createSVGPoint();
+    [NewObject] DOMMatrix createSVGMatrix();
+    [NewObject] DOMRect createSVGRect();
+    [NewObject] SVGTransform createSVGTransform();
+    [FIXME, NewObject] SVGTransform createSVGTransformFromMatrix(optional DOMMatrix2DInit matrix = {});
 
-    // NOTE: The spec says this returns `Element` but that's a bug: https://github.com/w3c/svgwg/issues/923
     Element? getElementById(DOMString elementId);
 
     // Deprecated methods that have no effect when called,

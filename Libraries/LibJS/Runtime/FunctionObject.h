@@ -40,11 +40,13 @@ public:
 
     virtual Vector<FlyString> const& local_variables_names() const { VERIFY_NOT_REACHED(); }
 
-    virtual NonnullRefPtr<FunctionParameters const> const& formal_parameters() const { VERIFY_NOT_REACHED(); }
+    virtual FunctionParameters const& formal_parameters() const { VERIFY_NOT_REACHED(); }
 
 protected:
     explicit FunctionObject(Realm&, Object* prototype, MayInterfereWithIndexedPropertyAccess = MayInterfereWithIndexedPropertyAccess::No);
     explicit FunctionObject(Object& prototype, MayInterfereWithIndexedPropertyAccess = MayInterfereWithIndexedPropertyAccess::No);
+
+    [[nodiscard]] GC::Ref<PrimitiveString> make_function_name(Variant<PropertyKey, PrivateName> const&, Optional<StringView> const& prefix);
 
 private:
     virtual bool is_function() const override { return true; }

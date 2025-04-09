@@ -252,16 +252,6 @@ void ViewImplementation::set_preferred_motion(Web::CSS::PreferredMotion motion)
     client().async_set_preferred_motion(page_id(), motion);
 }
 
-void ViewImplementation::set_preferred_languages(ReadonlySpan<String> preferred_languages)
-{
-    client().async_set_preferred_languages(page_id(), preferred_languages);
-}
-
-void ViewImplementation::set_enable_do_not_track(bool enable)
-{
-    client().async_set_enable_do_not_track(page_id(), enable);
-}
-
 ByteString ViewImplementation::selected_text()
 {
     return client().get_selected_text(page_id());
@@ -604,7 +594,9 @@ void ViewImplementation::initialize_client(CreateNewClient create_new_client)
     if (auto const& user_agent_preset = Application::web_content_options().user_agent_preset; user_agent_preset.has_value())
         client().async_debug_request(m_client_state.page_index, "spoof-user-agent"sv, *user_agents.get(*user_agent_preset));
 
+    languages_changed();
     autoplay_settings_changed();
+    do_not_track_changed();
 }
 
 void ViewImplementation::handle_web_content_process_crash(LoadErrorPage load_error_page)
@@ -652,6 +644,12 @@ void ViewImplementation::handle_web_content_process_crash(LoadErrorPage load_err
     }
 }
 
+void ViewImplementation::languages_changed()
+{
+    auto const& languages = Application::settings().languages();
+    client().async_set_preferred_languages(page_id(), languages);
+}
+
 void ViewImplementation::autoplay_settings_changed()
 {
     auto const& autoplay_settings = Application::settings().autoplay_settings();
@@ -661,6 +659,12 @@ void ViewImplementation::autoplay_settings_changed()
         client().async_set_autoplay_allowed_on_all_websites(page_id());
     else
         client().async_set_autoplay_allowlist(page_id(), autoplay_settings.site_filters.values());
+}
+
+void ViewImplementation::do_not_track_changed()
+{
+    auto do_not_track = Application::settings().do_not_track();
+    client().async_set_enable_do_not_track(page_id(), do_not_track == DoNotTrack::Yes);
 }
 
 static ErrorOr<LexicalPath> save_screenshot(Gfx::ShareableBitmap const& bitmap)
@@ -684,7 +688,7 @@ NonnullRefPtr<Core::Promise<LexicalPath>> ViewImplementation::take_screenshot(Sc
     auto promise = Core::Promise<LexicalPath>::construct();
 
     if (m_pending_screenshot) {
-        // For simplicitly, only allow taking one screenshot at a time for now. Revisit if we need
+        // For simplicity, only allow taking one screenshot at a time for now. Revisit if we need
         // to allow spamming screenshot requests for some reason.
         promise->reject(Error::from_string_literal("A screenshot request is already in progress"));
         return promise;
@@ -716,7 +720,7 @@ NonnullRefPtr<Core::Promise<LexicalPath>> ViewImplementation::take_dom_node_scre
     auto promise = Core::Promise<LexicalPath>::construct();
 
     if (m_pending_screenshot) {
-        // For simplicitly, only allow taking one screenshot at a time for now. Revisit if we need
+        // For simplicity, only allow taking one screenshot at a time for now. Revisit if we need
         // to allow spamming screenshot requests for some reason.
         promise->reject(Error::from_string_literal("A screenshot request is already in progress"));
         return promise;
@@ -745,7 +749,7 @@ NonnullRefPtr<Core::Promise<String>> ViewImplementation::request_internal_page_i
     auto promise = Core::Promise<String>::construct();
 
     if (m_pending_info_request) {
-        // For simplicitly, only allow one info request at a time for now.
+        // For simplicity, only allow one info request at a time for now.
         promise->reject(Error::from_string_literal("A page info request is already in progress"));
         return promise;
     }

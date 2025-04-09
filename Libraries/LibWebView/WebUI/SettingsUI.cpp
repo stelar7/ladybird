@@ -20,15 +20,30 @@ void SettingsUI::register_interfaces()
     register_interface("restoreDefaultSettings"sv, [this](auto const&) {
         restore_default_settings();
     });
+
     register_interface("setNewTabPageURL"sv, [this](auto const& data) {
         set_new_tab_page_url(data);
     });
-    register_interface("loadAvailableSearchEngines"sv, [this](auto const&) {
-        load_available_search_engines();
+    register_interface("setLanguages"sv, [this](auto const& data) {
+        set_languages(data);
+    });
+
+    register_interface("loadAvailableEngines"sv, [this](auto const&) {
+        load_available_engines();
     });
     register_interface("setSearchEngine"sv, [this](auto const& data) {
         set_search_engine(data);
     });
+    register_interface("addCustomSearchEngine"sv, [this](auto const& data) {
+        add_custom_search_engine(data);
+    });
+    register_interface("removeCustomSearchEngine"sv, [this](auto const& data) {
+        remove_custom_search_engine(data);
+    });
+    register_interface("setAutocompleteEngine"sv, [this](auto const& data) {
+        set_autocomplete_engine(data);
+    });
+
     register_interface("loadForciblyEnabledSiteSettings"sv, [this](auto const&) {
         load_forcibly_enabled_site_settings();
     });
@@ -43,6 +58,10 @@ void SettingsUI::register_interfaces()
     });
     register_interface("removeAllSiteSettingFilters"sv, [this](auto const& data) {
         remove_all_site_setting_filters(data);
+    });
+
+    register_interface("setDoNotTrack"sv, [this](auto const& data) {
+        set_do_not_track(data);
     });
 }
 
@@ -70,13 +89,29 @@ void SettingsUI::set_new_tab_page_url(JsonValue const& new_tab_page_url)
     WebView::Application::settings().set_new_tab_page_url(parsed_new_tab_page_url.release_value());
 }
 
-void SettingsUI::load_available_search_engines()
+void SettingsUI::set_languages(JsonValue const& languages)
 {
-    JsonArray engines;
-    for (auto const& engine : search_engines())
-        engines.must_append(engine.name);
+    auto parsed_languages = Settings::parse_json_languages(languages);
+    WebView::Application::settings().set_languages(move(parsed_languages));
 
-    async_send_message("loadSearchEngines"sv, move(engines));
+    load_current_settings();
+}
+
+void SettingsUI::load_available_engines()
+{
+    JsonArray search_engines;
+    for (auto const& engine : WebView::builtin_search_engines())
+        search_engines.must_append(engine.name);
+
+    JsonArray autocomplete_engines;
+    for (auto const& engine : WebView::autocomplete_engines())
+        autocomplete_engines.must_append(engine.name);
+
+    JsonObject engines;
+    engines.set("search"sv, move(search_engines));
+    engines.set("autocomplete"sv, move(autocomplete_engines));
+
+    async_send_message("loadEngines"sv, move(engines));
 }
 
 void SettingsUI::set_search_engine(JsonValue const& search_engine)
@@ -85,6 +120,30 @@ void SettingsUI::set_search_engine(JsonValue const& search_engine)
         WebView::Application::settings().set_search_engine({});
     else if (search_engine.is_string())
         WebView::Application::settings().set_search_engine(search_engine.as_string());
+}
+
+void SettingsUI::add_custom_search_engine(JsonValue const& search_engine)
+{
+    if (auto custom_engine = Settings::parse_custom_search_engine(search_engine); custom_engine.has_value())
+        WebView::Application::settings().add_custom_search_engine(custom_engine.release_value());
+
+    load_current_settings();
+}
+
+void SettingsUI::remove_custom_search_engine(JsonValue const& search_engine)
+{
+    if (auto custom_engine = Settings::parse_custom_search_engine(search_engine); custom_engine.has_value())
+        WebView::Application::settings().remove_custom_search_engine(*custom_engine);
+
+    load_current_settings();
+}
+
+void SettingsUI::set_autocomplete_engine(JsonValue const& autocomplete_engine)
+{
+    if (autocomplete_engine.is_null())
+        WebView::Application::settings().set_autocomplete_engine({});
+    else if (autocomplete_engine.is_string())
+        WebView::Application::settings().set_autocomplete_engine(autocomplete_engine.as_string());
 }
 
 enum class SiteSettingType {
@@ -194,6 +253,14 @@ void SettingsUI::remove_all_site_setting_filters(JsonValue const& site_setting)
     }
 
     load_current_settings();
+}
+
+void SettingsUI::set_do_not_track(JsonValue const& do_not_track)
+{
+    if (!do_not_track.is_bool())
+        return;
+
+    WebView::Application::settings().set_do_not_track(do_not_track.as_bool() ? DoNotTrack::Yes : DoNotTrack::No);
 }
 
 }

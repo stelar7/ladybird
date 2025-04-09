@@ -15,40 +15,29 @@ namespace Web::CSS {
 
 float FilterOperation::Blur::resolved_radius(Layout::Node const& node) const
 {
-    if (radius.has_value())
-        return radius->resolved({ .length_resolution_context = Length::ResolutionContext::for_layout_node(node) })->to_px(node).to_float();
-
-    // Default value when omitted is 0px.
-    return 0;
+    return radius.resolved({ .length_resolution_context = Length::ResolutionContext::for_layout_node(node) })->to_px(node).to_float();
 }
 
 float FilterOperation::HueRotate::angle_degrees(Layout::Node const& node) const
 {
-    // Default value when omitted is 0deg.
-    if (!angle.has_value())
-        return 0.0f;
-    return angle->visit([&](AngleOrCalculated const& a) { return a.resolved({ .length_resolution_context = Length::ResolutionContext::for_layout_node(node) })->to_degrees(); }, [&](Zero) { return 0.0; });
+    return angle.visit([&](AngleOrCalculated const& a) { return a.resolved({ .length_resolution_context = Length::ResolutionContext::for_layout_node(node) })->to_degrees(); }, [&](Zero) { return 0.0; });
 }
 
 float FilterOperation::Color::resolved_amount() const
 {
-    // Default value when omitted is 1.
-    if (!amount.has_value())
-        return 1;
+    if (amount.is_number())
+        return amount.number().value();
 
-    if (amount->is_number())
-        return amount->number().value();
+    if (amount.is_percentage())
+        return amount.percentage().as_fraction();
 
-    if (amount->is_percentage())
-        return amount->percentage().as_fraction();
-
-    if (amount->is_calculated()) {
+    if (amount.is_calculated()) {
         CalculationResolutionContext context {};
-        if (amount->calculated()->resolves_to_number())
-            return amount->calculated()->resolve_number(context).value();
+        if (amount.calculated()->resolves_to_number())
+            return amount.calculated()->resolve_number(context).value();
 
-        if (amount->calculated()->resolves_to_percentage())
-            return amount->calculated()->resolve_percentage(context)->as_fraction();
+        if (amount.calculated()->resolves_to_percentage())
+            return amount.calculated()->resolve_percentage(context)->as_fraction();
     }
 
     VERIFY_NOT_REACHED();
@@ -63,31 +52,27 @@ String FilterValueListStyleValue::to_string(SerializationMode) const
             builder.append(' ');
         filter_function.visit(
             [&](FilterOperation::Blur const& blur) {
-                builder.append("blur("sv);
-                if (blur.radius.has_value())
-                    builder.append(blur.radius->to_string());
+                builder.appendff("blur({}", blur.radius.to_string());
             },
             [&](FilterOperation::DropShadow const& drop_shadow) {
-                builder.appendff("drop-shadow({} {}"sv,
-                    drop_shadow.offset_x, drop_shadow.offset_y);
+                builder.append("drop-shadow("sv);
+                if (drop_shadow.color.has_value()) {
+                    serialize_a_srgb_value(builder, *drop_shadow.color);
+                    builder.append(' ');
+                }
+                builder.appendff("{} {}", drop_shadow.offset_x, drop_shadow.offset_y);
                 if (drop_shadow.radius.has_value())
                     builder.appendff(" {}", drop_shadow.radius->to_string());
-                if (drop_shadow.color.has_value()) {
-                    builder.append(' ');
-                    serialize_a_srgb_value(builder, *drop_shadow.color);
-                }
             },
             [&](FilterOperation::HueRotate const& hue_rotate) {
                 builder.append("hue-rotate("sv);
-                if (hue_rotate.angle.has_value()) {
-                    hue_rotate.angle->visit(
-                        [&](Angle const& angle) {
-                            return builder.append(angle.to_string());
-                        },
-                        [&](auto&) {
-                            return builder.append('0');
-                        });
-                }
+                hue_rotate.angle.visit(
+                    [&](Angle const& angle) {
+                        builder.append(angle.to_string());
+                    },
+                    [&](auto&) {
+                        builder.append("0deg"sv);
+                    });
             },
             [&](FilterOperation::Color const& color) {
                 builder.appendff("{}(",
@@ -111,8 +96,8 @@ String FilterValueListStyleValue::to_string(SerializationMode) const
                             VERIFY_NOT_REACHED();
                         }
                     }());
-                if (color.amount.has_value())
-                    builder.append(color.amount->to_string());
+
+                builder.append(color.amount.to_string());
             });
         builder.append(')');
         first = false;

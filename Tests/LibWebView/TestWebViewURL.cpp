@@ -6,7 +6,13 @@
  */
 
 #include <LibTest/TestCase.h>
+#include <LibWebView/SearchEngine.h>
 #include <LibWebView/URL.h>
+
+static WebView::SearchEngine s_test_engine {
+    .name = "Test"_string,
+    .query_url = "https://ecosia.org/search?q=%s"_string
+};
 
 static void compare_url_parts(StringView url, WebView::URLParts const& expected)
 {
@@ -28,9 +34,7 @@ static bool is_sanitized_url_the_same(StringView url)
 
 static void expect_url_equals_sanitized_url(StringView test_url, StringView url, WebView::AppendTLD append_tld = WebView::AppendTLD::No)
 {
-    StringView const search_engine_url = "https://ecosia.org/search?q={}"sv;
-
-    auto sanitized_url = WebView::sanitize_url(url, search_engine_url, append_tld);
+    auto sanitized_url = WebView::sanitize_url(url, s_test_engine, append_tld);
 
     EXPECT(sanitized_url.has_value());
     EXPECT_EQ(sanitized_url->to_string(), test_url);
@@ -38,13 +42,11 @@ static void expect_url_equals_sanitized_url(StringView test_url, StringView url,
 
 static void expect_search_url_equals_sanitized_url(StringView url)
 {
-    StringView const search_engine_url = "https://ecosia.org/search?q={}"sv;
-    auto const search_url = String::formatted(search_engine_url, URL::percent_encode(url));
-
-    auto sanitized_url = WebView::sanitize_url(url, search_engine_url);
+    auto search_url = s_test_engine.format_search_query_for_navigation(url);
+    auto sanitized_url = WebView::sanitize_url(url, s_test_engine);
 
     EXPECT(sanitized_url.has_value());
-    EXPECT_EQ(sanitized_url->to_string(), search_url.value());
+    EXPECT_EQ(sanitized_url->to_string(), search_url);
 }
 
 TEST_CASE(invalid_url)
@@ -77,6 +79,17 @@ TEST_CASE(invalid_url)
     EXPECT(!WebView::break_url_into_parts("https:"sv).has_value());
     EXPECT(!WebView::break_url_into_parts("https:/"sv).has_value());
     EXPECT(!WebView::break_url_into_parts("https://"sv).has_value());
+
+    EXPECT(!WebView::break_url_into_parts("a"sv).has_value());
+    EXPECT(!WebView::break_url_into_parts("ab"sv).has_value());
+    EXPECT(!WebView::break_url_into_parts("abo"sv).has_value());
+    EXPECT(!WebView::break_url_into_parts("abou"sv).has_value());
+    EXPECT(!WebView::break_url_into_parts("about"sv).has_value());
+
+    EXPECT(!WebView::break_url_into_parts("d"sv).has_value());
+    EXPECT(!WebView::break_url_into_parts("da"sv).has_value());
+    EXPECT(!WebView::break_url_into_parts("dat"sv).has_value());
+    EXPECT(!WebView::break_url_into_parts("data"sv).has_value());
 }
 
 TEST_CASE(file_url)
@@ -112,6 +125,12 @@ TEST_CASE(http_url)
 
 TEST_CASE(about_url)
 {
+    compare_url_parts("about:"sv, { "about:"sv, {}, {} });
+    compare_url_parts("about:a"sv, { "about:"sv, "a"sv, {} });
+    compare_url_parts("about:ab"sv, { "about:"sv, "ab"sv, {} });
+    compare_url_parts("about:abc"sv, { "about:"sv, "abc"sv, {} });
+    compare_url_parts("about:abc/def"sv, { "about:"sv, "abc/def"sv, {} });
+
     EXPECT(!is_sanitized_url_the_same("about"sv));
     EXPECT(!is_sanitized_url_the_same("about blabla:"sv));
     EXPECT(!is_sanitized_url_the_same("blabla about:"sv));
@@ -122,6 +141,12 @@ TEST_CASE(about_url)
 
 TEST_CASE(data_url)
 {
+    compare_url_parts("data:"sv, { "data:"sv, {}, {} });
+    compare_url_parts("data:a"sv, { "data:"sv, "a"sv, {} });
+    compare_url_parts("data:ab"sv, { "data:"sv, "ab"sv, {} });
+    compare_url_parts("data:abc"sv, { "data:"sv, "abc"sv, {} });
+    compare_url_parts("data:abc/def"sv, { "data:"sv, "abc/def"sv, {} });
+
     EXPECT(is_sanitized_url_the_same("data:text/html"sv));
 
     EXPECT(!is_sanitized_url_the_same("data text/html"sv));

@@ -140,11 +140,11 @@ static Optional<ParsedIPv4Number> parse_ipv4_number(StringView input)
     // 8. Let output be the mathematical integer value that is represented by input in radix-R notation, using ASCII hex digits for digits with values 0 through 15.
     Optional<u32> maybe_output;
     if (radix == 8)
-        maybe_output = AK::StringUtils::convert_to_uint_from_octal(input);
+        maybe_output = AK::StringUtils::convert_to_uint_from_octal(input, TrimWhitespace::No);
     else if (radix == 10)
-        maybe_output = input.to_number<u32>();
+        maybe_output = input.to_number<u32>(TrimWhitespace::No);
     else if (radix == 16)
-        maybe_output = AK::StringUtils::convert_to_uint_from_hex(input);
+        maybe_output = AK::StringUtils::convert_to_uint_from_hex(input, TrimWhitespace::No);
     else
         VERIFY_NOT_REACHED();
 
@@ -514,7 +514,7 @@ static ErrorOr<String> domain_to_ascii(StringView domain, bool be_strict)
     // OPTIMIZATION: If beStrict is false, domain is an ASCII string, and strictly splitting domain on U+002E (.)
     //               does not produce any item that starts with an ASCII case-insensitive match for "xn--", this
     //               step is equivalent to ASCII lowercasing domain.
-    if (!be_strict && all_of(domain, is_ascii)) {
+    if (!be_strict && domain.is_ascii()) {
         // 3. If result is the empty string, domain-to-ASCII validation error, return failure.
         if (domain.is_empty())
             return Error::from_string_literal("Empty domain");
@@ -527,10 +527,8 @@ static ErrorOr<String> domain_to_ascii(StringView domain, bool be_strict)
             }
         }
 
-        if (!slow_path) {
-            auto lowercase_domain = domain.to_lowercase_string();
-            return String::from_utf8_without_validation(lowercase_domain.bytes());
-        }
+        if (!slow_path)
+            return domain.to_ascii_lowercase_string();
     }
 
     Unicode::IDNA::ToAsciiOptions const options {
@@ -646,7 +644,7 @@ constexpr bool is_double_dot_path_segment(StringView input)
 void Parser::shorten_urls_path(URL& url)
 {
     // 1. Assert: url does not have an opaque path.
-    VERIFY(!url.cannot_be_a_base_url());
+    VERIFY(!url.has_an_opaque_path());
 
     // 2. Let path be url’s path.
     auto& path = url.m_data->paths;
@@ -892,7 +890,7 @@ Optional<URL> Parser::basic_parse(StringView raw_input, Optional<URL const&> bas
                 }
                 // 9. Otherwise, set url’s path to the empty string and set state to opaque path state.
                 else {
-                    url->m_data->cannot_be_a_base_url = true;
+                    url->m_data->has_an_opaque_path = true;
                     url->append_slash();
                     state = State::OpaquePath;
                 }
@@ -912,18 +910,18 @@ Optional<URL> Parser::basic_parse(StringView raw_input, Optional<URL const&> bas
         // -> no scheme state, https://url.spec.whatwg.org/#no-scheme-state
         case State::NoScheme:
             // 1. If base is null, or base has an opaque path and c is not U+0023 (#), missing-scheme-non-relative-URL validation error, return failure.
-            if (!base_url.has_value() || (base_url->m_data->cannot_be_a_base_url && code_point != '#')) {
+            if (!base_url.has_value() || (base_url->has_an_opaque_path() && code_point != '#')) {
                 report_validation_error();
                 return {};
             }
             // 2. Otherwise, if base has an opaque path and c is U+0023 (#), set url’s scheme to base’s scheme, url’s path to base’s path, url’s query
             //    to base’s query,url’s fragment to the empty string, and set state to fragment state.
-            else if (base_url->m_data->cannot_be_a_base_url && code_point == '#') {
+            else if (base_url->has_an_opaque_path() && code_point == '#') {
                 url->m_data->scheme = base_url->m_data->scheme;
                 url->m_data->paths = base_url->m_data->paths;
                 url->m_data->query = base_url->m_data->query;
                 url->m_data->fragment = String {};
-                url->m_data->cannot_be_a_base_url = true;
+                url->m_data->has_an_opaque_path = true;
                 state = State::Fragment;
             }
             // 3. Otherwise, if base’s scheme is not "file", set state to relative state and decrease pointer by 1.
@@ -1155,7 +1153,7 @@ Optional<URL> Parser::basic_parse(StringView raw_input, Optional<URL const&> bas
                 continue;
             }
 
-            // 2. Otherwise, if c is U+003A (:) and insideBrackets is false, then:
+            // 2. Otherwise, if c is U+003A (:) and insideBrackets is false:
             if (code_point == ':' && !inside_brackets) {
                 // 1. If buffer is the empty string, host-missing validation error, return failure.
                 if (buffer.is_empty()) {
@@ -1163,9 +1161,9 @@ Optional<URL> Parser::basic_parse(StringView raw_input, Optional<URL const&> bas
                     return {};
                 }
 
-                // 2. If state override is given and state override is hostname state, then return.
+                // 2. If state override is given and state override is hostname state, then return failure.
                 if (state_override.has_value() && *state_override == State::Hostname)
-                    return *url;
+                    return {};
 
                 // 3. Let host be the result of host parsing buffer with url is not special.
                 auto host = parse_host(buffer.string_view(), !url->is_special());
@@ -1184,7 +1182,7 @@ Optional<URL> Parser::basic_parse(StringView raw_input, Optional<URL const&> bas
             //    * url is special and c is U+005C (\)
             else if ((code_point == end_of_file || code_point == '/' || code_point == '?' || code_point == '#')
                 || (url->is_special() && code_point == '\\')) {
-                // then decrease pointer by 1, and then:
+                // then decrease pointer by 1, and:
                 // NOTE: pointer decrement is done by the continue below
 
                 // 1. If url is special and buffer is the empty string, host-missing validation error, return failure.
@@ -1193,9 +1191,9 @@ Optional<URL> Parser::basic_parse(StringView raw_input, Optional<URL const&> bas
                     return {};
                 }
 
-                // 2. Otherwise, if state override is given, buffer is the empty string, and either url includes credentials or url’s port is non-null, return.
+                // 2. Otherwise, if state override is given, buffer is the empty string, and either url includes credentials or url’s port is non-null, then return failure.
                 if (state_override.has_value() && buffer.is_empty() && (url->includes_credentials() || url->port().has_value()))
-                    return *url;
+                    return {};
 
                 // 3. Let host be the result of host parsing buffer with url is not special.
                 auto host = parse_host(buffer.string_view(), !url->is_special());
@@ -1239,18 +1237,18 @@ Optional<URL> Parser::basic_parse(StringView raw_input, Optional<URL const&> bas
             }
 
             // 2. Otherwise, if one of the following is true:
-            //    * c is the EOF code point, U+002F (/), U+003F (?), or U+0023 (#)
-            //    * url is special and c is U+005C (\)
-            //    * state override is given
+            //    * c is the EOF code point, U+002F (/), U+003F (?), or U+0023 (#);
+            //    * url is special and c is U+005C (\); or
+            //    * state override is given,
             else if ((code_point == end_of_file || code_point == '/' || code_point == '?' || code_point == '#')
                 || (url->is_special() && code_point == '\\')
                 || state_override.has_value()) {
                 // then:
 
-                // 1. If buffer is not the empty string, then:
+                // 1. If buffer is not the empty string:
                 if (!buffer.is_empty()) {
                     // 1. Let port be the mathematical integer value that is represented by buffer in radix-10 using ASCII digits for digits with values 0 through 9.
-                    auto port = buffer.string_view().to_number<u16>();
+                    auto port = buffer.string_view().to_number<u16>(TrimWhitespace::No);
 
                     // 2. If port is greater than 2^16 − 1, port-out-of-range validation error, return failure.
                     // NOTE: This is done by to_number.
@@ -1267,11 +1265,15 @@ Optional<URL> Parser::basic_parse(StringView raw_input, Optional<URL const&> bas
 
                     // 4. Set buffer to the empty string.
                     buffer.clear();
+
+                    // 5. If state override is given, then return.
+                    if (state_override.has_value())
+                        return *url;
                 }
 
-                // 2. If state override is given, then return.
+                // 2. If state override is given, then return failure.
                 if (state_override.has_value())
-                    return *url;
+                    return {};
 
                 // 3. Set state to path start state and decrease pointer by 1.
                 state = State::PathStart;

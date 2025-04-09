@@ -55,6 +55,7 @@ public:
     void set_close_pending(bool close_pending) { m_close_pending = close_pending; }
     void set_state(ConnectionState state) { m_state = state; }
 
+    [[nodiscard]] String uuid() const { return m_uuid; }
     [[nodiscard]] String name() const { return m_name; }
     [[nodiscard]] u64 version() const { return m_version; }
     [[nodiscard]] bool close_pending() const { return m_close_pending; }
@@ -64,6 +65,7 @@ public:
     [[nodiscard]] ReadonlySpan<GC::Ref<IDBTransaction>> created_transactions() { return m_created_transactions; }
     void add_created_transaction(GC::Ref<IDBTransaction> transaction) { m_created_transactions.append(transaction); }
     [[nodiscard]] ReadonlySpan<GC::Ref<ObjectStore>> object_store_set() { return m_object_store_set; }
+    void add_to_object_store_set(GC::Ref<ObjectStore> object_store) { m_object_store_set.append(object_store); }
     void remove_from_object_store_set(GC::Ref<ObjectStore> object_store)
     {
         m_object_store_set.remove_first_matching([&](auto& entry) { return entry == object_store; });
@@ -114,7 +116,7 @@ private:
     // NOTE: We need to keep track of what transactions are created using this connection
     Vector<GC::Ref<IDBTransaction>> m_created_transactions;
 
-    // Note: Used for debug purposes
+    // NOTE: Used for debug purposes
     String m_uuid;
 };
 

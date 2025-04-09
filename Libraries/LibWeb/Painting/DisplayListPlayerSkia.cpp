@@ -177,6 +177,12 @@ void DisplayListPlayerSkia::save(Save const&)
     canvas.save();
 }
 
+void DisplayListPlayerSkia::save_layer(SaveLayer const&)
+{
+    auto& canvas = surface().canvas();
+    canvas.saveLayer(nullptr, nullptr);
+}
+
 void DisplayListPlayerSkia::restore(Restore const&)
 {
     auto& canvas = surface().canvas();
@@ -966,10 +972,7 @@ void DisplayListPlayerSkia::add_mask(AddMask const& command)
 
     auto mask_surface = Gfx::PaintingSurface::create_with_size(m_context, rect.size(), Gfx::BitmapFormat::BGRA8888, Gfx::AlphaType::Premultiplied);
 
-    NonnullRefPtr old_surface = surface();
-    set_surface(mask_surface);
-    execute(*command.display_list);
-    set_surface(old_surface);
+    execute_impl(*command.display_list, mask_surface);
 
     SkMatrix mask_matrix;
     mask_matrix.setTranslate(rect.x(), rect.y());
@@ -982,7 +985,7 @@ void DisplayListPlayerSkia::paint_nested_display_list(PaintNestedDisplayList con
 {
     auto& canvas = surface().canvas();
     canvas.translate(command.rect.x(), command.rect.y());
-    execute(*command.display_list);
+    execute_impl(*command.display_list, {});
 }
 
 void DisplayListPlayerSkia::paint_scrollbar(PaintScrollBar const& command)

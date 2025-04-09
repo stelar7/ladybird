@@ -15,14 +15,13 @@
 #include <AK/Debug.h>
 #include <AK/GenericLexer.h>
 #include <AK/TemporaryChange.h>
-#include <LibURL/URL.h>
+#include <LibWeb/CSS/FontFace.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyName.h>
 #include <LibWeb/CSS/StyleValues/AngleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BackgroundRepeatStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BackgroundSizeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BasicShapeStyleValue.h>
-#include <LibWeb/CSS/StyleValues/CSSColor.h>
 #include <LibWeb/CSS/StyleValues/CSSColorValue.h>
 #include <LibWeb/CSS/StyleValues/CSSHSL.h>
 #include <LibWeb/CSS/StyleValues/CSSHWB.h>
@@ -31,6 +30,7 @@
 #include <LibWeb/CSS/StyleValues/CSSLabLike.h>
 #include <LibWeb/CSS/StyleValues/CSSLightDark.h>
 #include <LibWeb/CSS/StyleValues/CSSRGB.h>
+#include <LibWeb/CSS/StyleValues/ColorFunctionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ConicGradientStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterDefinitionsStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterStyleValue.h>
@@ -39,6 +39,7 @@
 #include <LibWeb/CSS/StyleValues/EdgeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FitContentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FlexStyleValue.h>
+#include <LibWeb/CSS/StyleValues/FontSourceStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FrequencyStyleValue.h>
 #include <LibWeb/CSS/StyleValues/GridTrackPlacementStyleValue.h>
 #include <LibWeb/CSS/StyleValues/GridTrackSizeListStyleValue.h>
@@ -54,6 +55,7 @@
 #include <LibWeb/CSS/StyleValues/RectStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ResolutionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/StringStyleValue.h>
+#include <LibWeb/CSS/StyleValues/StyleValueList.h>
 #include <LibWeb/CSS/StyleValues/TimeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/URLStyleValue.h>
 #include <LibWeb/CSS/StyleValues/UnicodeRangeStyleValue.h>
@@ -63,6 +65,29 @@
 #include <LibWeb/Infra/CharacterTypes.h>
 
 namespace Web::CSS::Parser {
+
+RefPtr<CSSStyleValue> Parser::parse_comma_separated_value_list(TokenStream<ComponentValue>& tokens, ParseFunction parse_one_value)
+{
+    auto first = parse_one_value(tokens);
+    if (!first || !tokens.has_next_token())
+        return first;
+
+    StyleValueVector values;
+    values.append(first.release_nonnull());
+
+    while (tokens.has_next_token()) {
+        if (!tokens.consume_a_token().is(Token::Type::Comma))
+            return nullptr;
+
+        if (auto maybe_value = parse_one_value(tokens)) {
+            values.append(maybe_value.release_nonnull());
+            continue;
+        }
+        return nullptr;
+    }
+
+    return StyleValueList::create(move(values), StyleValueList::Separator::Comma);
+}
 
 Optional<Dimension> Parser::parse_dimension(ComponentValue const& component_value)
 {
@@ -335,17 +360,6 @@ RefPtr<CSSStyleValue> Parser::parse_family_name_value(TokenStream<ComponentValue
 
         if (peek.is(Token::Type::Ident)) {
             auto ident = tokens.consume_a_token().token().ident();
-
-            // CSS-wide keywords are not allowed
-            if (is_css_wide_keyword(ident))
-                return nullptr;
-
-            // <generic-family> is a separate type from <family-name>, and so isn't allowed here.
-            auto maybe_keyword = keyword_from_string(ident);
-            if (maybe_keyword.has_value() && keyword_to_generic_font_family(maybe_keyword.value()).has_value()) {
-                return nullptr;
-            }
-
             parts.append(ident.to_string());
             tokens.discard_whitespace();
             continue;
@@ -357,8 +371,19 @@ RefPtr<CSSStyleValue> Parser::parse_family_name_value(TokenStream<ComponentValue
     if (parts.is_empty())
         return nullptr;
 
+    if (parts.size() == 1) {
+        // <generic-family> is a separate type from <family-name>, and so isn't allowed here.
+        auto maybe_keyword = keyword_from_string(parts.first());
+        if (is_css_wide_keyword(parts.first()) || parts.first().equals_ignoring_ascii_case("default"sv))
+            return nullptr;
+        if (maybe_keyword.has_value() && keyword_to_generic_font_family(maybe_keyword.value()).has_value())
+            return nullptr;
+    }
+
+    auto complete_name = MUST(String::join(' ', parts));
+
     transaction.commit();
-    return CustomIdentStyleValue::create(MUST(String::join(' ', parts)));
+    return CustomIdentStyleValue::create(complete_name);
 }
 
 // https://www.w3.org/TR/css-syntax-3/#urange-syntax
@@ -1628,7 +1653,7 @@ RefPtr<CSSStyleValue> Parser::parse_color_function(TokenStream<ComponentValue>& 
 
     auto const& maybe_color_space = inner_tokens.consume_a_token();
     inner_tokens.discard_whitespace();
-    if (!any_of(CSSColor::s_supported_color_space, [&](auto supported) { return maybe_color_space.is_ident(supported); }))
+    if (!any_of(ColorFunctionStyleValue::s_supported_color_space, [&](auto supported) { return maybe_color_space.is_ident(supported); }))
         return {};
 
     auto const& color_space = maybe_color_space.token().ident();
@@ -1659,7 +1684,7 @@ RefPtr<CSSStyleValue> Parser::parse_color_function(TokenStream<ComponentValue>& 
         alpha = NumberStyleValue::create(1);
 
     transaction.commit();
-    return CSSColor::create(color_space.to_ascii_lowercase(),
+    return ColorFunctionStyleValue::create(color_space.to_ascii_lowercase(),
         c1.release_nonnull(),
         c2.release_nonnull(),
         c3.release_nonnull(),
@@ -1769,14 +1794,14 @@ RefPtr<CSSStyleValue> Parser::parse_color_value(TokenStream<ComponentValue>& tok
         if (!m_value_context.is_empty()) {
             quirky_color_allowed = m_value_context.first().visit(
                 [](PropertyID const& property_id) { return property_has_quirk(property_id, Quirk::HashlessHexColor); },
-                [](FunctionContext const&) { return false; });
+                [](FunctionContext const&) { return false; },
+                [](DescriptorContext const&) { return false; });
         }
         for (auto i = 1u; i < m_value_context.size() && quirky_color_allowed; i++) {
             quirky_color_allowed = m_value_context[i].visit(
                 [](PropertyID const& property_id) { return property_has_quirk(property_id, Quirk::UnitlessLength); },
-                [](FunctionContext const&) {
-                    return false;
-                });
+                [](FunctionContext const&) { return false; },
+                [](DescriptorContext const&) { return false; });
         }
         if (quirky_color_allowed) {
             // NOTE: This algorithm is no longer in the spec, since the concept got moved and renamed. However, it works,
@@ -1988,9 +2013,13 @@ RefPtr<AbstractImageStyleValue> Parser::parse_image_value(TokenStream<ComponentV
     if (url.has_value()) {
         // If the value is a 'url(..)' parse as image, but if it is just a reference 'url(#xx)', leave it alone,
         // so we can parse as URL further on. These URLs are used as references inside SVG documents for masks.
-        if (!url.value().equals(m_url, URL::ExcludeFragment::Yes)) {
-            tokens.discard_a_mark();
-            return ImageStyleValue::create(url.value());
+        if (!url->url().starts_with('#')) {
+            // FIXME: Stop completing the URL here
+            auto completed_url = complete_url(url->url());
+            if (completed_url.has_value()) {
+                tokens.discard_a_mark();
+                return ImageStyleValue::create(completed_url.release_value());
+            }
         }
         tokens.restore_a_mark();
         return nullptr;
@@ -2536,24 +2565,16 @@ RefPtr<CSSStyleValue> Parser::parse_easing_value(TokenStream<ComponentValue>& to
     return nullptr;
 }
 
-Optional<URL::URL> Parser::parse_url_function(TokenStream<ComponentValue>& tokens)
+Optional<URL> Parser::parse_url_function(TokenStream<ComponentValue>& tokens)
 {
     auto transaction = tokens.begin_transaction();
-    auto& component_value = tokens.consume_a_token();
-
-    auto convert_string_to_url = [&](StringView url_string) -> Optional<URL::URL> {
-        auto url = complete_url(url_string);
-        if (url.has_value()) {
-            transaction.commit();
-            return url;
-        }
-        return {};
-    };
+    auto const& component_value = tokens.consume_a_token();
 
     if (component_value.is(Token::Type::Url)) {
-        auto url_string = component_value.token().url();
-        return convert_string_to_url(url_string);
+        transaction.commit();
+        return URL { component_value.token().url().to_string() };
     }
+
     if (component_value.is_function("url"sv)) {
         auto const& function_values = component_value.function().value;
         // FIXME: Handle url-modifiers. https://www.w3.org/TR/css-values-4/#url-modifiers
@@ -2562,8 +2583,8 @@ Optional<URL::URL> Parser::parse_url_function(TokenStream<ComponentValue>& token
             if (value.is(Token::Type::Whitespace))
                 continue;
             if (value.is(Token::Type::String)) {
-                auto url_string = value.token().string();
-                return convert_string_to_url(url_string);
+                transaction.commit();
+                return URL { value.token().string().to_string() };
             }
             break;
         }
@@ -2577,7 +2598,11 @@ RefPtr<CSSStyleValue> Parser::parse_url_value(TokenStream<ComponentValue>& token
     auto url = parse_url_function(tokens);
     if (!url.has_value())
         return nullptr;
-    return URLStyleValue::create(*url);
+    // FIXME: Stop completing the URL here
+    auto completed_url = complete_url(url->url());
+    if (!completed_url.has_value())
+        return nullptr;
+    return URLStyleValue::create(completed_url.release_value());
 }
 
 // https://www.w3.org/TR/css-shapes-1/#typedef-shape-radius
@@ -3329,6 +3354,10 @@ RefPtr<CSSStyleValue> Parser::parse_calculated_value(ComponentValue const& compo
                 }
                 // FIXME: Add other functions that provide a context for resolving values
                 return {};
+            },
+            [](DescriptorContext const&) -> Optional<CalculationContext> {
+                // FIXME: If any descriptors have `<*-percentage>` or `<integer>` types, add them here.
+                return CalculationContext {};
             });
         if (maybe_context.has_value()) {
             context = maybe_context.release_value();
@@ -3629,6 +3658,71 @@ RefPtr<StringStyleValue> Parser::parse_opentype_tag_value(TokenStream<ComponentV
 
     transaction.commit();
     return string_value;
+}
+
+RefPtr<FontSourceStyleValue> Parser::parse_font_source_value(TokenStream<ComponentValue>& tokens)
+{
+    // <font-src> = <url> [ format(<font-format>)]? [ tech( <font-tech>#)]? | local(<family-name>)
+    auto transaction = tokens.begin_transaction();
+
+    tokens.discard_whitespace();
+
+    // local(<family-name>)
+    if (tokens.next_token().is_function("local"sv)) {
+        auto const& function = tokens.consume_a_token().function();
+        TokenStream function_tokens { function.value };
+        if (auto family_name = parse_family_name_value(function_tokens)) {
+            transaction.commit();
+            return FontSourceStyleValue::create(FontSourceStyleValue::Local { family_name.release_nonnull() }, {});
+        }
+        return nullptr;
+    }
+
+    // <url> [ format(<font-format>)]? [ tech( <font-tech>#)]?
+    auto url = parse_url_function(tokens);
+    if (!url.has_value())
+        return nullptr;
+    // FIXME: Stop completing the URL here
+    auto completed_url = complete_url(url->url());
+    if (!completed_url.has_value())
+        return nullptr;
+
+    Optional<FlyString> format;
+
+    tokens.discard_whitespace();
+
+    // [ format(<font-format>)]?
+    if (tokens.next_token().is_function("format"sv)) {
+        auto const& function = tokens.consume_a_token().function();
+        auto context_guard = push_temporary_value_parsing_context(FunctionContext { function.name });
+
+        TokenStream format_tokens { function.value };
+        format_tokens.discard_whitespace();
+        auto const& format_name_token = format_tokens.consume_a_token();
+        FlyString format_name;
+        if (format_name_token.is(Token::Type::Ident)) {
+            format_name = format_name_token.token().ident();
+        } else if (format_name_token.is(Token::Type::String)) {
+            format_name = format_name_token.token().string();
+        } else {
+            dbgln_if(CSS_PARSER_DEBUG, "CSSParser: font source invalid (`format()` parameter not an ident or string; is: {}); discarding.", format_name_token.to_debug_string());
+            return nullptr;
+        }
+
+        if (!font_format_is_supported(format_name)) {
+            dbgln_if(CSS_PARSER_DEBUG, "CSSParser: font source format({}) not supported; skipping.", format_name);
+            return nullptr;
+        }
+
+        format = move(format_name);
+    }
+
+    tokens.discard_whitespace();
+
+    // FIXME: [ tech( <font-tech>#)]?
+
+    transaction.commit();
+    return FontSourceStyleValue::create(completed_url.release_value(), move(format));
 }
 
 NonnullRefPtr<CSSStyleValue> Parser::resolve_unresolved_style_value(ParsingParams const& context, DOM::Element& element, Optional<PseudoElement> pseudo_element, PropertyID property_id, UnresolvedStyleValue const& unresolved)

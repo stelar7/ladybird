@@ -38,7 +38,7 @@ GC::Ref<WebIDL::Promise> fetch(JS::VM& vm, RequestInfo const& input, RequestInit
     auto exception_or_request_object = Request::construct_impl(realm, input, init);
     if (exception_or_request_object.is_exception()) {
         auto throw_completion = Bindings::exception_to_throw_completion(vm, exception_or_request_object.exception());
-        WebIDL::reject_promise(realm, promise_capability, *throw_completion.value());
+        WebIDL::reject_promise(realm, promise_capability, throw_completion.value());
         return promise_capability;
     }
     auto request_object = exception_or_request_object.release_value();
@@ -104,7 +104,7 @@ GC::Ref<WebIDL::Promise> fetch(JS::VM& vm, RequestInfo const& input, RequestInit
 
         // 3. If response is a network error, then reject p with a TypeError and abort these steps.
         if (response->is_network_error()) {
-            auto message = response->network_error_message().value_or("Response is a network error"sv);
+            auto message = response->network_error_message().value_or("Response is a network error"_string);
             WebIDL::reject_promise(relevant_realm, promise_capability, JS::TypeError::create(relevant_realm, message));
             return;
         }

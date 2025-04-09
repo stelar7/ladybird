@@ -1,13 +1,12 @@
 qt_add_executable(ladybird ${LADYBIRD_SOURCES})
 target_sources(ladybird PRIVATE
     Application.cpp
-    AutoComplete.cpp
+    Autocomplete.cpp
     BrowserWindow.cpp
     FindInPageWidget.cpp
     Icon.cpp
     LocationEdit.cpp
     Settings.cpp
-    SettingsDialog.cpp
     Tab.cpp
     TabBar.cpp
     TVGIconEngine.cpp
@@ -16,5 +15,5 @@ target_sources(ladybird PRIVATE
     ladybird.qrc
     main.cpp
 )
-target_link_libraries(ladybird PRIVATE Qt::Core Qt::Gui Qt::Network Qt::Widgets)
+target_link_libraries(ladybird PRIVATE Qt::Core Qt::Gui Qt::Widgets)
 create_ladybird_bundle(ladybird)

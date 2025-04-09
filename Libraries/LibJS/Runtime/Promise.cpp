@@ -125,7 +125,7 @@ Promise::ResolvingFunctions Promise::create_resolving_functions()
         if (then.is_throw_completion()) {
             // a. Perform RejectPromise(promise, then.[[Value]]).
             dbgln_if(PROMISE_DEBUG, "[Promise @ {} / PromiseResolvingFunction]: Exception while getting 'then' property, rejecting with error", &promise);
-            promise.reject(*then.throw_completion().value());
+            promise.reject(then.throw_completion().value());
 
             // b. Return undefined.
             return js_undefined();
@@ -204,7 +204,6 @@ void Promise::fulfill(Value value)
 
     // 1. Assert: The value of promise.[[PromiseState]] is pending.
     VERIFY(m_state == State::Pending);
-    VERIFY(!value.is_empty());
 
     // 2. Let reactions be promise.[[PromiseFulfillReactions]].
     // NOTE: This is a noop, we do these steps in a slightly different order.
@@ -235,7 +234,6 @@ void Promise::reject(Value reason)
 
     // 1. Assert: The value of promise.[[PromiseState]] is pending.
     VERIFY(m_state == State::Pending);
-    VERIFY(!reason.is_empty());
 
     // 2. Let reactions be promise.[[PromiseRejectReactions]].
     // NOTE: This is a noop, we do these steps in a slightly different order.

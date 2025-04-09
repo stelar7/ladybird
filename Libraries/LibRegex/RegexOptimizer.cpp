@@ -1002,6 +1002,7 @@ void Optimizer::append_alternation(ByteCode& target, Span<ByteCode> alternatives
     if (alternatives.size() == 1)
         return target.extend(move(alternatives[0]));
 
+    target.merge_string_tables_from(alternatives);
     if (all_of(alternatives, [](auto& x) { return x.is_empty(); }))
         return;
 

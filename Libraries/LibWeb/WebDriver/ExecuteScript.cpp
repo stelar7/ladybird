@@ -67,7 +67,12 @@ static JS::ThrowCompletionOr<JS::Value> execute_a_function_body(HTML::BrowsingCo
     //    The result of parsing global scope above.
     // strict
     //    The result of parsing strict above.
-    auto function = JS::ECMAScriptFunctionObject::create(realm, ""_fly_string, move(source_text), function_expression->body(), function_expression->parameters(), function_expression->function_length(), function_expression->local_variables_names(), &global_scope, nullptr, function_expression->kind(), function_expression->is_strict_mode(), function_expression->parsing_insights());
+    auto function = JS::ECMAScriptFunctionObject::create_from_function_node(
+        function_expression,
+        ""_fly_string,
+        realm,
+        &global_scope,
+        nullptr);
 
     // 9. Let completion be Function.[[Call]](window, parameters) with function as the this value.
     // NOTE: This is not entirely clear, but I don't think they mean actually passing `function` as
@@ -122,7 +127,7 @@ void execute_script(HTML::BrowsingContext const& browsing_context, String body, 
 
         // 3. Upon rejection of scriptPromise with value r, reject promise with value r.
         if (script_result.is_throw_completion()) {
-            WebIDL::reject_promise(realm, promise, *script_result.throw_completion().value());
+            WebIDL::reject_promise(realm, promise, script_result.throw_completion().value());
         }
     }));
 
@@ -184,7 +189,7 @@ void execute_async_script(HTML::BrowsingContext const& browsing_context, String 
         //       In order to preserve legacy behavior, the return value only influences the command if it is a
         //       "thenable"  object or if determining this produces an exception.
         if (script_result.is_throw_completion()) {
-            promise->reject(*script_result.throw_completion().value());
+            promise->reject(script_result.throw_completion().value());
             return;
         }
 
@@ -197,7 +202,7 @@ void execute_async_script(HTML::BrowsingContext const& browsing_context, String 
 
         // 7. If then.[[Type]] is not normal, then reject promise with value then.[[Value]], and abort these steps.
         if (then.is_throw_completion()) {
-            promise->reject(*then.throw_completion().value());
+            promise->reject(then.throw_completion().value());
             return;
         }
 

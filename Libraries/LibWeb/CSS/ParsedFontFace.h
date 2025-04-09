@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022-2024, Sam Atkins <sam@ladybird.org>
+ * Copyright (c) 2022-2025, Sam Atkins <sam@ladybird.org>
  * Copyright (c) 2023, Andreas Kling <andreas@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -19,10 +19,13 @@ namespace Web::CSS {
 class ParsedFontFace {
 public:
     struct Source {
-        Variant<FlyString, URL::URL> local_or_url;
+        Variant<FlyString, ::URL::URL> local_or_url;
         // FIXME: Do we need to keep this around, or is it only needed to discard unwanted formats during parsing?
         Optional<FlyString> format;
     };
+
+    static Vector<Source> sources_from_style_value(CSSStyleValue const&);
+    static ParsedFontFace from_descriptors(CSSFontFaceDescriptors const&);
 
     ParsedFontFace(FlyString font_family, Optional<int> weight, Optional<int> slope, Optional<int> width, Vector<Source> sources, Vector<Gfx::UnicodeRange> unicode_ranges, Optional<Percentage> ascent_override, Optional<Percentage> descent_override, Optional<Percentage> line_gap_override, FontDisplay font_display, Optional<FlyString> font_named_instance, Optional<FlyString> font_language_override, Optional<OrderedHashMap<FlyString, i64>> font_feature_settings, Optional<OrderedHashMap<FlyString, double>> font_variation_settings);
     ~ParsedFontFace() = default;

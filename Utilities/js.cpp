@@ -266,8 +266,7 @@ static ErrorOr<bool> parse_and_run(JS::Realm& realm, StringView source, StringVi
         g_last_value = GC::make_root(result.value());
 
     if (result.is_error()) {
-        VERIFY(result.throw_completion().value().has_value());
-        TRY(handle_exception(*result.release_error().value()));
+        TRY(handle_exception(result.release_error().value()));
         return false;
     }
 
@@ -779,7 +778,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                 if (value_or_error.is_error())
                     return {};
                 auto variable = value_or_error.value();
-                VERIFY(!variable.is_empty());
+                VERIFY(!variable.is_special_empty_value());
 
                 if (!variable.is_object())
                     break;
@@ -795,7 +794,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
                 for (auto const& name : global_environment.declarative_record().bindings()) {
                     if (name.bytes_as_string_view().starts_with(variable_name)) {
-                        results.empend(name.to_deprecated_fly_string());
+                        results.empend(name);
                         results.last().invariant_offset = variable_name.bytes().size();
                     }
                 }

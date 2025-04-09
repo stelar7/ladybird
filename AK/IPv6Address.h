@@ -111,6 +111,18 @@ public:
         if (string.is_null())
             return {};
 
+        // NOTE: This supports URI syntax (square brackets) for IPv6 addresses.
+        //       See: https://datatracker.ietf.org/doc/html/rfc3986#section-3.2.2
+        auto const starts_with_bracket = string.starts_with('[');
+        auto const ends_with_bracket = string.ends_with(']');
+
+        if (starts_with_bracket || ends_with_bracket) {
+            if (!starts_with_bracket || !ends_with_bracket)
+                return {};
+
+            string = string.substring_view(1, string.length() - 2);
+        }
+
         auto const parts = string.split_view(':', SplitBehavior::KeepEmpty);
         if (parts.is_empty())
             return {};
@@ -254,12 +266,6 @@ private:
 };
 
 static_assert(sizeof(IPv6Address) == 16);
-
-template<>
-struct Traits<IPv6Address> : public DefaultTraits<IPv6Address> {
-    // SipHash-4-8 is considered conservatively secure, even if not cryptographically secure.
-    static unsigned hash(IPv6Address const& address) { return sip_hash_bytes<4, 8>({ &address.to_in6_addr_t(), sizeof(address.to_in6_addr_t()) }); }
-};
 
 template<>
 struct Formatter<IPv6Address> : Formatter<StringView> {
