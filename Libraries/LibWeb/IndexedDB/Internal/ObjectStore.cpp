@@ -78,7 +78,7 @@ void ObjectStore::store_a_record(Record const& record)
 
     // The record is stored in the object store’s list of records such that the list is sorted according to the key of the records in ascending order.
     AK::quick_sort(m_records, [](auto const& a, auto const& b) {
-        return a.key < b.key;
+        return Key::compare_two_keys(a.key, b.key) < 0;
     });
 }
 
