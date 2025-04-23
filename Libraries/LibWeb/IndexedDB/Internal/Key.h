@@ -38,6 +38,7 @@ public:
         String,
         Binary,
         Array,
+        Invalid,
     };
 
     [[nodiscard]] static GC::Ref<Key> create(JS::Realm&, KeyType, KeyValue);
@@ -45,6 +46,7 @@ public:
 
     [[nodiscard]] KeyType type() { return m_type; }
     [[nodiscard]] KeyValue value() { return m_value; }
+    [[nodiscard]] bool is_invalid() { return m_type == Invalid; }
 
     [[nodiscard]] double value_as_double() { return m_value.get<double>(); }
     [[nodiscard]] AK::String value_as_string() { return m_value.get<AK::String>(); }
@@ -61,6 +63,7 @@ public:
     [[nodiscard]] static GC::Ref<Key> create_string(JS::Realm& realm, AK::String const& value) { return create(realm, String, value); }
     [[nodiscard]] static GC::Ref<Key> create_binary(JS::Realm& realm, ByteBuffer const& value) { return create(realm, Binary, value); }
     [[nodiscard]] static GC::Ref<Key> create_array(JS::Realm& realm, Vector<GC::Root<Key>> const& value) { return create(realm, Array, value); }
+    [[nodiscard]] static GC::Ref<Key> create_invalid(JS::Realm& realm, AK::String const& value) { return create(realm, Invalid, value); }
 
     [[nodiscard]] static i8 compare_two_keys(GC::Ref<Key> a, GC::Ref<Key> b);
     [[nodiscard]] static bool equals(GC::Ref<Key> a, GC::Ref<Key> b) { return compare_two_keys(a, b) == 0; }

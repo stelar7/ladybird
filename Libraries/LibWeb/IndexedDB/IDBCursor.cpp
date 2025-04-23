@@ -99,11 +99,11 @@ WebIDL::ExceptionOr<void> IDBCursor::continue_(JS::Value key)
         auto r = TRY(convert_a_value_to_a_key(realm, key));
 
         // 2. If r is invalid, throw a "DataError" DOMException.
-        if (r.is_error())
+        if (r->is_invalid())
             return WebIDL::DataError::create(realm, "Key is invalid"_string);
 
         // 3. Let key be r.
-        key_value = r.release_value();
+        key_value = r;
 
         // 4. If key is less than or equal to this's position and this's direction is "next" or "nextunique", then throw a "DataError" DOMException.
         auto is_less_than_or_equal_to = Key::less_than(*key_value, *this->position()) || Key::equals(*key_value, *this->position());
@@ -129,8 +129,8 @@ WebIDL::ExceptionOr<void> IDBCursor::continue_(JS::Value key)
     request->set_done(false);
 
     // 10. Let operation be an algorithm to run iterate a cursor with the current Realm record, this, and key (if given).
-    auto operation = GC::Function<WebIDL::ExceptionOr<JS::Value>()>::create(realm.heap(), [this, &realm, key_value] {
-        return iterate_a_cursor(realm, *this, key_value);
+    auto operation = GC::Function<WebIDL::ExceptionOr<JS::Value>()>::create(realm.heap(), [this, &realm, key_value] -> WebIDL::ExceptionOr<JS::Value> {
+        return WebIDL::ExceptionOr<JS::Value>(iterate_a_cursor(realm, *this, key_value));
     });
 
     // 11. Run asynchronously execute a request with this's source, operation, and request.

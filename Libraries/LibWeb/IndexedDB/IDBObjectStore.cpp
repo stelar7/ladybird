@@ -98,7 +98,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::count(Optional<JS::Valu
     auto range = TRY(convert_a_value_to_a_key_range(realm, move(query)));
 
     // 6. Let operation be an algorithm to run count the records in a range with store and range.
-    auto operation = GC::Function<WebIDL::ExceptionOr<JS::Value>()>::create(realm.heap(), [store, range] {
+    auto operation = GC::Function<WebIDL::ExceptionOr<JS::Value>()>::create(realm.heap(), [store, range] -> WebIDL::ExceptionOr<JS::Value> {
         return count_the_records_in_a_range(store, range);
     });
 
@@ -133,7 +133,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::open_cursor(JS::Value q
     auto cursor = IDBCursor::create(realm, transaction, {}, direction, false, {}, {}, GC::Ref(*this), range, false);
 
     // 7. Let operation be an algorithm to run iterate a cursor with the current Realm record and cursor.
-    auto operation = GC::Function<WebIDL::ExceptionOr<JS::Value>()>::create(realm.heap(), [&realm, cursor] {
+    auto operation = GC::Function<WebIDL::ExceptionOr<JS::Value>()>::create(realm.heap(), [&realm, cursor] -> WebIDL::ExceptionOr<JS::Value> {
         return WebIDL::ExceptionOr<JS::Value>(iterate_a_cursor(realm, cursor));
     });
 
@@ -169,7 +169,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::get(JS::Value query)
     auto range = TRY(convert_a_value_to_a_key_range(realm, query, true));
 
     // 6. Let operation be an algorithm to run retrieve a value from an object store with the current Realm record, store, and range.
-    auto operation = GC::Function<WebIDL::ExceptionOr<JS::Value>()>::create(realm.heap(), [&realm, &store, range] {
+    auto operation = GC::Function<WebIDL::ExceptionOr<JS::Value>()>::create(realm.heap(), [&realm, store, range] -> WebIDL::ExceptionOr<JS::Value> {
         return retrieve_a_value_from_an_object_store(realm, store, range);
     });
 
@@ -365,7 +365,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::add_or_put(GC::Ref<IDBO
     auto transaction = handle->transaction();
 
     // 2. Let store be handle’s object store.
-    auto& store = *handle->store();
+    auto store = handle->store();
 
     // FIXME: 3. If store has been deleted, throw an "InvalidStateError" DOMException.
 
@@ -380,24 +380,25 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::add_or_put(GC::Ref<IDBO
     auto key_was_given = key.has_value() && key != JS::js_undefined();
 
     // 6. If store uses in-line keys and key was given, throw a "DataError" DOMException.
-    if (store.uses_inline_keys() && key_was_given)
+    if (store->uses_inline_keys() && key_was_given)
         return WebIDL::DataError::create(realm, "Store uses in-line keys and key was given"_string);
 
     // 7. If store uses out-of-line keys and has no key generator and key was not given, throw a "DataError" DOMException.
-    if (store.uses_out_of_line_keys() && !store.key_generator().has_value() && !key_was_given)
+    if (store->uses_out_of_line_keys() && !store->key_generator().has_value() && !key_was_given)
         return WebIDL::DataError::create(realm, "Store uses out-of-line keys and has no key generator and key was not given"_string);
 
     GC::Ptr<Key> key_value;
     // 8. If key was given, then:
     if (key_was_given) {
         // 1. Let r be the result of converting a value to a key with key. Rethrow any exceptions.
-        auto maybe_key = TRY(convert_a_value_to_a_key(realm, key.value()));
+        auto r = TRY(convert_a_value_to_a_key(realm, key.value()));
+
         // 2. If r is invalid, throw a "DataError" DOMException.
-        if (maybe_key.is_error())
+        if (r->is_invalid())
             return WebIDL::DataError::create(realm, "Key is invalid"_string);
 
         // 3. Let key be r.
-        key_value = maybe_key.release_value();
+        key_value = r;
     }
 
     // 9. Let targetRealm be a user-agent defined Realm.
@@ -407,42 +408,40 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::add_or_put(GC::Ref<IDBO
     auto clone = TRY(clone_in_realm(target_realm, value, transaction));
 
     // 11. If store uses in-line keys, then:
-    if (store.uses_inline_keys()) {
+    if (store->uses_inline_keys()) {
         // 1. Let kpk be the result of extracting a key from a value using a key path with clone and store’s key path. Rethrow any exceptions.
-        auto maybe_kpk = TRY(extract_a_key_from_a_value_using_a_key_path(realm, clone, store.key_path().value()));
+        auto maybe_kpk = TRY(extract_a_key_from_a_value_using_a_key_path(realm, clone, store->key_path().value()));
 
-        // 2. If kpk is invalid, throw a "DataError" DOMException.
-        if (maybe_kpk.is_error())
-            return WebIDL::DataError::create(realm, "Key path is invalid"_string);
-
+        // NOTE: Step 2 and 3 is reversed here, since we check for failure before validity.
         // 3. If kpk is not failure, let key be kpk.
         if (!maybe_kpk.is_error()) {
             key_value = maybe_kpk.release_value();
+
+            // 2. If kpk is invalid, throw a "DataError" DOMException.
+            if (key_value->is_invalid())
+                return WebIDL::DataError::create(realm, key_value->value_as_string());
         }
 
         // 4. Otherwise (kpk is failure):
         else {
             // 1. If store does not have a key generator, throw a "DataError" DOMException.
-            if (!store.key_generator().has_value())
+            if (!store->key_generator().has_value())
                 return WebIDL::DataError::create(realm, "Store does not have a key generator"_string);
 
             // 2. Otherwise, if check that a key could be injected into a value with clone and store’s key path return false, throw a "DataError" DOMException.
-            if (!check_that_a_key_could_be_injected_into_a_value(realm, clone, store.key_path().value()))
+            if (!check_that_a_key_could_be_injected_into_a_value(realm, clone, store->key_path().value()))
                 return WebIDL::DataError::create(realm, "Key could not be injected into value"_string);
         }
     }
 
     // 12. Let operation be an algorithm to run store a record into an object store with store, clone, key, and no-overwrite flag.
-    auto operation = GC::Function<WebIDL::ExceptionOr<JS::Value>()>::create(realm.heap(), [&realm, &store, clone, key_value, no_overwrite] -> WebIDL::ExceptionOr<JS::Value> {
-        auto maybe_key = store_a_record_into_an_object_store(realm, store, clone, key_value, no_overwrite);
-        if (maybe_key.is_error())
-            return maybe_key.release_error();
+    auto operation = GC::Function<WebIDL::ExceptionOr<JS::Value>()>::create(realm.heap(), [&realm, store, clone, key_value, no_overwrite] -> WebIDL::ExceptionOr<JS::Value> {
+        auto key = TRY(store_a_record_into_an_object_store(realm, store, clone, key_value, no_overwrite));
 
-        auto optional_key = maybe_key.release_value();
-        if (optional_key == nullptr)
+        if (!key || key->is_invalid())
             return JS::js_undefined();
 
-        return convert_a_key_to_a_value(realm, GC::Ref(*optional_key));
+        return convert_a_key_to_a_value(realm, GC::Ref(*key));
     });
 
     // 13. Return the result (an IDBRequest) of running asynchronously execute a request with handle and operation.

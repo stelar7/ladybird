@@ -207,14 +207,14 @@ bool fire_a_version_change_event(JS::Realm& realm, FlyString const& event_name, 
 }
 
 // https://w3c.github.io/IndexedDB/#convert-value-to-key
-WebIDL::ExceptionOr<ErrorOr<GC::Ref<Key>>> convert_a_value_to_a_key(JS::Realm& realm, JS::Value input, Vector<JS::Value> seen)
+WebIDL::ExceptionOr<GC::Ref<Key>> convert_a_value_to_a_key(JS::Realm& realm, JS::Value input, Vector<JS::Value> seen)
 {
     // 1. If seen was not given, then let seen be a new empty set.
     // NOTE: This is handled by the caller.
 
     // 2. If seen contains input, then return invalid.
     if (seen.contains_slow(input))
-        return Error::from_string_literal("Already seen key");
+        return Key::create_invalid(realm, "Already seen key"_string);
 
     // 3. Jump to the appropriate step below:
 
@@ -223,7 +223,7 @@ WebIDL::ExceptionOr<ErrorOr<GC::Ref<Key>>> convert_a_value_to_a_key(JS::Realm& r
 
         // 1. If input is NaN then return invalid.
         if (input.is_nan())
-            return Error::from_string_literal("NaN key");
+            return Key::create_invalid(realm, "NaN key"_string);
 
         // 2. Otherwise, return a new key with type number and value input.
         return Key::create_number(realm, input.as_double());
@@ -238,7 +238,7 @@ WebIDL::ExceptionOr<ErrorOr<GC::Ref<Key>>> convert_a_value_to_a_key(JS::Realm& r
 
         // 2. If ms is NaN then return invalid.
         if (isnan(ms))
-            return Error::from_string_literal("NaN key");
+            return Key::create_invalid(realm, "NaN key"_string);
 
         // 3. Otherwise, return a new key with type date and value ms.
         return Key::create_date(realm, ms);
@@ -256,10 +256,10 @@ WebIDL::ExceptionOr<ErrorOr<GC::Ref<Key>>> convert_a_value_to_a_key(JS::Realm& r
 
         // 1. If input is [detached] then return invalid.
         if (WebIDL::is_buffer_source_detached(input))
-            return Error::from_string_literal("Detached buffer is not supported as key");
+            return Key::create_invalid(realm, "Detached buffer is not supported as key"_string);
 
         // 2. Let bytes be the result of getting a copy of the bytes held by the buffer source input.
-        auto data_buffer = TRY(WebIDL::get_buffer_source_copy(input.as_object()));
+        auto data_buffer = MUST(WebIDL::get_buffer_source_copy(input.as_object()));
 
         // 3. Return a new key with type binary and value bytes.
         return Key::create_binary(realm, data_buffer);
@@ -287,15 +287,18 @@ WebIDL::ExceptionOr<ErrorOr<GC::Ref<Key>>> convert_a_value_to_a_key(JS::Realm& r
 
             // 2. If hop is false, return invalid.
             if (!hop)
-                return Error::from_string_literal("Array-like object has no property");
+                return Key::create_invalid(realm, "Array-like object has no property"_string);
 
             // 3. Let entry be ? Get(input, index).
             auto entry = TRY(input.as_object().get(index));
 
             // 4. Let key be the result of converting a value to a key with arguments entry and seen.
             // 5. ReturnIfAbrupt(key).
+            auto key = TRY(convert_a_value_to_a_key(realm, entry, seen));
+
             // 6. If key is invalid abort these steps and return invalid.
-            auto key = TRY(TRY(convert_a_value_to_a_key(realm, entry, seen)));
+            if (key->is_invalid())
+                return key;
 
             // 7. Append key to keys.
             keys.append(key);
@@ -309,7 +312,8 @@ WebIDL::ExceptionOr<ErrorOr<GC::Ref<Key>>> convert_a_value_to_a_key(JS::Realm& r
     }
 
     // - Otherwise
-    return Error::from_string_literal("Unknown key type");
+    // Return invalid.
+    return Key::create_invalid(realm, "Unable to convert value to key. Its not of a known type"_string);
 }
 
 // https://w3c.github.io/IndexedDB/#close-a-database-connection
@@ -683,6 +687,8 @@ JS::Value convert_a_key_to_a_value(JS::Realm& realm, GC::Ref<Key> key)
         // 6. Return array.
         return array;
     }
+    case Key::KeyType::Invalid:
+        VERIFY_NOT_REACHED();
     }
 
     VERIFY_NOT_REACHED();
@@ -813,7 +819,7 @@ WebIDL::ExceptionOr<JS::Value> clone_in_realm(JS::Realm& target_realm, JS::Value
 }
 
 // https://w3c.github.io/IndexedDB/#convert-a-value-to-a-multientry-key
-WebIDL::ExceptionOr<ErrorOr<GC::Ref<Key>>> convert_a_value_to_a_multi_entry_key(JS::Realm& realm, JS::Value value)
+WebIDL::ExceptionOr<GC::Ref<Key>> convert_a_value_to_a_multi_entry_key(JS::Realm& realm, JS::Value value)
 {
     // 1. If input is an Array exotic object, then:
     if (value.is_object() && is<JS::Array>(value.as_object())) {
@@ -844,14 +850,10 @@ WebIDL::ExceptionOr<ErrorOr<GC::Ref<Key>>> convert_a_value_to_a_multi_entry_key(
 
                 // 2. If key is not invalid or an abrupt completion, and there is no item in keys equal to key, then append key to keys.
                 if (!completion_key.is_error()) {
-                    auto maybe_key = completion_key.release_value();
+                    auto key = completion_key.release_value();
 
-                    if (!maybe_key.is_error()) {
-                        auto key = maybe_key.release_value();
-
-                        if (!keys.contains_slow(key))
-                            keys.append(key);
-                    }
+                    if (!key->is_invalid() && !keys.contains_slow(key))
+                        keys.append(key);
                 }
             }
 
@@ -916,7 +918,7 @@ WebIDL::ExceptionOr<ErrorOr<JS::Value>> evaluate_key_path_on_a_value(JS::Realm& 
 
     // 3. Let identifiers be the result of strictly splitting keyPath on U+002E FULL STOP characters (.).
     // 4. For each identifier of identifiers, jump to the appropriate step below:
-    TRY(key_path_string.bytes_as_string_view().for_each_split_view('.', SplitBehavior::KeepEmpty | SplitBehavior::KeepTrailingSeparator, [&](auto const& identifier) -> ErrorOr<void> {
+    TRY(key_path_string.bytes_as_string_view().for_each_split_view('.', SplitBehavior::KeepEmpty, [&](auto const& identifier) -> ErrorOr<void> {
         // If Type(value) is String, and identifier is "length"
         if (value.is_string() && identifier == "length") {
             // Let value be a Number equal to the number of elements in value.
@@ -966,7 +968,7 @@ WebIDL::ExceptionOr<ErrorOr<JS::Value>> evaluate_key_path_on_a_value(JS::Realm& 
 
             // 3. If hop is false, return failure.
             if (!hop)
-                return Error::from_string_literal("Property does not exist");
+                return Error::from_string_literal("Failed to find property on object during key path evaluation");
 
             // 4. Let value be ! Get(value, identifier).
             value = MUST(value.as_object().get(identifier_property));
@@ -1581,9 +1583,13 @@ WebIDL::ExceptionOr<JS::Value> retrieve_a_value_from_an_object_store(JS::Realm& 
     // 1. Let record be the first record in store’s list of records whose key is in range, if any.
     auto record = store->first_in_range(range);
 
+    dbgln("getting value");
+
     // 2. If record was not found, return undefined.
     if (!record.has_value())
         return JS::js_undefined();
+
+    dbgln("got value");
 
     // 3. Let serialized be record’s value. If an error occurs while reading the value from the underlying storage, return a newly created "NotReadableError" DOMException.
     auto serialized = record->value;
@@ -1608,13 +1614,11 @@ WebIDL::ExceptionOr<GC::Ref<IDBKeyRange>> convert_a_value_to_a_key_range(JS::Rea
     }
 
     // 3. Let key be the result of converting a value to a key with value. Rethrow any exceptions.
-    auto maybe_key = TRY(convert_a_value_to_a_key(realm, *value));
+    auto key = TRY(convert_a_value_to_a_key(realm, *value));
 
     // 4. If key is invalid, throw a "DataError" DOMException.
-    if (maybe_key.is_error())
+    if (key->is_invalid())
         return WebIDL::DataError::create(realm, "Value is invalid"_string);
-
-    auto key = maybe_key.release_value();
 
     // 5. Return a key range containing only key.
     return IDBKeyRange::create(realm, key, key, false, false);

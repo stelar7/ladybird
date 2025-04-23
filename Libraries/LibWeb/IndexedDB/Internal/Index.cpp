@@ -58,7 +58,7 @@ void Index::store_a_record(IndexRecord const& record)
 bool Index::has_record_with_key(GC::Ref<Key> key)
 {
     auto index = m_records.find_if([&key](auto const& record) {
-        return record.key == key;
+        return Key::equals(key, record.key);
     });
 
     return index != m_records.end();
