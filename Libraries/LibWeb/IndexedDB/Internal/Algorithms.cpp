@@ -4,30 +4,16 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/Assertions.h>
-#include <AK/Error.h>
-#include <AK/Format.h>
 #include <AK/Math.h>
-#include <AK/Optional.h>
 #include <AK/QuickSort.h>
-#include <AK/Variant.h>
-#include <LibGC/Ptr.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/ArrayBuffer.h>
 #include <LibJS/Runtime/Completion.h>
 #include <LibJS/Runtime/DataView.h>
 #include <LibJS/Runtime/Date.h>
-#include <LibJS/Runtime/Object.h>
-#include <LibJS/Runtime/PrimitiveString.h>
-#include <LibJS/Runtime/PropertyKey.h>
-#include <LibJS/Runtime/Realm.h>
 #include <LibJS/Runtime/TypedArray.h>
 #include <LibJS/Runtime/VM.h>
-#include <LibJS/Runtime/Value.h>
-#include <LibWeb/Bindings/IDBCursorPrototype.h>
-#include <LibWeb/Bindings/IDBDatabasePrototype.h>
-#include <LibWeb/Bindings/IDBTransactionPrototype.h>
 #include <LibWeb/DOM/EventDispatcher.h>
 #include <LibWeb/FileAPI/Blob.h>
 #include <LibWeb/FileAPI/File.h>
@@ -37,7 +23,6 @@
 #include <LibWeb/IndexedDB/IDBCursor.h>
 #include <LibWeb/IndexedDB/IDBDatabase.h>
 #include <LibWeb/IndexedDB/IDBIndex.h>
-#include <LibWeb/IndexedDB/IDBKeyRange.h>
 #include <LibWeb/IndexedDB/IDBObjectStore.h>
 #include <LibWeb/IndexedDB/IDBRequest.h>
 #include <LibWeb/IndexedDB/IDBTransaction.h>
@@ -45,16 +30,11 @@
 #include <LibWeb/IndexedDB/Internal/Algorithms.h>
 #include <LibWeb/IndexedDB/Internal/ConnectionQueueHandler.h>
 #include <LibWeb/IndexedDB/Internal/Database.h>
-#include <LibWeb/IndexedDB/Internal/Key.h>
 #include <LibWeb/Infra/Strings.h>
 #include <LibWeb/Platform/EventLoopPlugin.h>
 #include <LibWeb/StorageAPI/StorageKey.h>
 #include <LibWeb/WebIDL/AbstractOperations.h>
 #include <LibWeb/WebIDL/Buffers.h>
-#include <LibWeb/WebIDL/DOMException.h>
-
-#undef IDB_DEBUG
-#define IDB_DEBUG true
 
 namespace Web::IndexedDB {
 
@@ -441,7 +421,6 @@ GC::Ref<IDBTransaction> upgrade_a_database(JS::Realm& realm, GC::Ref<IDBDatabase
     }));
 
     // 11. Wait for transaction to finish.
-    // NOTE: https://github.com/w3c/IndexedDB/issues/436
     HTML::main_thread_event_loop().spin_until(GC::create_function(realm.vm().heap(), [transaction]() {
         dbgln_if(IDB_DEBUG, "upgrade_a_database: waiting for step 11");
         return transaction->is_finished();
@@ -553,7 +532,6 @@ void abort_a_transaction(GC::Ref<IDBTransaction> transaction, GC::Ptr<WebIDL::DO
 {
     // NOTE: This is not spec'ed anywhere, but we need to know IF the transaction was aborted.
     transaction->set_aborted(true);
-
     dbgln_if(IDB_DEBUG, "abort_a_transaction: transaction {} is aborting", transaction->uuid());
 
     // FIXME: 1. All the changes made to the database by the transaction are reverted.
@@ -1433,6 +1411,212 @@ WebIDL::ExceptionOr<GC::Ptr<Key>> store_a_record_into_an_object_store(JS::Realm&
 
     // 6. Return key.
     return key;
+}
+
+// https://w3c.github.io/IndexedDB/#count-the-records-in-a-range
+JS::Value count_the_records_in_a_range(GC::Ref<ObjectStore> source, GC::Ref<IDBKeyRange> range)
+{
+    // 1. Let count be the number of records, if any, in source’s list of records with key in range.
+    auto count = source->count_records_in_range(range);
+
+    // 2. Return count.
+    return JS::Value(count);
+}
+
+// https://w3c.github.io/IndexedDB/#iterate-a-cursor
+GC::Ptr<IDBCursor> iterate_a_cursor(JS::Realm& realm, GC::Ref<IDBCursor> cursor, GC::Ptr<Key> key, GC::Ptr<Key> primary_key, u64 count)
+{
+    // 1. Let source be cursor’s source.
+    auto source = cursor->source();
+
+    // 2. Let direction be cursor’s direction.
+    auto direction = cursor->direction();
+
+    // 3. Assert: if primaryKey is given, source is an index and direction is "next" or "prev".
+    auto source_is_an_index = source.has<GC::Ref<Index>>();
+    auto source_is_an_object_store = source.has<GC::Ref<ObjectStore>>();
+    auto direction_is_next_or_prev = direction == Bindings::IDBCursorDirection::Next || direction == Bindings::IDBCursorDirection::Prev;
+    VERIFY(!primary_key || (source_is_an_index && direction_is_next_or_prev));
+
+    // 4. Let records be the list of records in source.
+    auto records = source.visit(
+        [](GC::Ref<ObjectStore> object_store) -> Vector<Record> {
+            return object_store->records();
+        },
+        [](GC::Ref<Index>) -> Vector<Record> {
+            VERIFY_NOT_REACHED();
+            // FIXME: return index->records();
+        });
+    // 5. Let range be cursor’s range.
+    auto range = cursor->range();
+
+    // 6. Let position be cursor’s position.
+    auto position = cursor->position();
+
+    // 7. Let object store position be cursor’s object store position.
+    auto object_store_position = cursor->object_store_position();
+
+    // 8. If count is not given, let count be 1.
+    // NOTE: This is handled by the default parameter
+
+    // 9. While count is greater than 0:
+    Optional<Record> found_record;
+    while (count > 0) {
+        // 1. Switch on direction:
+        switch (direction) {
+        case Bindings::IDBCursorDirection::Next: {
+            // Let found record be the first record in records which satisfy all of the following requirements:
+            for (auto const& record : records) {
+                auto key_is_defined = key != nullptr;
+                auto record_key_is_equal_to_key = key_is_defined ? Key::equals(record.key, *key) : false;
+                auto record_key_is_greater_than_key = key_is_defined ? Key::greater_than(record.key, *key) : false;
+                auto record_key_is_greater_or_equal_to_key = key_is_defined ? Key::greater_than(record.key, *key) || Key::equals(record.key, *key) : false;
+                auto is_primary_key_defined = primary_key != nullptr;
+                // FIXME: auto record_value_is_greater_or_equal_to_primary_key = is_primary_key_defined ? Key::greater_than(record.value, *primary_key) || Key::equals(record.value, *primary_key) : false;
+                auto record_value_is_greater_or_equal_to_primary_key = false;
+                auto position_is_defined = position != nullptr;
+                auto record_key_is_greater_than_position = position_is_defined ? Key::greater_than(record.key, *position) : false;
+                auto record_key_is_equal_to_position = position_is_defined ? Key::greater_than(record.key, *position) : false;
+                // FIXME: auto record_value_is_greater_than_object_store_position = object_store_position != nullptr && Key::greater_than(record.value, *object_store_position);
+                auto record_value_is_greater_than_object_store_position = false;
+
+                // * If key is defined, the record’s key is greater than or equal to key.
+                if (key_is_defined) {
+                    if (!record_key_is_greater_or_equal_to_key)
+                        continue;
+                }
+
+                // * If primaryKey is defined, the record’s key is equal to key and the record’s value is greater than or equal to primaryKey, or the record’s key is greater than key.
+                if (is_primary_key_defined) {
+                    if (!((record_key_is_equal_to_key && record_value_is_greater_or_equal_to_primary_key) || record_key_is_greater_than_key))
+                        continue;
+                }
+
+                // * If position is defined, and source is an object store, the record’s key is greater than position.
+                if (position_is_defined && source_is_an_object_store) {
+                    if (!record_key_is_greater_than_position)
+                        continue;
+                }
+
+                // * If position is defined, and source is an index, the record’s key is equal to position and the record’s value is greater than object store position or the record’s key is greater than position.
+                if (position_is_defined && source_is_an_index) {
+                    if (!((record_key_is_equal_to_position && record_value_is_greater_than_object_store_position) || record_key_is_greater_than_position))
+                        continue;
+                }
+
+                // * The record’s key is in range.
+                if (!range->is_in_range(record.key))
+                    continue;
+
+                found_record = record;
+                break;
+            }
+
+            break;
+        }
+        // FIXME:
+        case Bindings::IDBCursorDirection::Nextunique:
+        case Bindings::IDBCursorDirection::Prev:
+        case Bindings::IDBCursorDirection::Prevunique:
+        }
+
+        // 2. If found record is not defined, then:
+        if (!found_record.has_value()) {
+            // 1. Set cursor’s key to undefined.
+            cursor->set_key(nullptr);
+
+            // 2. If source is an index, set cursor’s object store position to undefined.
+            if (source_is_an_index)
+                cursor->set_object_store_position(nullptr);
+
+            // 3. If cursor’s key only flag is false, set cursor’s value to undefined.
+            if (!cursor->key_only())
+                cursor->set_value(JS::js_undefined());
+
+            // 4. Return null.
+            return nullptr;
+        }
+
+        // 3. Let position be found record’s key.
+        position = found_record->key;
+
+        // FIXME: 4. If source is an index, let object store position be found record’s value.
+        // if (source_is_an_index)
+        //     object_store_position = found_record->value;
+
+        // 5. Decrease count by 1.
+        count--;
+    }
+
+    // 10. Set cursor’s position to position.
+    cursor->set_position(position);
+
+    // 11. If source is an index, set cursor’s object store position to object store position.
+    if (source_is_an_index)
+        cursor->set_object_store_position(object_store_position);
+
+    // 12. Set cursor’s key to found record’s key.
+    cursor->set_key(found_record->key);
+
+    // 13. If cursor’s key only flag is false, then:
+    if (!cursor->key_only()) {
+        // 1. Let serialized be found record’s referenced value.
+        auto serialized = found_record->value;
+
+        // 2. Set cursor’s value to ! StructuredDeserialize(serialized, targetRealm)
+        cursor->set_value(MUST(HTML::structured_deserialize(realm.vm(), serialized, realm)));
+    }
+
+    // 14. Set cursor’s got value flag to true.
+    cursor->set_got_value(true);
+
+    // 15. Return cursor.
+    return cursor;
+}
+
+// https://w3c.github.io/IndexedDB/#retrieve-a-value-from-an-object-store
+WebIDL::ExceptionOr<JS::Value> retrieve_a_value_from_an_object_store(JS::Realm& realm, GC::Ref<ObjectStore> store, GC::Ref<IDBKeyRange> range)
+{
+    // 1. Let record be the first record in store’s list of records whose key is in range, if any.
+    auto record = store->first_in_range(range);
+
+    // 2. If record was not found, return undefined.
+    if (!record.has_value())
+        return JS::js_undefined();
+
+    // 3. Let serialized be record’s value. If an error occurs while reading the value from the underlying storage, return a newly created "NotReadableError" DOMException.
+    auto serialized = record->value;
+
+    // 4. Return ! StructuredDeserialize(serialized, targetRealm).
+    return MUST(HTML::structured_deserialize(realm.vm(), serialized, realm));
+}
+
+WebIDL::ExceptionOr<GC::Ref<IDBKeyRange>> convert_a_value_to_a_key_range(JS::Realm& realm, Optional<JS::Value> value, bool null_disallowed)
+{
+    // 1. If value is a key range, return value.
+    if (value.has_value() && value->is_object() && is<IDBKeyRange>(value->as_object())) {
+        return GC::Ref(static_cast<IDBKeyRange&>(value->as_object()));
+    }
+
+    // 2. If value is undefined or is null, then throw a "DataError" DOMException if null disallowed flag is true, or return an unbounded key range otherwise.
+    if (!value.has_value() || (value.has_value() && (value->is_undefined() || value->is_null()))) {
+        if (null_disallowed)
+            return WebIDL::DataError::create(realm, "Value is undefined or null"_string);
+
+        return IDBKeyRange::create(realm, {}, {}, false, false);
+    }
+
+    // 3. Let key be the result of converting a value to a key with value. Rethrow any exceptions.
+    auto maybe_key = TRY(convert_a_value_to_a_key(realm, *value));
+
+    // 4. If key is invalid, throw a "DataError" DOMException.
+    if (maybe_key.is_error())
+        return WebIDL::DataError::create(realm, "Value is invalid"_string);
+
+    auto key = maybe_key.release_value();
+
+    // 5. Return a key range containing only key.
+    return IDBKeyRange::create(realm, key, key, false, false);
 }
 
 }

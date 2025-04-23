@@ -25,22 +25,21 @@ public:
     virtual ~IDBKeyRange() override;
     [[nodiscard]] static GC::Ref<IDBKeyRange> create(JS::Realm&, GC::Ptr<Key> lower_bound, GC::Ptr<Key> upper_bound, bool lower_open, bool upper_open);
 
-    [[nodiscard]] static WebIDL::ExceptionOr<GC::Ref<IDBKeyRange>> only(JS::VM&, JS::Value);
-    [[nodiscard]] static WebIDL::ExceptionOr<GC::Ref<IDBKeyRange>> lower_bound(JS::VM&, JS::Value, bool);
-    [[nodiscard]] static WebIDL::ExceptionOr<GC::Ref<IDBKeyRange>> upper_bound(JS::VM&, JS::Value, bool);
-    [[nodiscard]] static WebIDL::ExceptionOr<GC::Ref<IDBKeyRange>> bound(JS::VM&, JS::Value, JS::Value, bool, bool);
-    [[nodiscard]] WebIDL::ExceptionOr<bool> includes(JS::Value);
+    [[nodiscard]] JS::Value lower() const;
+    [[nodiscard]] JS::Value upper() const;
+    bool lower_open() const { return m_lower_open; }
+    bool upper_open() const { return m_upper_open; }
+
+    static WebIDL::ExceptionOr<GC::Ref<IDBKeyRange>> only(JS::VM&, JS::Value);
+    static WebIDL::ExceptionOr<GC::Ref<IDBKeyRange>> lower_bound(JS::VM&, JS::Value, bool);
+    static WebIDL::ExceptionOr<GC::Ref<IDBKeyRange>> upper_bound(JS::VM&, JS::Value, bool);
+    static WebIDL::ExceptionOr<GC::Ref<IDBKeyRange>> bound(JS::VM&, JS::Value, JS::Value, bool, bool);
+    WebIDL::ExceptionOr<bool> includes(JS::Value);
 
     bool is_unbound() const { return m_lower_bound == nullptr && m_upper_bound == nullptr; }
     bool is_in_range(GC::Ref<Key>) const;
-   
-    [[nodiscard]] GC::Ptr<Key> lower_key() const { return m_lower_bound; }
-    [[nodiscard]] GC::Ptr<Key> upper_key() const { return m_upper_bound; }
-
-    [[nodiscard]] JS::Value lower() const;
-    [[nodiscard]] JS::Value upper() const;
-    [[nodiscard]] bool lower_open() const { return m_lower_open; }
-    [[nodiscard]] bool upper_open() const { return m_upper_open; }
+    GC::Ptr<Key> lower_key() const { return m_lower_bound; }
+    GC::Ptr<Key> upper_key() const { return m_upper_bound; }
 
 protected:
     explicit IDBKeyRange(JS::Realm&, GC::Ptr<Key> lower_bound, GC::Ptr<Key> upper_bound, bool lower_open, bool upper_open);

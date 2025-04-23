@@ -62,14 +62,15 @@ public:
     [[nodiscard]] ConnectionState state() const { return m_state; }
     [[nodiscard]] GC::Ref<Database> associated_database() { return m_associated_database; }
     [[nodiscard]] GC::Ref<HTML::DOMStringList> object_store_names();
-    [[nodiscard]] ReadonlySpan<GC::Ref<IDBTransaction>> created_transactions() { return m_created_transactions; }
-    void add_created_transaction(GC::Ref<IDBTransaction> transaction) { m_created_transactions.append(transaction); }
     [[nodiscard]] ReadonlySpan<GC::Ref<ObjectStore>> object_store_set() { return m_object_store_set; }
     void add_to_object_store_set(GC::Ref<ObjectStore> object_store) { m_object_store_set.append(object_store); }
     void remove_from_object_store_set(GC::Ref<ObjectStore> object_store)
     {
         m_object_store_set.remove_first_matching([&](auto& entry) { return entry == object_store; });
     }
+
+    [[nodiscard]] ReadonlySpan<GC::Ref<IDBTransaction>> transactions() { return m_transactions; }
+    void add_transaction(GC::Ref<IDBTransaction> transaction) { m_transactions.append(transaction); }
 
     WebIDL::ExceptionOr<GC::Ref<IDBObjectStore>> create_object_store(String const&, IDBObjectStoreParameters const&);
     WebIDL::ExceptionOr<void> delete_object_store(String const&);
@@ -112,7 +113,7 @@ private:
     GC::Ref<Database> m_associated_database;
 
     // NOTE: We need to keep track of what transactions are created using this connection
-    Vector<GC::Ref<IDBTransaction>> m_created_transactions;
+    Vector<GC::Ref<IDBTransaction>> m_transactions;
 
     // NOTE: Used for debug purposes
     String m_uuid;

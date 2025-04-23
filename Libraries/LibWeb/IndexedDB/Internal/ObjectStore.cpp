@@ -77,22 +77,6 @@ Optional<Record> ObjectStore::first_in_range(GC::Ref<IDBKeyRange> range)
     return {};
 }
 
-bool ObjectStore::has_record_with_key(GC::Ref<Key> key)
-{
-    auto index = m_records.find_if([&key](auto const& record) {
-        return record.key == key;
-    });
-
-    return index != m_records.end();
-}
-
-void ObjectStore::remove_records_in_range(GC::Ref<IDBKeyRange> range)
-{
-    m_records.remove_all_matching([&](auto const& record) {
-        return range->is_in_range(record.key);
-    });
-}
-
 u64 ObjectStore::count_records_in_range(GC::Ref<IDBKeyRange> range)
 {
     u64 count = 0;
@@ -101,16 +85,6 @@ u64 ObjectStore::count_records_in_range(GC::Ref<IDBKeyRange> range)
             ++count;
     }
     return count;
-}
-
-void ObjectStore::store_a_record(Record const& record)
-{
-    m_records.append(record);
-
-    // The record is stored in the object store’s list of records such that the list is sorted according to the key of the records in ascending order.
-    AK::quick_sort(m_records, [](auto const& a, auto const& b) {
-        return Key::compare_two_keys(a.key, b.key) < 0;
-    });
 }
 
 }
