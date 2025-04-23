@@ -25,9 +25,6 @@
 #include <LibWeb/IndexedDB/Internal/Key.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
 
-#undef IDB_DEBUG
-#define IDB_DEBUG true
-
 namespace Web::IndexedDB {
 
 GC_DEFINE_ALLOCATOR(IDBObjectStore);
@@ -101,7 +98,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::count(Optional<JS::Valu
     auto range = TRY(convert_a_value_to_a_key_range(realm, move(query)));
 
     // 6. Let operation be an algorithm to run count the records in a range with store and range.
-    auto operation = GC::Function<WebIDL::ExceptionOr<JS::Value>()>::create(realm.heap(), [&store, range] {
+    auto operation = GC::Function<WebIDL::ExceptionOr<JS::Value>()>::create(realm.heap(), [store, range] {
         return count_the_records_in_a_range(store, range);
     });
 
