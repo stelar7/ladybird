@@ -18,7 +18,7 @@
 
 namespace Web::IndexedDB {
 
-using CursorSource = Variant<GC::Ref<ObjectStore>, GC::Ref<Index>>;
+using CursorSource = Variant<GC::Ref<IDBObjectStore>, GC::Ref<IDBIndex>>;
 
 // https://w3c.github.io/IndexedDB/#cursor-interface
 class IDBCursor : public Bindings::PlatformObject {

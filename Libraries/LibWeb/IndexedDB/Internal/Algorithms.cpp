@@ -1433,20 +1433,21 @@ GC::Ptr<IDBCursor> iterate_a_cursor(JS::Realm& realm, GC::Ref<IDBCursor> cursor,
     auto direction = cursor->direction();
 
     // 3. Assert: if primaryKey is given, source is an index and direction is "next" or "prev".
-    auto source_is_an_index = source.has<GC::Ref<Index>>();
-    auto source_is_an_object_store = source.has<GC::Ref<ObjectStore>>();
+    auto source_is_an_index = source.has<GC::Ref<IDBIndex>>();
+    auto source_is_an_object_store = source.has<GC::Ref<IDBObjectStore>>();
     auto direction_is_next_or_prev = direction == Bindings::IDBCursorDirection::Next || direction == Bindings::IDBCursorDirection::Prev;
     VERIFY(!primary_key || (source_is_an_index && direction_is_next_or_prev));
 
     // 4. Let records be the list of records in source.
     auto records = source.visit(
-        [](GC::Ref<ObjectStore> object_store) -> Vector<Record> {
-            return object_store->records();
+        [](GC::Ref<IDBObjectStore> object_store) -> Vector<Record> {
+            return object_store->store()->records();
         },
-        [](GC::Ref<Index>) -> Vector<Record> {
+        [](GC::Ref<IDBIndex>) -> Vector<Record> {
             VERIFY_NOT_REACHED();
             // FIXME: return index->records();
         });
+
     // 5. Let range be cursor’s range.
     auto range = cursor->range();
 

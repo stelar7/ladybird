@@ -120,7 +120,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::open_cursor(JS::Value q
     auto transaction = this->transaction();
 
     // 2. Let store be this's object store.
-    auto store = this->store();
+    [[maybe_unused]] auto store = this->store();
 
     // FIXME: 3. If store has been deleted, throw an "InvalidStateError" DOMException.
 
@@ -133,7 +133,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::open_cursor(JS::Value q
 
     // 6. Let cursor be a new cursor with its transaction set to transaction, undefined position, direction set to direction,
     //    got value flag set to false, undefined key and value, source set to store, range set to range, and key only flag set to false.
-    auto cursor = IDBCursor::create(realm, transaction, {}, direction, false, {}, {}, store, range, false);
+    auto cursor = IDBCursor::create(realm, transaction, {}, direction, false, {}, {}, GC::Ref(*this), range, false);
 
     // 7. Let operation be an algorithm to run iterate a cursor with the current Realm record and cursor.
     auto operation = GC::Function<WebIDL::ExceptionOr<JS::Value>()>::create(realm.heap(), [&realm, cursor] {
