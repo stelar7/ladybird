@@ -173,8 +173,8 @@ EventSource::~EventSource() = default;
 
 void EventSource::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(EventSource);
+    Base::initialize(realm);
 
     auto& relevant_global = as<HTML::WindowOrWorkerGlobalScopeMixin>(HTML::relevant_global_object(*this));
     relevant_global.register_event_source({}, *this);
@@ -389,7 +389,7 @@ void EventSource::process_field(StringView field, StringView value)
 {
     // -> If the field name is "event"
     if (field == "event"sv) {
-        // Set the event type buffer to field value.
+        // Set the event type buffer to the field value.
         m_event_type = MUST(String::from_utf8(value));
     }
     // -> If the field name is "data"

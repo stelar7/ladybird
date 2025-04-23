@@ -95,7 +95,7 @@ void BlockFormattingContext::run(AvailableSpace const& available_space)
         // FIXME: this should take writing modes into consideration.
         auto legend_height = legend_state.border_box_height();
         auto new_y = -((legend_height) / 2) - fieldset_state.padding_top;
-        legend_state.set_content_offset({ legend_state.offset.x(), new_y });
+        legend_state.set_content_y(new_y);
 
         // If the computed value of 'inline-size' is 'auto',
         // then the used value is the fit-content inline size.
@@ -564,10 +564,6 @@ void BlockFormattingContext::layout_inline_children(BlockContainer const& block_
         block_container_state.set_content_width(used_width_px);
         block_container_state.set_content_height(context.automatic_content_height());
     }
-
-    // If we end up with remaining vertical clearance, we should make sure the next block is moved down accordingly.
-    if (context.vertical_float_clearance() > 0)
-        m_y_offset_of_current_block_container = context.vertical_float_clearance();
 }
 
 CSSPixels BlockFormattingContext::compute_auto_height_for_block_level_element(Box const& box, AvailableSpace const& available_space)
@@ -638,7 +634,7 @@ CSSPixels BlockFormattingContext::compute_auto_height_for_block_level_element(Bo
 static CSSPixels containing_block_height_to_resolve_percentage_in_quirks_mode(Box const& box, LayoutState const& state)
 {
     // https://quirks.spec.whatwg.org/#the-percentage-height-calculation-quirk
-    auto const* containing_block = box.containing_block();
+    auto containing_block = box.containing_block();
     while (containing_block) {
         // 1. Let element be the nearest ancestor containing block of element, if there is one.
         //    Otherwise, return the initial containing block.
@@ -909,38 +905,37 @@ BlockFormattingContext::DidIntroduceClearance BlockFormattingContext::clear_floa
     auto result = DidIntroduceClearance::No;
 
     auto clear_floating_boxes = [&](FloatSideData& float_side) {
-        if (!float_side.current_boxes.is_empty()) {
-            // NOTE: Floating boxes are globally relevant within this BFC, *but* their offset coordinates
-            //       are relative to their containing block.
-            //       This means that we have to first convert to a root-space Y coordinate before clearing,
-            //       and then convert back to a local Y coordinate when assigning the cleared offset to
-            //       the `child_box` layout state.
+        if (float_side.current_boxes.is_empty())
+            return;
 
-            // First, find the lowest margin box edge on this float side and calculate the Y offset just below it.
-            CSSPixels clearance_y_in_root = 0;
-            for (auto const& floating_box : float_side.current_boxes) {
-                auto floating_box_rect_in_root = margin_box_rect_in_ancestor_coordinate_space(floating_box.used_values, root());
-                clearance_y_in_root = max(clearance_y_in_root, floating_box_rect_in_root.bottom());
-            }
+        // NOTE: Floating boxes are globally relevant within this BFC, *but* their offset coordinates
+        //       are relative to their containing block.
+        //       This means that we have to first convert to a root-space Y coordinate before clearing,
+        //       and then convert back to a local Y coordinate when assigning the cleared offset to
+        //       the `child_box` layout state.
 
-            // Then, convert the clearance Y to a coordinate relative to the containing block of `child_box`.
-            CSSPixels clearance_y_in_containing_block = clearance_y_in_root;
-            for (auto* containing_block = child_box.containing_block(); containing_block && containing_block != &root(); containing_block = containing_block->containing_block())
-                clearance_y_in_containing_block -= m_state.get(*containing_block).offset.y();
+        // First, find the lowest margin box edge on this float side and calculate the Y offset just below it.
+        CSSPixels clearance_y_in_root = 0;
+        for (auto const& floating_box : float_side.current_boxes)
+            clearance_y_in_root = max(clearance_y_in_root, floating_box.margin_box_rect_in_root_coordinate_space.bottom());
 
-            if (inline_formatting_context.has_value()) {
-                if (clearance_y_in_containing_block > inline_formatting_context->vertical_float_clearance()) {
-                    result = DidIntroduceClearance::Yes;
-                    inline_formatting_context->set_vertical_float_clearance(clearance_y_in_containing_block);
-                }
-            } else if (clearance_y_in_containing_block > m_y_offset_of_current_block_container.value()) {
+        // Then, convert the clearance Y to a coordinate relative to the containing block of `child_box`.
+        CSSPixels clearance_y_in_containing_block = clearance_y_in_root;
+        for (auto containing_block = child_box.containing_block(); containing_block && containing_block != &root(); containing_block = containing_block->containing_block())
+            clearance_y_in_containing_block -= m_state.get(*containing_block).offset.y();
+
+        if (inline_formatting_context.has_value()) {
+            if (clearance_y_in_containing_block > inline_formatting_context->vertical_float_clearance()) {
                 result = DidIntroduceClearance::Yes;
-                m_y_offset_of_current_block_container = clearance_y_in_containing_block;
+                inline_formatting_context->set_vertical_float_clearance(clearance_y_in_containing_block);
             }
-
-            if (!child_box.is_floating())
-                float_side.clear();
+        } else if (clearance_y_in_containing_block > m_y_offset_of_current_block_container.value()) {
+            result = DidIntroduceClearance::Yes;
+            m_y_offset_of_current_block_container = clearance_y_in_containing_block;
         }
+
+        if (!child_box.is_floating())
+            float_side.clear();
     };
 
     if (computed_values.clear() == CSS::Clear::Left || computed_values.clear() == CSS::Clear::Both)
@@ -955,7 +950,7 @@ void BlockFormattingContext::place_block_level_element_in_normal_flow_vertically
 {
     auto& box_state = m_state.get_mutable(child_box);
     y += box_state.border_box_top();
-    box_state.set_content_offset(CSSPixelPoint { box_state.offset.x(), y });
+    box_state.set_content_y(y);
     for (auto const& float_box : m_left_floats.all_boxes)
         float_box->margin_box_rect_in_root_coordinate_space = margin_box_rect_in_ancestor_coordinate_space(float_box->used_values, root());
 
@@ -1004,7 +999,7 @@ void BlockFormattingContext::place_block_level_element_in_normal_flow_horizontal
         x += box_state.margin_box_left();
     }
 
-    box_state.set_content_offset({ x, box_state.offset.y() });
+    box_state.set_content_x(x);
 }
 
 void BlockFormattingContext::layout_viewport(AvailableSpace const& available_space)
@@ -1089,8 +1084,7 @@ void BlockFormattingContext::layout_floating_box(Box const& box, BlockContainer 
             // Walk all currently tracked floats on the side we're floating towards.
             // We're looking for the innermost preceding float that intersects vertically with `box`.
             for (auto& preceding_float : side_data.current_boxes.in_reverse()) {
-                auto const preceding_float_rect = margin_box_rect_in_ancestor_coordinate_space(preceding_float.used_values, root());
-                if (!preceding_float_rect.contains_vertically(y_in_root))
+                if (!preceding_float.margin_box_rect_in_root_coordinate_space.contains_vertically(y_in_root))
                     continue;
                 // We found a preceding float that intersects vertically with the current float.
                 // Now we need to find out if there's enough inline-axis space to stack them next to each other.

@@ -80,7 +80,7 @@ struct Containment {
     bool is_empty() const { return !(size_containment || inline_size_containment || layout_containment || style_containment || paint_containment); }
 };
 
-using CursorData = Variant<NonnullRefPtr<CursorStyleValue>, Cursor>;
+using CursorData = Variant<NonnullRefPtr<CursorStyleValue const>, Cursor>;
 
 using ListStyleType = Variant<CounterStyleNameKeyword, String>;
 
@@ -559,7 +559,7 @@ public:
 protected:
     struct {
         Color caret_color { InitialValues::caret_color() };
-        RefPtr<Gfx::FontCascadeList> font_list {};
+        RefPtr<Gfx::FontCascadeList const> font_list {};
         CSSPixels font_size { InitialValues::font_size() };
         int font_weight { InitialValues::font_weight() };
         Optional<Gfx::FontVariantAlternates> font_variant_alternates;
@@ -720,7 +720,7 @@ protected:
         Optional<MaskReference> mask;
         CSS::MaskType mask_type { InitialValues::mask_type() };
         Optional<ClipPathReference> clip_path;
-        RefPtr<CSS::AbstractImageStyleValue> mask_image;
+        RefPtr<CSS::AbstractImageStyleValue const> mask_image;
 
         LengthPercentage cx { InitialValues::cx() };
         LengthPercentage cy { InitialValues::cy() };
@@ -749,7 +749,7 @@ public:
 
     void set_aspect_ratio(AspectRatio aspect_ratio) { m_noninherited.aspect_ratio = move(aspect_ratio); }
     void set_caret_color(Color caret_color) { m_inherited.caret_color = caret_color; }
-    void set_font_list(NonnullRefPtr<Gfx::FontCascadeList> font_list) { m_inherited.font_list = move(font_list); }
+    void set_font_list(NonnullRefPtr<Gfx::FontCascadeList const> font_list) { m_inherited.font_list = move(font_list); }
     void set_font_size(CSSPixels font_size) { m_inherited.font_size = font_size; }
     void set_font_weight(int font_weight) { m_inherited.font_weight = font_weight; }
     void set_font_variant_alternates(Optional<Gfx::FontVariantAlternates> font_variant_alternates) { m_inherited.font_variant_alternates = font_variant_alternates; }

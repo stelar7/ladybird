@@ -231,11 +231,14 @@ Gfx::Path CanvasRenderingContext2D::text_path(StringView text, float x, float y,
         return {};
 
     auto& drawing_state = this->drawing_state();
-    auto font = current_font();
 
+    auto const& font_cascade_list = this->font_cascade_list();
+    auto const& font = font_cascade_list->first();
+    auto glyph_runs = Gfx::shape_text({ x, y }, Utf8View(text), *font_cascade_list);
     Gfx::Path path;
-    path.move_to({ x, y });
-    path.text(Utf8View { text }, *font);
+    for (auto const& glyph_run : glyph_runs) {
+        path.glyph_run(glyph_run);
+    }
 
     auto text_width = path.bounding_box().width();
     Gfx::AffineTransform transform = {};
@@ -268,10 +271,10 @@ Gfx::Path CanvasRenderingContext2D::text_path(StringView text, float x, float y,
     //        https://html.spec.whatwg.org/multipage/canvas.html#dom-context-2d-textbaseline-hanging
     // Default baseline of draw_text is top so do nothing by CanvasTextBaseline::Top and CanvasTextBaseline::Hanging
     if (drawing_state.text_baseline == Bindings::CanvasTextBaseline::Middle) {
-        transform = Gfx::AffineTransform {}.set_translation({ 0, font->pixel_size() / 2 }).multiply(transform);
+        transform = Gfx::AffineTransform {}.set_translation({ 0, font.pixel_size() / 2 }).multiply(transform);
     }
     if (drawing_state.text_baseline == Bindings::CanvasTextBaseline::Top || drawing_state.text_baseline == Bindings::CanvasTextBaseline::Hanging) {
-        transform = Gfx::AffineTransform {}.set_translation({ 0, font->pixel_size() }).multiply(transform);
+        transform = Gfx::AffineTransform {}.set_translation({ 0, font.pixel_size() }).multiply(transform);
     }
 
     return path.copy_transformed(transform);
@@ -329,10 +332,16 @@ void CanvasRenderingContext2D::stroke_internal(Gfx::Path const& path)
 
     auto& state = drawing_state();
 
-    // FIXME: Honor state's miter_limit, dash_list, and line_dash_offset.
     auto line_cap = to_gfx_cap(state.line_cap);
     auto line_join = to_gfx_join(state.line_join);
-    painter->stroke_path(path, state.stroke_style.to_gfx_paint_style(), state.filters, state.line_width, state.global_alpha, state.current_compositing_and_blending_operator, line_cap, line_join);
+    // FIXME: Need a Vector<float> for rendering dash_array, but state.dash_list is Vector<double>.
+    // Maybe possible to avoid creating copies?
+    auto dash_array = Vector<float> {};
+    dash_array.ensure_capacity(state.dash_list.size());
+    for (auto const& dash : state.dash_list) {
+        dash_array.append(static_cast<float>(dash));
+    }
+    painter->stroke_path(path, state.stroke_style.to_gfx_paint_style(), state.filters, state.line_width, state.global_alpha, state.current_compositing_and_blending_operator, line_cap, line_join, state.miter_limit, dash_array, state.line_dash_offset);
 
     did_draw(path.bounding_box());
 }
@@ -470,7 +479,7 @@ WebIDL::ExceptionOr<GC::Ptr<ImageData>> CanvasRenderingContext2D::get_image_data
 }
 
 // https://html.spec.whatwg.org/multipage/canvas.html#dom-context-2d-putimagedata-short
-void CanvasRenderingContext2D::put_image_data(ImageData const& image_data, float x, float y)
+void CanvasRenderingContext2D::put_image_data(ImageData& image_data, float x, float y)
 {
     // The putImageData(imageData, dx, dy) method steps are to put pixels from an ImageData onto a bitmap,
     // given imageData, this's output bitmap, dx, dy, 0, 0, imageData's width, and imageData's height.
@@ -524,7 +533,7 @@ GC::Ref<TextMetrics> CanvasRenderingContext2D::measure_text(StringView text)
     auto prepared_text = prepare_text(text);
     auto metrics = TextMetrics::create(realm());
     // FIXME: Use the font that was used to create the glyphs in prepared_text.
-    auto font = current_font();
+    auto const& font = font_cascade_list()->first();
 
     // width attribute: The width of that inline box, in CSS pixels. (The text's advance width.)
     metrics->set_width(prepared_text.bounding_box.width());
@@ -533,19 +542,19 @@ GC::Ref<TextMetrics> CanvasRenderingContext2D::measure_text(StringView text)
     // actualBoundingBoxRight attribute: The distance parallel to the baseline from the alignment point given by the textAlign attribute to the right side of the bounding rectangle of the given text, in CSS pixels; positive numbers indicating a distance going right from the given alignment point.
     metrics->set_actual_bounding_box_right(prepared_text.bounding_box.right());
     // fontBoundingBoxAscent attribute: The distance from the horizontal line indicated by the textBaseline attribute to the ascent metric of the first available font, in CSS pixels; positive numbers indicating a distance going up from the given baseline.
-    metrics->set_font_bounding_box_ascent(font->baseline());
+    metrics->set_font_bounding_box_ascent(font.baseline());
     // fontBoundingBoxDescent attribute: The distance from the horizontal line indicated by the textBaseline attribute to the descent metric of the first available font, in CSS pixels; positive numbers indicating a distance going down from the given baseline.
-    metrics->set_font_bounding_box_descent(prepared_text.bounding_box.height() - font->baseline());
+    metrics->set_font_bounding_box_descent(prepared_text.bounding_box.height() - font.baseline());
     // actualBoundingBoxAscent attribute: The distance from the horizontal line indicated by the textBaseline attribute to the top of the bounding rectangle of the given text, in CSS pixels; positive numbers indicating a distance going up from the given baseline.
-    metrics->set_actual_bounding_box_ascent(font->baseline());
+    metrics->set_actual_bounding_box_ascent(font.baseline());
     // actualBoundingBoxDescent attribute: The distance from the horizontal line indicated by the textBaseline attribute to the bottom of the bounding rectangle of the given text, in CSS pixels; positive numbers indicating a distance going down from the given baseline.
-    metrics->set_actual_bounding_box_descent(prepared_text.bounding_box.height() - font->baseline());
+    metrics->set_actual_bounding_box_descent(prepared_text.bounding_box.height() - font.baseline());
     // emHeightAscent attribute: The distance from the horizontal line indicated by the textBaseline attribute to the highest top of the em squares in the inline box, in CSS pixels; positive numbers indicating that the given baseline is below the top of that em square (so this value will usually be positive). Zero if the given baseline is the top of that em square; half the font size if the given baseline is the middle of that em square.
-    metrics->set_em_height_ascent(font->baseline());
+    metrics->set_em_height_ascent(font.baseline());
     // emHeightDescent attribute: The distance from the horizontal line indicated by the textBaseline attribute to the lowest bottom of the em squares in the inline box, in CSS pixels; positive numbers indicating that the given baseline is above the bottom of that em square. (Zero if the given baseline is the bottom of that em square.)
-    metrics->set_em_height_descent(prepared_text.bounding_box.height() - font->baseline());
+    metrics->set_em_height_descent(prepared_text.bounding_box.height() - font.baseline());
     // hangingBaseline attribute: The distance from the horizontal line indicated by the textBaseline attribute to the hanging baseline of the inline box, in CSS pixels; positive numbers indicating that the given baseline is below the hanging baseline. (Zero if the given baseline is the hanging baseline.)
-    metrics->set_hanging_baseline(font->baseline());
+    metrics->set_hanging_baseline(font.baseline());
     // alphabeticBaseline attribute: The distance from the horizontal line indicated by the textBaseline attribute to the alphabetic baseline of the inline box, in CSS pixels; positive numbers indicating that the given baseline is below the alphabetic baseline. (Zero if the given baseline is the alphabetic baseline.)
     metrics->set_font_bounding_box_ascent(0);
     // ideographicBaseline attribute: The distance from the horizontal line indicated by the textBaseline attribute to the ideographic-under baseline of the inline box, in CSS pixels; positive numbers indicating that the given baseline is below the ideographic-under baseline. (Zero if the given baseline is the ideographic-under baseline.)
@@ -554,7 +563,7 @@ GC::Ref<TextMetrics> CanvasRenderingContext2D::measure_text(StringView text)
     return metrics;
 }
 
-RefPtr<Gfx::Font const> CanvasRenderingContext2D::current_font()
+RefPtr<Gfx::FontCascadeList const> CanvasRenderingContext2D::font_cascade_list()
 {
     // When font style value is empty load default font
     if (!drawing_state().font_style_value) {
@@ -562,7 +571,7 @@ RefPtr<Gfx::Font const> CanvasRenderingContext2D::current_font()
     }
 
     // Get current loaded font
-    return drawing_state().current_font;
+    return drawing_state().current_font_cascade_list;
 }
 
 // https://html.spec.whatwg.org/multipage/canvas.html#text-preparation-algorithm
@@ -581,7 +590,7 @@ CanvasRenderingContext2D::PreparedText CanvasRenderingContext2D::prepare_text(By
     auto replaced_text = MUST(builder.to_string());
 
     // 3. Let font be the current font of target, as given by that object's font attribute.
-    auto font = current_font();
+    auto glyph_runs = Gfx::shape_text({ 0, 0 }, Utf8View(replaced_text), *font_cascade_list());
 
     // FIXME: 4. Let language be the target's language.
     // FIXME: 5. If language is "inherit":
@@ -605,7 +614,12 @@ CanvasRenderingContext2D::PreparedText CanvasRenderingContext2D::prepare_text(By
     // ...and with all other properties set to their initial values.
     // FIXME: Actually use a LineBox here instead of, you know, using the default font and measuring its size (which is not the spec at all).
     // FIXME: Once we have CanvasTextDrawingStyles, add the CSS attributes.
-    size_t height = font->pixel_size();
+    float height = 0;
+    float width = 0;
+    for (auto const& glyph_run : glyph_runs) {
+        height = max(height, glyph_run->font().pixel_size());
+        width += glyph_run->width();
+    }
 
     // 9. If maxWidth was provided and the hypothetical width of the inline box in the hypothetical line box is greater than maxWidth CSS pixels, then change font to have a more condensed font (if one is available or if a reasonably readable one can be synthesized by applying a horizontal scale factor to the font) or a smaller font, and return to the previous step.
     // FIXME: Record the font size used for this piece of text, and actually retry with a smaller size if needed.
@@ -613,15 +627,11 @@ CanvasRenderingContext2D::PreparedText CanvasRenderingContext2D::prepare_text(By
     // FIXME: 10. The anchor point is a point on the inline box, and the physical alignment is one of the values left, right,
     //            and center. These variables are determined by the textAlign and textBaseline values as follows:
     //            ...
-    Gfx::FloatPoint anchor { 0, 0 };
-    auto physical_alignment = Gfx::TextAlignment::CenterLeft;
-
-    auto glyph_run = Gfx::shape_text(anchor, 0, replaced_text.code_points(), *font, Gfx::GlyphRun::TextType::Ltr, {});
 
     // 11. Let result be an array constructed by iterating over each glyph in the inline box from left to right (if
     //     any), adding to the array, for each glyph, the shape of the glyph as it is in the inline box, positioned on
     //     a coordinate space using CSS pixels with its origin is at the anchor point.
-    PreparedText prepared_text { glyph_run, physical_alignment, { 0, 0, static_cast<int>(glyph_run->width()), static_cast<int>(height) } };
+    PreparedText prepared_text { move(glyph_runs), Gfx::TextAlignment::CenterLeft, { 0, 0, width, height } };
 
     // 12. Return result, physical alignment, and the inline box.
     return prepared_text;

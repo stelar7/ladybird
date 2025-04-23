@@ -69,7 +69,7 @@ static void update_function_name(Value value, FlyString const& name)
     if (!value.is_function())
         return;
     auto& function = value.as_function();
-    if (is<ECMAScriptFunctionObject>(function) && function.name().is_empty())
+    if (is<ECMAScriptFunctionObject>(function) && static_cast<ECMAScriptFunctionObject const&>(function).name().is_empty())
         static_cast<ECMAScriptFunctionObject&>(function).set_name(name);
 }
 
@@ -1378,19 +1378,17 @@ void TryStatement::dump(int indent) const
 void CatchClause::dump(int indent) const
 {
     print_indent(indent);
+    outln("CatchClause");
     m_parameter.visit(
-        [&](FlyString const& parameter) {
-            if (parameter.is_empty())
-                outln("CatchClause");
-            else
-                outln("CatchClause ({})", parameter);
+        [&](NonnullRefPtr<Identifier const> const& parameter) {
+            parameter->dump(indent + 1);
         },
         [&](NonnullRefPtr<BindingPattern const> const& pattern) {
-            outln("CatchClause");
             print_indent(indent);
             outln("(Parameter)");
             pattern->dump(indent + 2);
-        });
+        },
+        [&](Empty) {});
 
     body().dump(indent + 1);
 }

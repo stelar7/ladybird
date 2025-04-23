@@ -26,6 +26,7 @@
 #include <LibWeb/CSS/StyleSheetList.h>
 #include <LibWeb/Cookie/Cookie.h>
 #include <LibWeb/DOM/ParentNode.h>
+#include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/CrossOrigin/OpenerPolicy.h>
 #include <LibWeb/HTML/DocumentReadyState.h>
@@ -252,8 +253,9 @@ public:
 
     virtual FlyString node_name() const override { return "#document"_fly_string; }
 
-    void invalidate_style_for_elements_affected_by_hover_change(Node& old_new_hovered_common_ancestor, GC::Ptr<Node> hovered_node);
-    void set_hovered_node(Node*);
+    void invalidate_style_for_elements_affected_by_pseudo_class_change(CSS::PseudoClass, auto& element_slot, Node& old_new_common_ancestor, auto node);
+
+    void set_hovered_node(GC::Ptr<Node>);
     Node* hovered_node() { return m_hovered_node.ptr(); }
     Node const* hovered_node() const { return m_hovered_node.ptr(); }
 
@@ -426,14 +428,13 @@ public:
     Element* focused_element() { return m_focused_element.ptr(); }
     Element const* focused_element() const { return m_focused_element.ptr(); }
 
-    void set_focused_element(Element*);
+    void set_focused_element(GC::Ptr<Element>);
 
     Element const* active_element() const { return m_active_element.ptr(); }
-
-    void set_active_element(Element*);
+    void set_active_element(GC::Ptr<Element>);
 
     Element const* target_element() const { return m_target_element.ptr(); }
-    void set_target_element(Element*);
+    void set_target_element(GC::Ptr<Element>);
 
     void try_to_scroll_to_the_fragment();
     void scroll_to_the_fragment();
@@ -498,7 +499,8 @@ public:
 
     String dump_dom_tree_as_json() const;
 
-    bool has_a_style_sheet_that_is_blocking_scripts() const;
+    [[nodiscard]] bool has_a_style_sheet_that_is_blocking_scripts() const;
+    [[nodiscard]] bool has_no_style_sheet_that_is_blocking_scripts() const;
 
     bool is_fully_active() const;
     bool is_active() const;
@@ -546,6 +548,7 @@ public:
     void unregister_viewport_client(ViewportClient&);
     void inform_all_viewport_clients_about_the_current_viewport_rect();
 
+    bool has_focus_for_bindings() const;
     bool has_focus() const;
 
     bool allow_focus() const;
@@ -895,6 +898,9 @@ public:
 
     ElementByIdMap& element_by_id() const;
 
+    auto& script_blocking_style_sheet_set() { return m_script_blocking_style_sheet_set; }
+    auto const& script_blocking_style_sheet_set() const { return m_script_blocking_style_sheet_set; }
+
 protected:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
@@ -1028,8 +1034,8 @@ private:
     // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#throw-on-dynamic-markup-insertion-counter
     u32 m_throw_on_dynamic_markup_insertion_counter { 0 };
 
-    // https://html.spec.whatwg.org/multipage/semantics.html#script-blocking-style-sheet-counter
-    u32 m_script_blocking_style_sheet_counter { 0 };
+    // https://html.spec.whatwg.org/multipage/semantics.html#script-blocking-style-sheet-set
+    HashTable<GC::Ref<DOM::Element>> m_script_blocking_style_sheet_set;
 
     GC::Ptr<HTML::History> m_history;
 
@@ -1180,7 +1186,7 @@ private:
 
     mutable GC::Ptr<WebIDL::ObservableArray> m_adopted_style_sheets;
 
-    Vector<GC::Ref<DOM::ShadowRoot>> m_shadow_roots;
+    ShadowRoot::DocumentShadowRootList m_shadow_roots;
 
     Optional<Core::DateTime> m_last_modified;
 

@@ -97,7 +97,7 @@ public:
     void draw_painting_surface(Gfx::IntRect const& dst_rect, NonnullRefPtr<Gfx::PaintingSurface>, Gfx::IntRect const& src_rect, Gfx::ScalingMode scaling_mode = Gfx::ScalingMode::NearestNeighbor);
     void draw_scaled_immutable_bitmap(Gfx::IntRect const& dst_rect, Gfx::IntRect const& clip_rect, Gfx::ImmutableBitmap const& bitmap, Gfx::ScalingMode scaling_mode = Gfx::ScalingMode::NearestNeighbor);
 
-    void draw_repeated_immutable_bitmap(Gfx::IntRect dst_rect, Gfx::IntRect clip_rect, NonnullRefPtr<Gfx::ImmutableBitmap> bitmap, Gfx::ScalingMode scaling_mode, DrawRepeatedImmutableBitmap::Repeat);
+    void draw_repeated_immutable_bitmap(Gfx::IntRect dst_rect, Gfx::IntRect clip_rect, NonnullRefPtr<Gfx::ImmutableBitmap const> bitmap, Gfx::ScalingMode scaling_mode, DrawRepeatedImmutableBitmap::Repeat);
 
     void draw_line(Gfx::IntPoint from, Gfx::IntPoint to, Color color, int thickness = 1, Gfx::LineStyle style = Gfx::LineStyle::Solid, Color alternate_color = Color::Transparent);
 
@@ -129,7 +129,7 @@ public:
     void push_stacking_context(PushStackingContextParams params);
     void pop_stacking_context();
 
-    void paint_nested_display_list(RefPtr<DisplayList> display_list, Gfx::IntRect rect);
+    void paint_nested_display_list(RefPtr<DisplayList> display_list, ScrollStateSnapshot&&, Gfx::IntRect rect);
 
     void add_rounded_rect_clip(CornerRadii corner_radii, Gfx::IntRect border_rect, CornerClip corner_clip);
     void add_mask(RefPtr<DisplayList> display_list, Gfx::IntRect rect);
@@ -146,7 +146,7 @@ public:
 
     void draw_triangle_wave(Gfx::IntPoint a_p1, Gfx::IntPoint a_p2, Color color, int amplitude, int thickness);
 
-    void paint_scrollbar(int scroll_frame_id, Gfx::IntRect, CSSPixelFraction scroll_size, bool vertical);
+    void paint_scrollbar(int scroll_frame_id, Gfx::IntRect gutter_rect, Gfx::IntRect thumb_rect, CSSPixelFraction scroll_size, bool vertical);
 
     void apply_opacity(float opacity);
     void apply_compositing_and_blending_operator(Gfx::CompositingAndBlendingOperator compositing_and_blending_operator);

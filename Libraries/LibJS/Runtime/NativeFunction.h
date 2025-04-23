@@ -34,7 +34,7 @@ public:
     virtual ThrowCompletionOr<Value> call();
     virtual ThrowCompletionOr<GC::Ref<Object>> construct(FunctionObject& new_target);
 
-    virtual FlyString const& name() const override { return m_name; }
+    FlyString const& name() const { return m_name; }
     virtual bool is_strict_mode() const override;
     virtual bool has_constructor() const override { return false; }
     virtual Realm* realm() const override { return m_realm; }
@@ -44,8 +44,8 @@ public:
 
 protected:
     NativeFunction(FlyString name, Object& prototype);
-    NativeFunction(GC::Ptr<GC::Function<ThrowCompletionOr<Value>(VM&)>>, Object* prototype, Realm& realm);
-    NativeFunction(FlyString name, GC::Ptr<GC::Function<ThrowCompletionOr<Value>(VM&)>>, Object& prototype);
+    NativeFunction(AK::Function<ThrowCompletionOr<Value>(VM&)>, Object* prototype, Realm& realm);
+    NativeFunction(FlyString name, AK::Function<ThrowCompletionOr<Value>(VM&)>, Object& prototype);
     explicit NativeFunction(Object& prototype);
 
     virtual void initialize(Realm&) override;
@@ -57,7 +57,7 @@ private:
     FlyString m_name;
     GC::Ptr<PrimitiveString> m_name_string;
     Optional<FlyString> m_initial_name; // [[InitialName]]
-    GC::Ptr<GC::Function<ThrowCompletionOr<Value>(VM&)>> m_native_function;
+    AK::Function<ThrowCompletionOr<Value>(VM&)> m_native_function;
     GC::Ptr<Realm> m_realm;
 };
 

@@ -30,8 +30,8 @@ CSSFontFaceDescriptors::~CSSFontFaceDescriptors() = default;
 
 void CSSFontFaceDescriptors::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(CSSFontFaceDescriptors);
+    Base::initialize(realm);
 }
 
 // https://drafts.csswg.org/cssom/#dom-cssstyledeclaration-length
@@ -100,7 +100,7 @@ WebIDL::ExceptionOr<void> CSSFontFaceDescriptors::set_property(StringView proper
         return {};
 
     // 5. Let component value list be the result of parsing value for property property.
-    RefPtr<CSSStyleValue> component_value_list = parse_css_descriptor(Parser::ParsingParams {}, AtRuleID::FontFace, *descriptor_id, value);
+    RefPtr<CSSStyleValue const> component_value_list = parse_css_descriptor(Parser::ParsingParams {}, AtRuleID::FontFace, *descriptor_id, value);
 
     // 6. If component value list is null, then return.
     if (!component_value_list)
@@ -234,7 +234,7 @@ WebIDL::ExceptionOr<void> CSSFontFaceDescriptors::set_css_text(StringView value)
 
     // 3. Parse the given value and, if the return value is not the empty list, insert the items in the list into the
     //    declarations, in specified order.
-    auto descriptors = parse_css_list_of_descriptors(Parser::ParsingParams {}, AtRuleID::FontFace, value);
+    auto descriptors = parse_css_descriptor_declaration_block(Parser::ParsingParams {}, AtRuleID::FontFace, value);
     if (!descriptors.is_empty())
         m_descriptors = move(descriptors);
 

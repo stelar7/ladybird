@@ -27,6 +27,7 @@ IDBTransaction::IDBTransaction(JS::Realm& realm, GC::Ref<IDBDatabase> connection
 {
     connection->add_created_transaction(*this);
     m_uuid = MUST(Crypto::generate_random_uuid());
+    connection->add_transaction(*this);
 }
 
 GC::Ref<IDBTransaction> IDBTransaction::create(JS::Realm& realm, GC::Ref<IDBDatabase> connection, Bindings::IDBTransactionMode mode, Bindings::IDBTransactionDurability durability = Bindings::IDBTransactionDurability::Default, Vector<GC::Ref<ObjectStore>> scopes = {})
@@ -36,8 +37,8 @@ GC::Ref<IDBTransaction> IDBTransaction::create(JS::Realm& realm, GC::Ref<IDBData
 
 void IDBTransaction::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(IDBTransaction);
+    Base::initialize(realm);
 }
 
 void IDBTransaction::visit_edges(Visitor& visitor)
@@ -94,16 +95,6 @@ WebIDL::ExceptionOr<void> IDBTransaction::abort()
     return {};
 }
 
-GC::Ptr<ObjectStore> IDBTransaction::object_store_named(String const& name) const
-{
-    for (auto const& store : m_scope) {
-        if (store->name() == name)
-            return GC::Ref(*store);
-    }
-
-    return nullptr;
-}
-
 // https://w3c.github.io/IndexedDB/#dom-idbtransaction-objectstore
 WebIDL::ExceptionOr<GC::Ref<IDBObjectStore>> IDBTransaction::object_store(String const& name)
 {
@@ -137,13 +128,44 @@ GC::Ref<HTML::DOMStringList> IDBTransaction::object_store_names()
 // https://w3c.github.io/IndexedDB/#dom-idbtransaction-commit
 WebIDL::ExceptionOr<void> IDBTransaction::commit()
 {
+    auto& realm = this->realm();
+
     // 1. If this's state is not active, then throw an "InvalidStateError" DOMException.
     if (m_state != TransactionState::Active)
-        return WebIDL::InvalidStateError::create(realm(), "Transaction is not active while commiting"_string);
+        return WebIDL::InvalidStateError::create(realm, "Transaction is not active while commiting"_string);
 
     // 2. Run commit a transaction with this.
-    commit_a_transaction(realm(), *this);
+    commit_a_transaction(realm, *this);
+
     return {};
+}
+
+GC::Ptr<ObjectStore> IDBTransaction::object_store_named(String const& name) const
+{
+    for (auto const& store : m_scope) {
+        if (store->name() == name)
+            return store;
+    }
+
+    return nullptr;
+}
+
+// https://w3c.github.io/IndexedDB/#dom-idbtransaction-objectstore
+WebIDL::ExceptionOr<GC::Ref<IDBObjectStore>> IDBTransaction::object_store(String const& name)
+{
+    auto& realm = this->realm();
+
+    // 1. If this's state is finished, then throw an "InvalidStateError" DOMException.
+    if (m_state == TransactionState::Finished)
+        return WebIDL::InvalidStateError::create(realm, "Transaction is finished"_string);
+
+    // 2. Let store be the object store named name in this's scope, or throw a "NotFoundError" DOMException if none.
+    auto store = object_store_named(name);
+    if (!store)
+        return WebIDL::NotFoundError::create(realm, "Object store not found in transactions scope"_string);
+
+    // 3. Return an object store handle associated with store and this.
+    return IDBObjectStore::create(realm, *store, *this);
 }
 
 }

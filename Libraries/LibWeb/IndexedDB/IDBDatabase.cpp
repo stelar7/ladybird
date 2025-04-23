@@ -38,8 +38,8 @@ GC::Ref<IDBDatabase> IDBDatabase::create(JS::Realm& realm, Database& db)
 
 void IDBDatabase::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(IDBDatabase);
+    Base::initialize(realm);
 }
 
 void IDBDatabase::visit_edges(Visitor& visitor)
@@ -47,6 +47,7 @@ void IDBDatabase::visit_edges(Visitor& visitor)
     Base::visit_edges(visitor);
     visitor.visit(m_object_store_set);
     visitor.visit(m_associated_database);
+    visitor.visit(m_transactions);
 }
 
 void IDBDatabase::set_onabort(WebIDL::CallbackType* event_handler)
@@ -178,7 +179,7 @@ WebIDL::ExceptionOr<void> IDBDatabase::delete_object_store(String const& name)
     // 4. Let store be the object store named name in database, or throw a "NotFoundError" DOMException if none.
     auto store = database->object_store_with_name(name);
     if (!store)
-        return WebIDL::NotFoundError::create(realm, "Object store not found"_string);
+        return WebIDL::NotFoundError::create(realm, "Object store not found while trying to delete"_string);
 
     // 5. Remove store from this's object store set.
     remove_from_object_store_set(*store);

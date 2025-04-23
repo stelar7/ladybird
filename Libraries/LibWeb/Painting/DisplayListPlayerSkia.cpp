@@ -22,7 +22,7 @@
 #include <gpu/ganesh/SkSurfaceGanesh.h>
 #include <pathops/SkPathOps.h>
 
-#include <LibGfx/Font/ScaledFont.h>
+#include <LibGfx/Font/Font.h>
 #include <LibGfx/PainterSkia.h>
 #include <LibGfx/PathSkia.h>
 #include <LibGfx/SkiaUtils.h>
@@ -77,7 +77,7 @@ void DisplayListPlayerSkia::flush()
 
 void DisplayListPlayerSkia::draw_glyph_run(DrawGlyphRun const& command)
 {
-    auto const& gfx_font = static_cast<Gfx::ScaledFont const&>(command.glyph_run->font());
+    auto const& gfx_font = command.glyph_run->font();
     auto sk_font = gfx_font.skia_font(command.scale);
 
     auto glyph_count = command.glyph_run->glyphs().size();
@@ -663,7 +663,6 @@ void DisplayListPlayerSkia::stroke_path_using_color(StrokePathUsingColor const& 
     if (!command.thickness)
         return;
 
-    // FIXME: Use .miter_limit, .dash_array, .dash_offset.
     auto& canvas = surface().canvas();
     SkPaint paint;
     paint.setAntiAlias(true);
@@ -672,6 +671,8 @@ void DisplayListPlayerSkia::stroke_path_using_color(StrokePathUsingColor const& 
     paint.setStrokeCap(to_skia_cap(command.cap_style));
     paint.setStrokeJoin(to_skia_join(command.join_style));
     paint.setColor(to_skia_color(command.color));
+    paint.setStrokeMiter(command.miter_limit);
+    paint.setPathEffect(SkDashPathEffect::Make(command.dash_array.data(), command.dash_array.size(), command.dash_offset));
     auto path = to_skia_path(command.path);
     path.offset(command.aa_translation.x(), command.aa_translation.y());
     canvas.drawPath(path, paint);
@@ -683,7 +684,6 @@ void DisplayListPlayerSkia::stroke_path_using_paint_style(StrokePathUsingPaintSt
     if (!command.thickness)
         return;
 
-    // FIXME: Use .miter_limit, .dash_array, .dash_offset.
     auto path = to_skia_path(command.path);
     path.offset(command.aa_translation.x(), command.aa_translation.y());
     auto paint = paint_style_to_skia_paint(*command.paint_style, command.bounding_rect().to_type<float>());
@@ -693,6 +693,8 @@ void DisplayListPlayerSkia::stroke_path_using_paint_style(StrokePathUsingPaintSt
     paint.setStrokeWidth(command.thickness);
     paint.setStrokeCap(to_skia_cap(command.cap_style));
     paint.setStrokeJoin(to_skia_join(command.join_style));
+    paint.setStrokeMiter(command.miter_limit);
+    paint.setPathEffect(SkDashPathEffect::Make(command.dash_array.data(), command.dash_array.size(), command.dash_offset));
     surface().canvas().drawPath(path, paint);
 }
 
@@ -972,7 +974,8 @@ void DisplayListPlayerSkia::add_mask(AddMask const& command)
 
     auto mask_surface = Gfx::PaintingSurface::create_with_size(m_context, rect.size(), Gfx::BitmapFormat::BGRA8888, Gfx::AlphaType::Premultiplied);
 
-    execute_impl(*command.display_list, mask_surface);
+    ScrollStateSnapshot scroll_state_snapshot;
+    execute_impl(*command.display_list, scroll_state_snapshot, mask_surface);
 
     SkMatrix mask_matrix;
     mask_matrix.setTranslate(rect.x(), rect.y());
@@ -985,28 +988,36 @@ void DisplayListPlayerSkia::paint_nested_display_list(PaintNestedDisplayList con
 {
     auto& canvas = surface().canvas();
     canvas.translate(command.rect.x(), command.rect.y());
-    execute_impl(*command.display_list, {});
+    execute_impl(*command.display_list, command.scroll_state_snapshot, {});
 }
 
 void DisplayListPlayerSkia::paint_scrollbar(PaintScrollBar const& command)
 {
-    auto rect = to_skia_rect(command.rect);
-    auto radius = rect.width() / 2;
-    auto rrect = SkRRect::MakeRectXY(rect, radius, radius);
+    auto gutter_rect = to_skia_rect(command.gutter_rect);
+
+    auto thumb_rect = to_skia_rect(command.thumb_rect);
+    auto radius = thumb_rect.width() / 2;
+    auto thumb_rrect = SkRRect::MakeRectXY(thumb_rect, radius, radius);
 
     auto& canvas = surface().canvas();
 
-    auto fill_color = Color(Color::NamedColor::DarkGray).with_alpha(128);
-    SkPaint fill_paint;
-    fill_paint.setColor(to_skia_color(fill_color));
-    canvas.drawRRect(rrect, fill_paint);
+    auto gutter_fill_color = Color(Color::NamedColor::WarmGray).with_alpha(192);
+    SkPaint gutter_fill_paint;
+    gutter_fill_paint.setColor(to_skia_color(gutter_fill_color));
+    canvas.drawRect(gutter_rect, gutter_fill_paint);
+
+    auto thumb_fill_color = Color(Color::NamedColor::DarkGray).with_alpha(gutter_rect.isEmpty() ? 128 : 192);
+    SkPaint thumb_fill_paint;
+    thumb_fill_paint.setColor(to_skia_color(thumb_fill_color));
+    canvas.drawRRect(thumb_rrect, thumb_fill_paint);
 
     auto stroke_color = Color(Color::NamedColor::LightGray).with_alpha(128);
     SkPaint stroke_paint;
     stroke_paint.setStroke(true);
     stroke_paint.setStrokeWidth(1);
+    stroke_paint.setAntiAlias(true);
     stroke_paint.setColor(to_skia_color(stroke_color));
-    canvas.drawRRect(rrect, stroke_paint);
+    canvas.drawRRect(thumb_rrect, stroke_paint);
 }
 
 void DisplayListPlayerSkia::apply_opacity(ApplyOpacity const& command)

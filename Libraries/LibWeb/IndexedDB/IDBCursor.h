@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024, stelar7 <dudedbz@gmail.com>
+ * Copyright (c) 2024-2025, stelar7 <dudedbz@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -53,6 +53,7 @@ public:
 protected:
     explicit IDBCursor(JS::Realm&, GC::Ref<IDBTransaction>, GC::Ptr<Key>, Bindings::IDBCursorDirection, bool, GC::Ptr<Key>, JS::Value, CursorSource, GC::Ref<IDBKeyRange>, bool);
     virtual void initialize(JS::Realm&) override;
+    virtual void visit_edges(Visitor& visitor) override;
 
 private:
     // A cursor has a transaction, the transaction that was active when the cursor was created.

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024, stelar7 <dudedbz@gmail.com>
+ * Copyright (c) 2024-2025, stelar7 <dudedbz@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -12,10 +12,6 @@
 #include <LibWeb/HTML/EventNames.h>
 #include <LibWeb/IndexedDB/IDBCursor.h>
 #include <LibWeb/IndexedDB/Internal/Algorithms.h>
-#include <LibWeb/WebIDL/ExceptionOr.h>
-
-#undef IDB_DEBUG
-#define IDB_DEBUG true
 
 namespace Web::IndexedDB {
 
@@ -44,8 +40,33 @@ GC::Ref<IDBCursor> IDBCursor::create(JS::Realm& realm, GC::Ref<IDBTransaction> t
 
 void IDBCursor::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(IDBCursor);
+    Base::initialize(realm);
+}
+
+void IDBCursor::visit_edges(Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_transaction);
+    visitor.visit(m_position);
+    visitor.visit(m_object_store_position);
+    visitor.visit(m_key);
+    visitor.visit(m_range);
+    visitor.visit(m_request);
+
+    m_source.visit([&](auto& source) {
+        visitor.visit(source);
+    });
+}
+
+// https://w3c.github.io/IndexedDB/#dom-idbcursor-key
+JS::Value IDBCursor::key()
+{
+    // The key getter steps are to return the result of converting a key to a value with the cursor’s current key.
+    if (!m_key)
+        return JS::js_undefined();
+
+    return convert_a_key_to_a_value(realm(), *m_key);
 }
 
 // https://w3c.github.io/IndexedDB/#dom-idbcursor-key

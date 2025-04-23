@@ -14,7 +14,7 @@ namespace Web::CSS {
 
 class EdgeStyleValue final : public StyleValueWithDefaultOperators<EdgeStyleValue> {
 public:
-    static ValueComparingNonnullRefPtr<EdgeStyleValue> create(Optional<PositionEdge> edge, Optional<LengthPercentage> const& offset)
+    static ValueComparingNonnullRefPtr<EdgeStyleValue const> create(Optional<PositionEdge> edge, Optional<LengthPercentage> const& offset)
     {
         return adopt_ref(*new (nothrow) EdgeStyleValue(edge, offset));
     }
@@ -40,6 +40,8 @@ public:
     }
 
     virtual String to_string(SerializationMode) const override;
+
+    ValueComparingNonnullRefPtr<EdgeStyleValue const> resolved_value(CalculationContext context) const;
 
     bool properties_equal(EdgeStyleValue const& other) const { return m_properties == other.m_properties; }
 

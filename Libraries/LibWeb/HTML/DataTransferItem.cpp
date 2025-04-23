@@ -35,8 +35,8 @@ DataTransferItem::~DataTransferItem() = default;
 
 void DataTransferItem::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(DataTransferItem);
+    Base::initialize(realm);
 }
 
 void DataTransferItem::visit_edges(JS::Cell::Visitor& visitor)
@@ -117,7 +117,7 @@ void DataTransferItem::get_as_string(GC::Ptr<WebIDL::CallbackType> callback) con
 
     HTML::queue_a_task(HTML::Task::Source::Unspecified, nullptr, nullptr,
         GC::Function<void()>::create(realm.heap(), [callback, data]() {
-            (void)WebIDL::invoke_callback(*callback, {}, data);
+            (void)WebIDL::invoke_callback(*callback, {}, { { data } });
         }));
 }
 

@@ -77,6 +77,9 @@ void Application::create_platform_options(WebView::BrowserOptions& browser_optio
 
         // Ensure consistent font rendering between operating systems.
         web_content_options.force_fontconfig = WebView::ForceFontconfig::Yes;
+
+        // Ensure tests are resilient to minor changes to the viewport scrollbar.
+        web_content_options.paint_viewport_scrollbars = WebView::PaintViewportScrollbars::No;
     }
 
     if (dump_gc_graph) {
@@ -110,7 +113,7 @@ HeadlessWebView& Application::create_web_view(Core::AnonymousBuffer theme, Web::
     return *m_web_views.last();
 }
 
-HeadlessWebView& Application::create_child_web_view(HeadlessWebView const& parent, u64 page_index)
+HeadlessWebView& Application::create_child_web_view(HeadlessWebView& parent, u64 page_index)
 {
     auto web_view = HeadlessWebView::create_child(parent, page_index);
     m_web_views.append(move(web_view));

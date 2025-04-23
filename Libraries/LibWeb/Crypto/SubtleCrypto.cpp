@@ -11,6 +11,7 @@
 #include <LibCrypto/Hash/HashManager.h>
 #include <LibJS/Runtime/ArrayBuffer.h>
 #include <LibJS/Runtime/JSONObject.h>
+#include <LibJS/Runtime/ValueInlines.h>
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Bindings/SubtleCryptoPrototype.h>
@@ -57,8 +58,8 @@ SubtleCrypto::~SubtleCrypto() = default;
 
 void SubtleCrypto::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(SubtleCrypto);
+    Base::initialize(realm);
 }
 
 // https://w3c.github.io/webcrypto/#dfn-normalize-an-algorithm

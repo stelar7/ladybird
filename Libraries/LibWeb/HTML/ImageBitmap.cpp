@@ -24,8 +24,8 @@ ImageBitmap::ImageBitmap(JS::Realm& realm)
 
 void ImageBitmap::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(ImageBitmap);
+    Base::initialize(realm);
 }
 
 void ImageBitmap::visit_edges(Cell::Visitor& visitor)
@@ -65,7 +65,7 @@ HTML::TransferType ImageBitmap::primary_interface() const
 {
     // FIXME: Implement this
     dbgln("(STUBBED) ImageBitmap::primary_interface()");
-    return {};
+    return TransferType::Unknown;
 }
 
 // https://html.spec.whatwg.org/multipage/imagebitmap-and-animations.html#dom-imagebitmap-width

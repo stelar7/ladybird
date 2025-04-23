@@ -48,8 +48,8 @@ HTMLLinkElement::~HTMLLinkElement() = default;
 
 void HTMLLinkElement::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(HTMLLinkElement);
+    Base::initialize(realm);
 }
 
 void HTMLLinkElement::removed_from(Node* old_parent, Node& old_root)
@@ -280,7 +280,7 @@ HTMLLinkElement::LinkProcessingOptions HTMLLinkElement::create_link_options()
     options.policy_container = document.policy_container();
     // document                         document
     options.document = &document;
-    // FIXME: cryptographic nonce metadata     The current value of el's [[CryptographicNonce]] internal slot
+    // FIXME: cryptographic nonce metadata     the current value of el's [[CryptographicNonce]] internal slot
     // fetch priority                   the state of el's fetchpriority content attribute
     options.fetch_priority = Fetch::Infrastructure::request_priority_from_string(get_attribute_value(HTML::AttributeNames::fetchpriority)).value_or(Fetch::Infrastructure::Request::Priority::Auto);
 
@@ -486,28 +486,18 @@ void HTMLLinkElement::process_stylesheet_resource(bool success, Fetch::Infrastru
                 dbgln("Style sheet {} claimed to be '{}' but decoding failed", response.url().value_or(URL::URL()), encoding);
                 dispatch_event(*DOM::Event::create(realm(), HTML::EventNames::error));
             } else {
-                auto const decoded_string = maybe_decoded_string.release_value();
-                m_loaded_style_sheet = parse_css_stylesheet(CSS::Parser::ParsingParams(document(), *response.url()), decoded_string);
-
-                if (m_loaded_style_sheet) {
-                    Optional<::URL::URL> location;
-                    if (!response.url_list().is_empty())
-                        location = response.url_list().first();
-
-                    document_or_shadow_root_style_sheets().create_a_css_style_sheet(
-                        "text/css"_string,
-                        this,
-                        attribute(HTML::AttributeNames::media).value_or({}),
-                        in_a_document_tree() ? attribute(HTML::AttributeNames::title).value_or({}) : String {},
-                        m_relationship & Relationship::Alternate && !m_explicitly_enabled,
-                        true,
-                        move(location),
-                        nullptr,
-                        nullptr,
-                        *m_loaded_style_sheet);
-                } else {
-                    dbgln_if(CSS_LOADER_DEBUG, "HTMLLinkElement: Failed to parse stylesheet: {}", resource()->url());
-                }
+                VERIFY(!response.url_list().is_empty());
+                m_loaded_style_sheet = document_or_shadow_root_style_sheets().create_a_css_style_sheet(
+                    maybe_decoded_string.release_value(),
+                    "text/css"_string,
+                    this,
+                    attribute(HTML::AttributeNames::media).value_or({}),
+                    in_a_document_tree() ? attribute(HTML::AttributeNames::title).value_or({}) : String {},
+                    (m_relationship & Relationship::Alternate && !m_explicitly_enabled) ? CSS::StyleSheetList::Alternate::Yes : CSS::StyleSheetList::Alternate::No,
+                    CSS::StyleSheetList::OriginClean::Yes,
+                    response.url_list().first(),
+                    nullptr,
+                    nullptr);
 
                 // 2. Fire an event named load at el.
                 dispatch_event(*DOM::Event::create(realm(), HTML::EventNames::load));
@@ -519,9 +509,14 @@ void HTMLLinkElement::process_stylesheet_resource(bool success, Fetch::Infrastru
         dispatch_event(*DOM::Event::create(realm(), HTML::EventNames::error));
     }
 
-    // FIXME: 6. If el contributes a script-blocking style sheet, then:
-    //     FIXME: 1. Assert: el's node document's script-blocking style sheet counter is greater than 0.
-    //     FIXME: 2. Decrement el's node document's script-blocking style sheet counter by 1.
+    // 6. If el contributes a script-blocking style sheet, then:
+    if (contributes_a_script_blocking_style_sheet()) {
+        // 1. Assert: el's node document's script-blocking style sheet set contains el.
+        VERIFY(document().script_blocking_style_sheet_set().contains(*this));
+
+        // 2. Remove el from its node document's script-blocking style sheet set.
+        document().script_blocking_style_sheet_set().remove(*this);
+    }
 
     // 7. Unblock rendering on el.
     unblock_rendering();
@@ -551,7 +546,10 @@ bool HTMLLinkElement::stylesheet_linked_resource_fetch_setup_steps(Fetch::Infras
     // 1. If el's disabled attribute is set, then return false.
     if (has_attribute(AttributeNames::disabled))
         return false;
-    // FIXME: 2. If el contributes a script-blocking style sheet, increment el's node document's script-blocking style sheet counter by 1.
+
+    // 2. If el contributes a script-blocking style sheet, append el to its node document's script-blocking style sheet set.
+    if (contributes_a_script_blocking_style_sheet())
+        document().script_blocking_style_sheet_set().set(*this);
 
     // 3. If el's media attribute's value matches the environment and el is potentially render-blocking, then block rendering on el.
     // FIXME: Check media attribute value.
@@ -620,7 +618,7 @@ bool HTMLLinkElement::load_favicon_and_use_if_window_is_active()
         return false;
 
     // FIXME: Refactor the caller(s) to handle the async nature of image loading
-    auto promise = decode_favicon(resource()->encoded_data(), resource()->url(), document());
+    auto promise = decode_favicon(resource()->encoded_data(), *resource()->url(), document());
     auto result = promise->await();
     return !result.is_error();
 }
@@ -682,6 +680,36 @@ void HTMLLinkElement::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_loaded_style_sheet);
     visitor.visit(m_rel_list);
     visitor.visit(m_sizes);
+}
+
+// https://html.spec.whatwg.org/multipage/semantics.html#contributes-a-script-blocking-style-sheet
+bool HTMLLinkElement::contributes_a_script_blocking_style_sheet() const
+{
+    // An element el in the context of a Document of an HTML parser or XML parser
+    // contributes a script-blocking style sheet if all of the following are true:
+
+    // el was created by that Document's parser.
+    if (m_parser_document != &document())
+        return false;
+
+    // FIXME: el is either a style element or a link element that was an external resource link that contributes to the styling processing model when the el was created by the parser.
+
+    // FIXME: el's media attribute's value matches the environment.
+
+    // FIXME: el's style sheet was enabled when the element was created by the parser.
+    if (has_attribute(AttributeNames::disabled))
+        return false;
+
+    // FIXME: The last time the event loop reached step 1, el's root was that Document.
+
+    // The user agent hasn't given up on loading that particular style sheet yet.
+    // A user agent may give up on loading a style sheet at any time.
+    if (m_fetch_controller && m_fetch_controller->state() == Fetch::Infrastructure::FetchController::State::Terminated)
+        return false;
+    if (m_fetch_controller && m_fetch_controller->state() == Fetch::Infrastructure::FetchController::State::Aborted)
+        return false;
+
+    return true;
 }
 
 }

@@ -42,43 +42,43 @@ GC::Ref<JS::Realm> internal_css_realm()
     return *realm;
 }
 
-CSS::CSSStyleSheet* parse_css_stylesheet(CSS::Parser::ParsingParams const& context, StringView css, Optional<::URL::URL> location, Vector<NonnullRefPtr<CSS::MediaQuery>> media_query_list)
+GC::Ref<CSS::CSSStyleSheet> parse_css_stylesheet(CSS::Parser::ParsingParams const& context, StringView css, Optional<::URL::URL> location, Vector<NonnullRefPtr<CSS::MediaQuery>> media_query_list)
 {
     if (css.is_empty()) {
-        auto rule_list = CSS::CSSRuleList::create_empty(*context.realm);
+        auto rule_list = CSS::CSSRuleList::create(*context.realm);
         auto media_list = CSS::MediaList::create(*context.realm, {});
         auto style_sheet = CSS::CSSStyleSheet::create(*context.realm, rule_list, media_list, location);
         style_sheet->set_source_text({});
         return style_sheet;
     }
-    auto* style_sheet = CSS::Parser::Parser::create(context, css).parse_as_css_stylesheet(location, move(media_query_list));
+    auto style_sheet = CSS::Parser::Parser::create(context, css).parse_as_css_stylesheet(location, move(media_query_list));
     // FIXME: Avoid this copy
     style_sheet->set_source_text(MUST(String::from_utf8(css)));
     return style_sheet;
 }
 
-CSS::Parser::Parser::PropertiesAndCustomProperties parse_css_style_attribute(CSS::Parser::ParsingParams const& context, StringView css)
+CSS::Parser::Parser::PropertiesAndCustomProperties parse_css_property_declaration_block(CSS::Parser::ParsingParams const& context, StringView css)
 {
     if (css.is_empty())
         return {};
-    return CSS::Parser::Parser::create(context, css).parse_as_style_attribute();
+    return CSS::Parser::Parser::create(context, css).parse_as_property_declaration_block();
 }
 
-Vector<CSS::Descriptor> parse_css_list_of_descriptors(CSS::Parser::ParsingParams const& parsing_params, CSS::AtRuleID at_rule_id, StringView css)
+Vector<CSS::Descriptor> parse_css_descriptor_declaration_block(CSS::Parser::ParsingParams const& parsing_params, CSS::AtRuleID at_rule_id, StringView css)
 {
     if (css.is_empty())
         return {};
-    return CSS::Parser::Parser::create(parsing_params, css).parse_as_list_of_descriptors(at_rule_id);
+    return CSS::Parser::Parser::create(parsing_params, css).parse_as_descriptor_declaration_block(at_rule_id);
 }
 
-RefPtr<CSS::CSSStyleValue> parse_css_value(CSS::Parser::ParsingParams const& context, StringView string, CSS::PropertyID property_id)
+RefPtr<CSS::CSSStyleValue const> parse_css_value(CSS::Parser::ParsingParams const& context, StringView string, CSS::PropertyID property_id)
 {
     if (string.is_empty())
         return nullptr;
     return CSS::Parser::Parser::create(context, string).parse_as_css_value(property_id);
 }
 
-RefPtr<CSS::CSSStyleValue> parse_css_descriptor(CSS::Parser::ParsingParams const& parsing_params, CSS::AtRuleID at_rule_id, CSS::DescriptorID descriptor_id, StringView string)
+RefPtr<CSS::CSSStyleValue const> parse_css_descriptor(CSS::Parser::ParsingParams const& parsing_params, CSS::AtRuleID at_rule_id, CSS::DescriptorID descriptor_id, StringView string)
 {
     if (string.is_empty())
         return nullptr;

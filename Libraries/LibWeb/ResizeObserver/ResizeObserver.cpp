@@ -36,8 +36,8 @@ ResizeObserver::~ResizeObserver() = default;
 
 void ResizeObserver::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(ResizeObserver);
+    Base::initialize(realm);
 }
 
 void ResizeObserver::visit_edges(JS::Cell::Visitor& visitor)
@@ -109,7 +109,7 @@ void ResizeObserver::invoke_callback(ReadonlySpan<GC::Ref<ResizeObserverEntry>> 
         MUST(wrapped_records->create_data_property(property_index, record.ptr()));
     }
 
-    (void)WebIDL::invoke_callback(callback, JS::js_undefined(), WebIDL::ExceptionBehavior::Report, wrapped_records);
+    (void)WebIDL::invoke_callback(callback, JS::js_undefined(), WebIDL::ExceptionBehavior::Report, { { wrapped_records } });
 }
 
 }

@@ -29,6 +29,12 @@ struct Record {
 
 using KeyPath = Variant<String, Vector<String>>;
 
+// https://w3c.github.io/IndexedDB/#object-store-record
+struct Record {
+    GC::Ref<Key> key;
+    HTML::SerializationRecord value;
+};
+
 // https://w3c.github.io/IndexedDB/#object-store-construct
 class ObjectStore : public JS::Cell {
     GC_CELL(ObjectStore, JS::Cell);
@@ -53,6 +59,10 @@ public:
     u64 count_records_in_range(GC::Ref<IDBKeyRange> range);
     bool has_record_with_key(GC::Ref<Key> key);
     void remove_records_in_range(GC::Ref<IDBKeyRange> range);
+    void store_a_record(Record const& record);
+
+    void remove_records_in_range(GC::Ref<IDBKeyRange> range);
+    bool has_record_with_key(GC::Ref<Key> key);
     void store_a_record(Record const& record);
 
 protected:

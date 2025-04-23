@@ -180,13 +180,6 @@
 #    define VALIDATE_IS_RISCV64() static_assert(false, "Trying to include riscv64 only header on non riscv64 platform");
 #endif
 
-// Apple Clang 14.0.3 (shipped in Xcode 14.3) has a bug that causes __builtin_subc{,l,ll}
-// to incorrectly return whether a borrow occurred on AArch64. See our writeup for the Qemu
-// issue also caused by it: https://gitlab.com/qemu-project/qemu/-/issues/1659#note_1408275831
-#if ARCH(AARCH64) && defined(__apple_build_version__) && __clang_major__ == 14
-#    define AK_BUILTIN_SUBC_BROKEN
-#endif
-
 #ifdef ALWAYS_INLINE
 #    undef ALWAYS_INLINE
 #endif
@@ -245,6 +238,19 @@
 #    define DISALLOW(message) __attribute__((diagnose_if(1, message, "error")))
 #else
 #    define DISALLOW(message) __attribute__((error(message)))
+#endif
+
+#ifdef NO_UNIQUE_ADDRESS
+#    undef NO_UNIQUE_ADDRESS
+#endif
+#if defined(AK_DISABLE_NO_UNIQUE_ADDRESS)
+#    define NO_UNIQUE_ADDRESS
+#else
+#    if defined(AK_OS_WINDOWS)
+#        define NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
+#    else
+#        define NO_UNIQUE_ADDRESS [[no_unique_address]]
+#    endif
 #endif
 
 // GCC doesn't have __has_feature but clang does

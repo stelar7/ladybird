@@ -39,8 +39,8 @@ CSSImportRule::CSSImportRule(JS::Realm& realm, URL url, GC::Ptr<DOM::Document> d
 
 void CSSImportRule::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(CSSImportRule);
+    Base::initialize(realm);
 }
 
 void CSSImportRule::visit_edges(Cell::Visitor& visitor)
@@ -116,7 +116,7 @@ void CSSImportRule::fetch()
     m_document_load_event_delayer.emplace(*m_document);
 
     // 4. Fetch a style resource from parsedUrl, with stylesheet parentStylesheet, destination "style", CORS mode "no-cors", and processResponse being the following steps given response response and byte stream, null or failure byteStream:
-    fetch_a_style_resource(parsed_url->to_string(), parent_style_sheet, Fetch::Infrastructure::Request::Destination::Style, CorsMode::NoCors,
+    fetch_a_style_resource(parsed_url.value(), { parent_style_sheet }, Fetch::Infrastructure::Request::Destination::Style, CorsMode::NoCors,
         [strong_this = GC::Ref { *this }, parent_style_sheet = GC::Ref { parent_style_sheet }, parsed_url = parsed_url.value()](auto response, auto maybe_byte_stream) {
             // AD-HOC: Stop delaying the load event.
             ScopeGuard guard = [strong_this] {
@@ -156,7 +156,7 @@ void CSSImportRule::fetch()
             }
             auto decoded = decoded_or_error.release_value();
 
-            auto* imported_style_sheet = parse_css_stylesheet(Parser::ParsingParams(*strong_this->m_document, parsed_url), decoded, parsed_url, strong_this->m_media_query_list);
+            auto imported_style_sheet = parse_css_stylesheet(Parser::ParsingParams(*strong_this->m_document, parsed_url), decoded, parsed_url, strong_this->m_media_query_list);
 
             // 5. Set importedStylesheet’s origin-clean flag to parentStylesheet’s origin-clean flag.
             imported_style_sheet->set_origin_clean(parent_style_sheet->is_origin_clean());
@@ -166,7 +166,7 @@ void CSSImportRule::fetch()
                 imported_style_sheet->set_origin_clean(false);
 
             // 7. Set rule’s styleSheet to importedStylesheet.
-            strong_this->set_style_sheet(*imported_style_sheet);
+            strong_this->set_style_sheet(imported_style_sheet);
         });
 }
 

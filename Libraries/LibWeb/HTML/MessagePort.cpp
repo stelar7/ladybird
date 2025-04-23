@@ -58,8 +58,8 @@ void MessagePort::for_each_message_port(Function<void(MessagePort&)> callback)
 
 void MessagePort::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(MessagePort);
+    Base::initialize(realm);
 }
 
 void MessagePort::finalize()
@@ -288,13 +288,9 @@ void MessagePort::post_port_message(SerializedTransferRecord serialize_with_tran
 
 void MessagePort::read_from_transport()
 {
-    auto schedule_shutdown = m_transport->read_as_many_messages_as_possible_without_blocking([this](auto&& unparsed_message) {
-        auto& bytes = unparsed_message.bytes;
-        IPC::UnprocessedFileDescriptors unprocessed_fds;
-        unprocessed_fds.return_fds_to_front_of_queue(move(unparsed_message.fds));
-
-        FixedMemoryStream stream { bytes.span(), FixedMemoryStream::Mode::ReadOnly };
-        IPC::Decoder decoder { stream, unprocessed_fds };
+    auto schedule_shutdown = m_transport->read_as_many_messages_as_possible_without_blocking([this](auto&& raw_message) {
+        FixedMemoryStream stream { raw_message.bytes.span(), FixedMemoryStream::Mode::ReadOnly };
+        IPC::Decoder decoder { stream, raw_message.fds };
 
         auto serialized_transfer_record = MUST(decoder.decode<SerializedTransferRecord>());
 
@@ -328,11 +324,11 @@ void MessagePort::post_message_task_steps(SerializedTransferRecord& serialize_wi
 
     // 2. Let targetRealm be finalTargetPort's relevant realm.
     auto& target_realm = relevant_realm(*final_target_port);
-    auto& target_vm = target_realm.vm();
+
+    TemporaryExecutionContext context { target_realm };
 
     // 3. Let deserializeRecord be StructuredDeserializeWithTransfer(serializeWithTransferResult, targetRealm).
-    TemporaryExecutionContext context { relevant_realm(*final_target_port) };
-    auto deserialize_record_or_error = structured_deserialize_with_transfer(target_vm, serialize_with_transfer_result);
+    auto deserialize_record_or_error = structured_deserialize_with_transfer(serialize_with_transfer_result, target_realm);
     if (deserialize_record_or_error.is_error()) {
         // If this throws an exception, catch it, fire an event named messageerror at finalTargetPort, using MessageEvent, and then return.
         auto exception = deserialize_record_or_error.release_error();

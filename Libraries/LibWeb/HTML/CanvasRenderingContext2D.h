@@ -80,7 +80,7 @@ public:
     virtual WebIDL::ExceptionOr<GC::Ref<ImageData>> create_image_data(int width, int height, Optional<ImageDataSettings> const& settings = {}) const override;
     virtual WebIDL::ExceptionOr<GC::Ref<ImageData>> create_image_data(ImageData const& image_data) const override;
     virtual WebIDL::ExceptionOr<GC::Ptr<ImageData>> get_image_data(int x, int y, int width, int height, Optional<ImageDataSettings> const& settings = {}) const override;
-    virtual void put_image_data(ImageData const&, float x, float y) override;
+    virtual void put_image_data(ImageData&, float x, float y) override;
 
     virtual void reset_to_default_state() override;
 
@@ -137,14 +137,14 @@ private:
     virtual Gfx::Path& path_for_canvas_state() override { return path(); }
 
     struct PreparedText {
-        RefPtr<Gfx::GlyphRun> glyph_run;
+        Vector<NonnullRefPtr<Gfx::GlyphRun>> glyph_runs;
         Gfx::TextAlignment physical_alignment;
-        Gfx::IntRect bounding_box;
+        Gfx::FloatRect bounding_box;
     };
 
     void did_draw(Gfx::FloatRect const&);
 
-    RefPtr<Gfx::Font const> current_font();
+    RefPtr<Gfx::FontCascadeList const> font_cascade_list();
 
     PreparedText prepare_text(ByteString const& text, float max_width = INFINITY);
 

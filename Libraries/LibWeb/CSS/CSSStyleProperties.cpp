@@ -77,8 +77,8 @@ CSSStyleProperties::CSSStyleProperties(JS::Realm& realm, Computed computed, Read
 
 void CSSStyleProperties::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(CSSStyleProperties);
+    Base::initialize(realm);
 }
 
 void CSSStyleProperties::visit_edges(Visitor& visitor)
@@ -428,10 +428,10 @@ static Optional<StyleProperty> style_property_for_sided_shorthand(PropertyID pro
     if (top->important != right->important || top->important != bottom->important || top->important != left->important)
         return {};
 
-    ValueComparingNonnullRefPtr<CSSStyleValue> const top_value { top->value };
-    ValueComparingNonnullRefPtr<CSSStyleValue> const right_value { right->value };
-    ValueComparingNonnullRefPtr<CSSStyleValue> const bottom_value { bottom->value };
-    ValueComparingNonnullRefPtr<CSSStyleValue> const left_value { left->value };
+    ValueComparingNonnullRefPtr<CSSStyleValue const> const top_value { top->value };
+    ValueComparingNonnullRefPtr<CSSStyleValue const> const right_value { right->value };
+    ValueComparingNonnullRefPtr<CSSStyleValue const> const bottom_value { bottom->value };
+    ValueComparingNonnullRefPtr<CSSStyleValue const> const left_value { left->value };
 
     bool const top_and_bottom_same = top_value == bottom_value;
     bool const left_and_right_same = left_value == right_value;
@@ -595,6 +595,11 @@ static RefPtr<CSSStyleValue const> resolve_color_style_value(CSSStyleValue const
 {
     if (style_value.is_color_function())
         return style_value;
+    if (style_value.is_color()) {
+        auto& color_style_value = static_cast<CSSColorValue const&>(style_value);
+        if (first_is_one_of(color_style_value.color_type(), CSSColorValue::ColorType::Lab, CSSColorValue::ColorType::OKLab, CSSColorValue::ColorType::LCH, CSSColorValue::ColorType::OKLCH))
+            return style_value;
+    }
 
     return CSSColorValue::create_from_color(computed_color, ColorSyntax::Modern);
 }
@@ -1158,6 +1163,13 @@ WebIDL::ExceptionOr<void> CSSStyleProperties::set_css_text(StringView css_text)
     // 4. Update style attribute for the CSS declaration block.
     update_style_attribute();
 
+    // Non-standard: Invalidate style for the owners of our containing sheet, if any.
+    if (auto rule = parent_rule()) {
+        if (auto sheet = rule->parent_style_sheet()) {
+            sheet->invalidate_owners(DOM::StyleInvalidationReason::CSSStylePropertiesTextChange);
+        }
+    }
+
     return {};
 }
 
@@ -1204,7 +1216,9 @@ void CSSStyleProperties::set_declarations_from_text(StringView css_text)
     auto parsing_params = owner_node().has_value()
         ? Parser::ParsingParams(owner_node()->element().document())
         : Parser::ParsingParams();
-    auto style = parse_css_style_attribute(parsing_params, css_text);
+    parsing_params.rule_context.append(Parser::RuleContext::Style);
+
+    auto style = parse_css_property_declaration_block(parsing_params, css_text);
     set_the_declarations(style.properties, style.custom_properties);
 }
 

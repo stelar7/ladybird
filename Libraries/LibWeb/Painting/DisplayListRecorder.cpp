@@ -24,9 +24,9 @@ void DisplayListRecorder::append(Command&& command)
     m_command_list.append(move(command), scroll_frame_id);
 }
 
-void DisplayListRecorder::paint_nested_display_list(RefPtr<DisplayList> display_list, Gfx::IntRect rect)
+void DisplayListRecorder::paint_nested_display_list(RefPtr<DisplayList> display_list, ScrollStateSnapshot&& scroll_state_snapshot, Gfx::IntRect rect)
 {
-    append(PaintNestedDisplayList { move(display_list), rect });
+    append(PaintNestedDisplayList { move(display_list), move(scroll_state_snapshot), rect });
 }
 
 void DisplayListRecorder::add_rounded_rect_clip(CornerRadii corner_radii, Gfx::IntRect border_rect, CornerClip corner_clip)
@@ -206,7 +206,7 @@ void DisplayListRecorder::draw_scaled_immutable_bitmap(Gfx::IntRect const& dst_r
     });
 }
 
-void DisplayListRecorder::draw_repeated_immutable_bitmap(Gfx::IntRect dst_rect, Gfx::IntRect clip_rect, NonnullRefPtr<Gfx::ImmutableBitmap> bitmap, Gfx::ScalingMode scaling_mode, DrawRepeatedImmutableBitmap::Repeat repeat)
+void DisplayListRecorder::draw_repeated_immutable_bitmap(Gfx::IntRect dst_rect, Gfx::IntRect clip_rect, NonnullRefPtr<Gfx::ImmutableBitmap const> bitmap, Gfx::ScalingMode scaling_mode, DrawRepeatedImmutableBitmap::Repeat repeat)
 {
     append(DrawRepeatedImmutableBitmap {
         .dst_rect = dst_rect,
@@ -404,11 +404,12 @@ void DisplayListRecorder::draw_triangle_wave(Gfx::IntPoint a_p1, Gfx::IntPoint a
         .thickness = thickness });
 }
 
-void DisplayListRecorder::paint_scrollbar(int scroll_frame_id, Gfx::IntRect rect, CSSPixelFraction scroll_size, bool vertical)
+void DisplayListRecorder::paint_scrollbar(int scroll_frame_id, Gfx::IntRect gutter_rect, Gfx::IntRect thumb_rect, CSSPixelFraction scroll_size, bool vertical)
 {
     append(PaintScrollBar {
         .scroll_frame_id = scroll_frame_id,
-        .rect = rect,
+        .gutter_rect = gutter_rect,
+        .thumb_rect = thumb_rect,
         .scroll_size = scroll_size,
         .vertical = vertical });
 }
