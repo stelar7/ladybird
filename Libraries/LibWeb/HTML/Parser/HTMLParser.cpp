@@ -38,8 +38,8 @@
 #include <LibWeb/HTML/Parser/HTMLEncodingDetection.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
 #include <LibWeb/HTML/Parser/HTMLToken.h>
-#include <LibWeb/HTML/Scripting/Agent.h>
 #include <LibWeb/HTML/Scripting/ExceptionReporter.h>
+#include <LibWeb/HTML/Scripting/SimilarOriginWindowAgent.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
 #include <LibWeb/Infra/CharacterTypes.h>
@@ -801,7 +801,7 @@ GC::Ref<DOM::Element> HTMLParser::create_element_for(HTMLToken const& token, Opt
             perform_a_microtask_checkpoint();
 
         // 3. Push a new element queue onto document's relevant agent's custom element reactions stack.
-        relevant_agent(document).custom_element_reactions_stack.element_queue_stack.append({});
+        relevant_similar_origin_window_agent(document).custom_element_reactions_stack.element_queue_stack.append({});
     }
 
     // 9. Let element be the result of creating an element given document, localName, given namespace, null, is, and willExecuteScript.
@@ -810,7 +810,9 @@ GC::Ref<DOM::Element> HTMLParser::create_element_for(HTMLToken const& token, Opt
     // AD-HOC: Let <link> elements know which document they were originally parsed for.
     //         This is used for the render-blocking logic.
     if (local_name == HTML::TagNames::link && namespace_ == Namespace::HTML) {
-        as<HTMLLinkElement>(*element).set_parser_document({}, document);
+        auto& link_element = as<HTMLLinkElement>(*element);
+        link_element.set_parser_document({}, document);
+        link_element.set_was_enabled_when_created_by_parser({}, !token.has_attribute(HTML::AttributeNames::disabled));
     }
 
     // 10. Append each attribute in the given token to element.
@@ -824,7 +826,7 @@ GC::Ref<DOM::Element> HTMLParser::create_element_for(HTMLToken const& token, Opt
     // 11. If willExecuteScript is true:
     if (will_execute_script) {
         // 1. Let queue be the result of popping from document's relevant agent's custom element reactions stack. (This will be the same element queue as was pushed above.)
-        auto queue = relevant_agent(document).custom_element_reactions_stack.element_queue_stack.take_last();
+        auto queue = relevant_similar_origin_window_agent(document).custom_element_reactions_stack.element_queue_stack.take_last();
 
         // 2. Invoke custom element reactions in queue.
         Bindings::invoke_custom_element_reactions(queue);
@@ -1112,7 +1114,10 @@ void HTMLParser::handle_in_head(HTMLToken& token)
                 auto result = declarative_shadow_host_element.attach_a_shadow_root(mode, clonable, serializable, delegates_focus, Bindings::SlotAssignmentMode::Named);
                 if (result.is_error()) {
                     report_exception(Bindings::exception_to_throw_completion(vm(), result.release_error()), realm());
-                    insert_an_element_at_the_adjusted_insertion_location(template_);
+                    // FIXME: We do manual "insert before" instead of "insert an element at the adjusted insertion location" here
+                    //        Otherwise, the new insertion location will be inside the template's contents, which is not what we want here.
+                    //        This might be a spec bug(?)
+                    adjusted_insertion_location.parent->insert_before(*template_, adjusted_insertion_location.insert_before_sibling);
                     return;
                 }
 
@@ -5235,7 +5240,7 @@ void HTMLParser::insert_an_element_at_the_adjusted_insertion_location(GC::Ref<DO
     // 3. If the parser was not created as part of the HTML fragment parsing algorithm,
     //    then push a new element queue onto element's relevant agent's custom element reactions stack.
     if (!m_parsing_fragment) {
-        relevant_agent(*element).custom_element_reactions_stack.element_queue_stack.append({});
+        relevant_similar_origin_window_agent(*element).custom_element_reactions_stack.element_queue_stack.append({});
     }
 
     // 4. Insert element at the adjusted insertion location.
@@ -5244,7 +5249,7 @@ void HTMLParser::insert_an_element_at_the_adjusted_insertion_location(GC::Ref<DO
     // 5. If the parser was not created as part of the HTML fragment parsing algorithm,
     //    then pop the element queue from element's relevant agent's custom element reactions stack, and invoke custom element reactions in that queue.
     if (!m_parsing_fragment) {
-        auto queue = relevant_agent(*element).custom_element_reactions_stack.element_queue_stack.take_last();
+        auto queue = relevant_similar_origin_window_agent(*element).custom_element_reactions_stack.element_queue_stack.take_last();
         Bindings::invoke_custom_element_reactions(queue);
     }
 }

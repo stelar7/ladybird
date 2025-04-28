@@ -80,14 +80,14 @@ WebIDL::ExceptionOr<GC::Ref<IDBKeyRange>> IDBKeyRange::lower_bound(JS::VM& vm, J
     auto& realm = *vm.current_realm();
 
     // 1. Let lowerKey be the result of converting a value to a key with lower. Rethrow any exceptions.
-    auto lower_key = TRY(convert_a_value_to_a_key(realm, lower));
+    auto key = TRY(convert_a_value_to_a_key(realm, lower));
 
     // 2. If lowerKey is invalid, throw a "DataError" DOMException.
-    if (lower_key->is_invalid())
+    if (key->is_invalid())
         return WebIDL::DataError::create(realm, "Value is invalid"_string);
 
     // 3. Create and return a new key range with lower bound set to lowerKey, lower open flag set to open, upper bound set to null, and upper open flag set to true.
-    return IDBKeyRange::create(realm, lower_key, {}, open, true);
+    return IDBKeyRange::create(realm, key, {}, open, true);
 }
 
 // https://w3c.github.io/IndexedDB/#dom-idbkeyrange-upperbound
@@ -96,14 +96,14 @@ WebIDL::ExceptionOr<GC::Ref<IDBKeyRange>> IDBKeyRange::upper_bound(JS::VM& vm, J
     auto& realm = *vm.current_realm();
 
     // 1. Let upperKey be the result of converting a value to a key with upper. Rethrow any exceptions.
-    auto upper_key = TRY(convert_a_value_to_a_key(realm, upper));
+    auto key = TRY(convert_a_value_to_a_key(realm, upper));
 
     // 2. If upperKey is invalid, throw a "DataError" DOMException.
-    if (upper_key->is_invalid())
+    if (key->is_invalid())
         return WebIDL::DataError::create(realm, "Value is invalid"_string);
 
     // 3. Create and return a new key range with lower bound set to null, lower open flag set to true, upper bound set to upperKey, and upper open flag set to open.
-    return IDBKeyRange::create(realm, {}, upper_key, true, open);
+    return IDBKeyRange::create(realm, {}, key, true, open);
 }
 
 // https://w3c.github.io/IndexedDB/#dom-idbkeyrange-bound

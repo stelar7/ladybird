@@ -621,7 +621,7 @@ Vector<GC::Ref<SessionHistoryEntry>>& Navigable::get_session_history_entries() c
 
 // https://html.spec.whatwg.org/multipage/browsers.html#determining-navigation-params-policy-container
 static GC::Ref<PolicyContainer> determine_navigation_params_policy_container(URL::URL const& response_url,
-    JS::Realm& realm,
+    GC::Heap& heap,
     GC::Ptr<PolicyContainer> history_policy_container,
     GC::Ptr<PolicyContainer> initiator_policy_container,
     GC::Ptr<PolicyContainer> parent_policy_container,
@@ -632,7 +632,7 @@ static GC::Ref<PolicyContainer> determine_navigation_params_policy_container(URL
         // FIXME: 1. Assert: responseURL requires storing the policy container in history.
 
         // 2. Return a clone of historyPolicyContainer.
-        return history_policy_container->clone(realm);
+        return history_policy_container->clone(heap);
     }
 
     // 2. If responseURL is about:srcdoc, then:
@@ -641,20 +641,20 @@ static GC::Ref<PolicyContainer> determine_navigation_params_policy_container(URL
         VERIFY(parent_policy_container);
 
         // 2. Return a clone of parentPolicyContainer.
-        return parent_policy_container->clone(realm);
+        return parent_policy_container->clone(heap);
     }
 
     // 3. If responseURL is local and initiatorPolicyContainer is not null, then return a clone of initiatorPolicyContainer.
     if (Fetch::Infrastructure::is_local_url(response_url) && initiator_policy_container)
-        return initiator_policy_container->clone(realm);
+        return initiator_policy_container->clone(heap);
 
     // 4. If responsePolicyContainer is not null, then return responsePolicyContainer.
     // FIXME: File a spec issue to say "a clone of" here for consistency
     if (response_policy_container)
-        return response_policy_container->clone(realm);
+        return response_policy_container->clone(heap);
 
     // 5. Return a new policy container.
-    return realm.create<PolicyContainer>(realm);
+    return heap.allocate<PolicyContainer>(heap);
 }
 
 // https://html.spec.whatwg.org/multipage/browsers.html#obtain-coop
@@ -743,9 +743,9 @@ static GC::Ref<NavigationParams> create_navigation_params_from_a_srcdoc_resource
         // NOTE: Specification assumes that only navigables corresponding to iframes can be navigated to about:srcdoc.
         //       We also use srcdoc to implement load_html() for top level navigables so we need to null check container
         //       because it might be null.
-        policy_container = determine_navigation_params_policy_container(*response->url(), realm, history_policy_container, {}, navigable->container_document()->policy_container(), {});
+        policy_container = determine_navigation_params_policy_container(*response->url(), realm.heap(), history_policy_container, {}, navigable->container_document()->policy_container(), {});
     } else {
-        policy_container = realm.create<PolicyContainer>(realm);
+        policy_container = realm.heap().allocate<PolicyContainer>(realm.heap());
     }
 
     // 7. Return a new navigation params, with
@@ -1036,7 +1036,7 @@ static WebIDL::ExceptionOr<Navigable::NavigationParamsVariant> create_navigation
         }
 
         // 9. Set responsePolicyContainer to the result of creating a policy container from a fetch response given response and request's reserved client.
-        response_policy_container = create_a_policy_container_from_a_fetch_response(realm, *response_holder->response(), request->reserved_client());
+        response_policy_container = create_a_policy_container_from_a_fetch_response(realm.heap(), *response_holder->response(), request->reserved_client());
 
         // 10. Set finalSandboxFlags to the union of targetSnapshotParams's sandboxing flags and responsePolicyContainer's CSP list's CSP-derived sandboxing flags.
         final_sandbox_flags = target_snapshot_params.sandboxing_flags | response_policy_container->csp_list->csp_derived_sandboxing_flags();
@@ -1156,7 +1156,7 @@ static WebIDL::ExceptionOr<Navigable::NavigationParamsVariant> create_navigation
     GC::Ptr<PolicyContainer> history_policy_container = entry->document_state()->history_policy_container().visit(
         [](GC::Ref<PolicyContainer> const& c) -> GC::Ptr<PolicyContainer> { return c; },
         [](DocumentState::Client) -> GC::Ptr<PolicyContainer> { return {}; });
-    auto result_policy_container = determine_navigation_params_policy_container(*response_holder->response()->url(), realm, history_policy_container, source_snapshot_params.source_policy_container, {}, response_policy_container);
+    auto result_policy_container = determine_navigation_params_policy_container(*response_holder->response()->url(), realm.heap(), history_policy_container, source_snapshot_params.source_policy_container, {}, response_policy_container);
 
     // 24. If navigable's container is an iframe, and response's timing allow passed flag is set, then set container's pending resource-timing start time to null.
     if (navigable->container() && is<HTML::HTMLIFrameElement>(*navigable->container()) && response_holder->response()->timing_allow_passed())
@@ -1402,12 +1402,14 @@ WebIDL::ExceptionOr<void> Navigable::navigate(NavigateParams params)
 
     auto source_document = params.source_document;
     auto exceptions_enabled = params.exceptions_enabled;
+
     auto& active_document = *this->active_document();
     auto& realm = active_document.realm();
+    auto& page_client = active_document.page().client();
 
     // AD-HOC: If we are not able to continue in this process, request a new process from the UI.
-    if (!active_document.page().client().is_url_suitable_for_same_process_navigation(active_document.url(), params.url)) {
-        active_document.page().client().request_new_process_for_navigation(params.url);
+    if (is_top_level_traversable() && !page_client.is_url_suitable_for_same_process_navigation(active_document.url(), params.url)) {
+        page_client.request_new_process_for_navigation(params.url);
         return {};
     }
 
@@ -2341,6 +2343,19 @@ bool Navigable::has_a_rendering_opportunity() const
     if (!browsing_context)
         return false;
     return browsing_context->page().client().is_ready_to_paint();
+}
+
+// https://html.spec.whatwg.org/multipage/nav-history-apis.html#inform-the-navigation-api-about-child-navigable-destruction
+void Navigable::inform_the_navigation_api_about_child_navigable_destruction()
+{
+    // 1. Inform the navigation API about aborting navigation in navigable.
+    inform_the_navigation_api_about_aborting_navigation();
+
+    // FIXME: 2. Let navigation be navigable's active window's navigation API.
+
+    // FIXME: 3. Let traversalAPIMethodTrackers be a clone of navigation's upcoming traverse API method trackers.
+
+    // FIXME: 4. For each apiMethodTracker of traversalAPIMethodTrackers: reject the finished promise for apiMethodTracker with a new "AbortError" DOMException created in navigation's relevant realm.
 }
 
 // https://html.spec.whatwg.org/multipage/nav-history-apis.html#inform-the-navigation-api-about-aborting-navigation

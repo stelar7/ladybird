@@ -52,11 +52,6 @@ public:
     {
     }
 
-    [[nodiscard]] static SignedBigInteger create_invalid()
-    {
-        return { UnsignedBigInteger::create_invalid(), false };
-    }
-
     [[nodiscard]] static SignedBigInteger import_data(StringView data) { return import_data((u8 const*)data.characters_without_null_termination(), data.length()); }
     [[nodiscard]] static SignedBigInteger import_data(u8 const* ptr, size_t length);
 
@@ -64,7 +59,6 @@ public:
 
     [[nodiscard]] static ErrorOr<SignedBigInteger> from_base(u16 N, StringView str);
     [[nodiscard]] ErrorOr<String> to_base(u16 N) const;
-    [[nodiscard]] ByteString to_base_deprecated(u16 N) const;
 
     [[nodiscard]] u64 to_u64() const;
     [[nodiscard]] double to_double(UnsignedBigInteger::RoundingMode rounding_mode = UnsignedBigInteger::RoundingMode::IEEERoundAndTiesToEvenMantissa) const;
@@ -97,13 +91,6 @@ public:
         m_unsigned_data.set_to(other.m_unsigned_data);
         m_sign = other.m_sign;
     }
-
-    void invalidate()
-    {
-        m_unsigned_data.invalidate();
-    }
-
-    [[nodiscard]] bool is_invalid() const { return m_unsigned_data.is_invalid(); }
 
     // These get + 1 byte for the sign.
     [[nodiscard]] size_t length() const { return m_unsigned_data.length() + 1; }

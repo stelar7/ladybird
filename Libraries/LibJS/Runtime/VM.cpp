@@ -37,12 +37,12 @@
 
 namespace JS {
 
-ErrorOr<NonnullRefPtr<VM>> VM::create(OwnPtr<Agent> agent)
+NonnullRefPtr<VM> VM::create()
 {
     ErrorMessages error_messages {};
     error_messages[to_underlying(ErrorMessage::OutOfMemory)] = ErrorType::OutOfMemory.message();
 
-    auto vm = adopt_ref(*new VM(move(agent), move(error_messages)));
+    auto vm = adopt_ref(*new VM(move(error_messages)));
 
     WellKnownSymbols well_known_symbols {
 #define __JS_ENUMERATE(SymbolName, snake_name) \
@@ -63,12 +63,11 @@ static constexpr auto make_single_ascii_character_strings(IndexSequence<code_poi
 
 static constexpr auto single_ascii_character_strings = make_single_ascii_character_strings(MakeIndexSequence<128>());
 
-VM::VM(OwnPtr<Agent> agent, ErrorMessages error_messages)
+VM::VM(ErrorMessages error_messages)
     : m_heap(this, [this](HashMap<GC::Cell*, GC::HeapRoot>& roots) {
         gather_roots(roots);
     })
     , m_error_messages(move(error_messages))
-    , m_agent(move(agent))
 {
     m_bytecode_interpreter = make<Bytecode::Interpreter>(*this);
 
@@ -420,7 +419,7 @@ bool VM::in_strict_mode() const
     return running_execution_context().is_strict_mode;
 }
 
-void VM::run_queued_promise_jobs()
+void VM::run_queued_promise_jobs_impl()
 {
     dbgln_if(PROMISE_DEBUG, "Running queued promise jobs");
 

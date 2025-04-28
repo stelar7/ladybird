@@ -11,12 +11,6 @@
 
 namespace Web::HTML {
 
-bool Agent::can_block() const
-{
-    // similar-origin window agents can not block, see: https://html.spec.whatwg.org/multipage/webappapis.html#obtain-similar-origin-window-agent
-    return false;
-}
-
 void Agent::spin_event_loop_until(GC::Root<GC::Function<bool()>> goal_condition)
 {
     Platform::EventLoopPlugin::the().spin_until(move(goal_condition));

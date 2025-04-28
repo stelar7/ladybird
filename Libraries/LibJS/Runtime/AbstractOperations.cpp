@@ -59,7 +59,19 @@ ThrowCompletionOr<Value> call_impl(VM& vm, Value function, Value this_value, Rea
         return vm.throw_completion<TypeError>(ErrorType::NotAFunction, function.to_string_without_side_effects());
 
     // 3. Return ? F.[[Call]](V, argumentsList).
-    return function.as_function().internal_call(this_value, arguments_list);
+    ExecutionContext* callee_context = nullptr;
+    auto& function_object = function.as_function();
+    size_t registers_and_constants_and_locals_count = 0;
+    size_t argument_count = arguments_list.size();
+    TRY(function_object.get_stack_frame_size(registers_and_constants_and_locals_count, argument_count));
+    ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK(callee_context, registers_and_constants_and_locals_count, argument_count);
+
+    auto* argument_values = callee_context->arguments.data();
+    for (size_t i = 0; i < arguments_list.size(); ++i)
+        argument_values[i] = arguments_list[i];
+    callee_context->passed_argument_count = arguments_list.size();
+
+    return function_object.internal_call(*callee_context, this_value);
 }
 
 ThrowCompletionOr<Value> call_impl(VM&, FunctionObject& function, Value this_value, ReadonlySpan<Value> arguments_list)
@@ -70,7 +82,18 @@ ThrowCompletionOr<Value> call_impl(VM&, FunctionObject& function, Value this_val
     // Note: Called with a FunctionObject ref
 
     // 3. Return ? F.[[Call]](V, argumentsList).
-    return function.internal_call(this_value, arguments_list);
+    ExecutionContext* callee_context = nullptr;
+    size_t registers_and_constants_and_locals_count = 0;
+    size_t argument_count = arguments_list.size();
+    TRY(function.get_stack_frame_size(registers_and_constants_and_locals_count, argument_count));
+    ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK(callee_context, registers_and_constants_and_locals_count, argument_count);
+
+    auto* argument_values = callee_context->arguments.data();
+    for (size_t i = 0; i < arguments_list.size(); ++i)
+        argument_values[i] = arguments_list[i];
+    callee_context->passed_argument_count = arguments_list.size();
+
+    return function.internal_call(*callee_context, this_value);
 }
 
 // 7.3.15 Construct ( F [ , argumentsList [ , newTarget ] ] ), https://tc39.es/ecma262/#sec-construct
@@ -175,29 +198,26 @@ ThrowCompletionOr<Realm*> get_function_realm(VM& vm, FunctionObject const& funct
     }
 
     // 2. If obj is a bound function exotic object, then
-    if (is<BoundFunction>(function)) {
-        auto& bound_function = static_cast<BoundFunction const&>(function);
+    if (auto const* bound_function = as_if<BoundFunction>(function)) {
+        // a. Let boundTargetFunction be obj.[[BoundTargetFunction]].
+        auto& bound_target_function = bound_function->bound_target_function();
 
-        // a. Let target be obj.[[BoundTargetFunction]].
-        auto& target = bound_function.bound_target_function();
-
-        // b. Return ? GetFunctionRealm(target).
-        return get_function_realm(vm, target);
+        // b. Return ? GetFunctionRealm(boundTargetFunction).
+        return get_function_realm(vm, bound_target_function);
     }
 
     // 3. If obj is a Proxy exotic object, then
-    if (is<ProxyObject>(function)) {
-        auto& proxy = static_cast<ProxyObject const&>(function);
-
-        // a. If obj.[[ProxyHandler]] is null, throw a TypeError exception.
-        if (proxy.is_revoked())
-            return vm.throw_completion<TypeError>(ErrorType::ProxyRevoked);
+    if (auto const* proxy = as_if<ProxyObject>(function)) {
+        // a. a. Perform ? ValidateNonRevokedProxy(obj).
+        TRY(proxy->validate_non_revoked_proxy());
 
         // b. Let proxyTarget be obj.[[ProxyTarget]].
-        auto& proxy_target = proxy.target();
+        auto& proxy_target = proxy->target();
 
-        // c. Return ? GetFunctionRealm(proxyTarget).
+        // c. Assert: proxyTarget is a function object.
         VERIFY(proxy_target.is_function());
+
+        // d. Return ? GetFunctionRealm(proxyTarget).
         return get_function_realm(vm, static_cast<FunctionObject const&>(proxy_target));
     }
 
@@ -646,8 +666,24 @@ ThrowCompletionOr<Value> perform_eval(VM& vm, Value x, CallerMode strict_caller,
     // 19. If runningContext is not already suspended, suspend runningContext.
     // NOTE: Done by the push on step 27.
 
+    // NOTE: Spec steps are rearranged in order to compute number of registers+constants+locals before construction of the execution context.
+
+    // 28. Let result be Completion(EvalDeclarationInstantiation(body, varEnv, lexEnv, privateEnv, strictEval)).
+    TRY(eval_declaration_instantiation(vm, program, variable_environment, lexical_environment, private_environment, strict_eval));
+
+    // 29. If result.[[Type]] is normal, then
+    //     a. Set result to the result of evaluating body.
+    auto executable_result = Bytecode::Generator::generate_from_ast_node(vm, program, {});
+    if (executable_result.is_error())
+        return vm.throw_completion<InternalError>(ErrorType::NotImplemented, TRY_OR_THROW_OOM(vm, executable_result.error().to_string()));
+    auto executable = executable_result.release_value();
+    executable->name = "eval"_fly_string;
+    if (Bytecode::g_dump_bytecode)
+        executable->dump();
+
     // 20. Let evalContext be a new ECMAScript code execution context.
-    auto eval_context = ExecutionContext::create();
+    ExecutionContext* eval_context = nullptr;
+    ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK(eval_context, executable->number_of_registers + executable->constants.size() + executable->local_variable_names.size(), 0);
 
     // 21. Set evalContext's Function to null.
     // NOTE: This was done in the construction of eval_context.
@@ -680,21 +716,8 @@ ThrowCompletionOr<Value> perform_eval(VM& vm, Value x, CallerMode strict_caller,
         vm.pop_execution_context();
     };
 
-    // 28. Let result be Completion(EvalDeclarationInstantiation(body, varEnv, lexEnv, privateEnv, strictEval)).
-    TRY(eval_declaration_instantiation(vm, program, variable_environment, lexical_environment, private_environment, strict_eval));
-
     Optional<Value> eval_result;
 
-    // 29. If result.[[Type]] is normal, then
-    //     a. Set result to the result of evaluating body.
-    auto executable_result = Bytecode::Generator::generate_from_ast_node(vm, program, {});
-    if (executable_result.is_error())
-        return vm.throw_completion<InternalError>(ErrorType::NotImplemented, TRY_OR_THROW_OOM(vm, executable_result.error().to_string()));
-
-    auto executable = executable_result.release_value();
-    executable->name = "eval"_fly_string;
-    if (Bytecode::g_dump_bytecode)
-        executable->dump();
     auto result_or_error = vm.bytecode_interpreter().run_executable(*executable, {});
     if (result_or_error.value.is_error())
         return result_or_error.value.release_error();

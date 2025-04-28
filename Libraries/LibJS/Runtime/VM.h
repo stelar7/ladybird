@@ -47,7 +47,7 @@ enum class EvalMode {
 
 class VM : public RefCounted<VM> {
 public:
-    static ErrorOr<NonnullRefPtr<VM>> create(OwnPtr<Agent> = {});
+    static NonnullRefPtr<VM> create();
     ~VM();
 
     GC::Heap& heap() { return m_heap; }
@@ -112,8 +112,9 @@ public:
     ThrowCompletionOr<void> push_execution_context(ExecutionContext& context, CheckStackSpaceLimitTag)
     {
         // Ensure we got some stack space left, so the next function call doesn't kill us.
-        if (did_reach_stack_space_limit())
+        if (did_reach_stack_space_limit()) [[unlikely]] {
             return throw_completion<InternalError>(ErrorType::CallStackSizeExceeded);
+        }
         push_execution_context(context);
         return {};
     }
@@ -227,7 +228,13 @@ public:
         GC::Ptr<PrimitiveString> object_Object;
     } cached_strings;
 
-    void run_queued_promise_jobs();
+    void run_queued_promise_jobs()
+    {
+        if (m_promise_jobs.is_empty())
+            return;
+        run_queued_promise_jobs_impl();
+    }
+
     void enqueue_promise_job(GC::Ref<GC::Function<ThrowCompletionOr<Value>()>> job, Realm*);
 
     void run_queued_finalization_registry_cleanup_jobs();
@@ -240,6 +247,7 @@ public:
     Function<void(Promise&)> on_promise_rejection_handled;
     Function<void(Object const&, PropertyKey const&)> on_unimplemented_property_access;
 
+    void set_agent(OwnPtr<Agent> agent) { m_agent = move(agent); }
     Agent* agent() { return m_agent; }
     Agent const* agent() const { return m_agent; }
 
@@ -290,12 +298,14 @@ private:
 #undef __JS_ENUMERATE
     };
 
-    VM(OwnPtr<Agent>, ErrorMessages);
+    explicit VM(ErrorMessages);
 
     void load_imported_module(ImportedModuleReferrer, ModuleRequest const&, GC::Ptr<GraphLoadingState::HostDefined>, ImportedModulePayload);
     ThrowCompletionOr<void> link_and_eval_module(CyclicModule&);
 
     void set_well_known_symbols(WellKnownSymbols well_known_symbols) { m_well_known_symbols = move(well_known_symbols); }
+
+    void run_queued_promise_jobs_impl();
 
     HashMap<String, GC::Ptr<PrimitiveString>> m_string_cache;
     HashMap<Utf16String, GC::Ptr<PrimitiveString>> m_utf16_string_cache;

@@ -435,13 +435,13 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::add_or_put(GC::Ref<IDBO
     }
 
     // 12. Let operation be an algorithm to run store a record into an object store with store, clone, key, and no-overwrite flag.
-    auto operation = GC::Function<WebIDL::ExceptionOr<JS::Value>()>::create(realm.heap(), [&realm, store, clone, key_value, no_overwrite] -> WebIDL::ExceptionOr<JS::Value> {
-        auto key = TRY(store_a_record_into_an_object_store(realm, store, clone, key_value, no_overwrite));
+    auto operation = GC::Function<WebIDL::ExceptionOr<JS::Value>()>::create(realm.heap(), [&realm, &store, clone, key_value, no_overwrite] -> WebIDL::ExceptionOr<JS::Value> {
+        auto optional_key = TRY(store_a_record_into_an_object_store(realm, store, clone, key_value, no_overwrite));
 
-        if (!key || key->is_invalid())
+        if (!optional_key || optional_key->is_invalid())
             return JS::js_undefined();
 
-        return convert_a_key_to_a_value(realm, GC::Ref(*key));
+        return convert_a_key_to_a_value(realm, GC::Ref(*optional_key));
     });
 
     // 13. Return the result (an IDBRequest) of running asynchronously execute a request with handle and operation.

@@ -58,6 +58,42 @@ static NonnullRefPtr<CSSStyleValue const> with_keyword_values_resolved(DOM::Elem
     return value;
 }
 
+static RefPtr<CSSStyleValue const> interpolate_scale(DOM::Element& element, CalculationContext calculation_context, CSSStyleValue const& a_from, CSSStyleValue const& a_to, float delta)
+{
+    if (a_from.to_keyword() == Keyword::None && a_to.to_keyword() == Keyword::None)
+        return a_from;
+
+    static auto one = TransformationStyleValue::create(PropertyID::Scale, TransformFunction::Scale, { NumberStyleValue::create(1), NumberStyleValue::create(1) });
+
+    auto const& from = a_from.to_keyword() == Keyword::None ? *one : a_from;
+    auto const& to = a_to.to_keyword() == Keyword::None ? *one : a_to;
+
+    auto const& from_transform = from.as_transformation();
+    auto const& to_transform = to.as_transformation();
+
+    auto interpolated_x = interpolate_value(element, calculation_context, from_transform.values()[0], to_transform.values()[0], delta);
+    auto interpolated_y = interpolate_value(element, calculation_context, from_transform.values()[1], to_transform.values()[1], delta);
+
+    RefPtr<CSSStyleValue const> interpolated_z;
+
+    if (from_transform.values().size() == 3 || to_transform.values().size() == 3) {
+        static auto one_value = NumberStyleValue::create(1);
+        auto from = from_transform.values().size() == 3 ? from_transform.values()[2] : one_value;
+        auto to = to_transform.values().size() == 3 ? to_transform.values()[2] : one_value;
+        interpolated_z = interpolate_value(element, calculation_context, from, to, delta);
+    }
+
+    StyleValueVector new_values = { interpolated_x, interpolated_y };
+    if (interpolated_z && interpolated_z->is_number() && interpolated_z->as_number().number() != 1) {
+        new_values.append(*interpolated_z);
+    }
+
+    return TransformationStyleValue::create(
+        PropertyID::Scale,
+        TransformFunction::Scale,
+        move(new_values));
+}
+
 ValueComparingRefPtr<CSSStyleValue const> interpolate_property(DOM::Element& element, PropertyID property_id, CSSStyleValue const& a_from, CSSStyleValue const& a_to, float delta)
 {
     auto from = with_keyword_values_resolved(element, property_id, a_from);
@@ -88,6 +124,9 @@ ValueComparingRefPtr<CSSStyleValue const> interpolate_property(DOM::Element& ele
         }
         if (property_id == PropertyID::BoxShadow)
             return interpolate_box_shadow(element, calculation_context, from, to, delta);
+
+        if (property_id == PropertyID::Scale)
+            return interpolate_scale(element, calculation_context, from, to, delta);
 
         // FIXME: Handle all custom animatable properties
         [[fallthrough]];

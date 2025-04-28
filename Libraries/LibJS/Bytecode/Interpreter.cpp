@@ -83,6 +83,9 @@ static ByteString format_operand(StringView name, Operand operand, Bytecode::Exe
     case Operand::Type::Local:
         builder.appendff("\033[34m{}~{}\033[0m", executable.local_variable_names[operand.index() - executable.local_index_base], operand.index() - executable.local_index_base);
         break;
+    case Operand::Type::Argument:
+        builder.appendff("\033[34marg{}\033[0m", operand.index() - executable.argument_index_base);
+        break;
     case Operand::Type::Constant: {
         builder.append("\033[36m"sv);
         auto value = executable.constants[operand.index() - executable.number_of_registers];
@@ -184,12 +187,12 @@ Interpreter::~Interpreter()
 
 ALWAYS_INLINE Value Interpreter::get(Operand op) const
 {
-    return m_registers_and_constants_and_locals.data()[op.index()];
+    return m_registers_and_constants_and_locals_arguments.data()[op.index()];
 }
 
 ALWAYS_INLINE void Interpreter::set(Operand op, Value value)
 {
-    m_registers_and_constants_and_locals.data()[op.index()] = value;
+    m_registers_and_constants_and_locals_arguments.data()[op.index()] = value;
 }
 
 ALWAYS_INLINE Value Interpreter::do_yield(Value value, Optional<Label> continuation)
@@ -208,8 +211,42 @@ ThrowCompletionOr<Value> Interpreter::run(Script& script_record, GC::Ptr<Environ
     // 1. Let globalEnv be scriptRecord.[[Realm]].[[GlobalEnv]].
     auto& global_environment = script_record.realm().global_environment();
 
+    // NOTE: Spec steps are rearranged in order to compute number of registers+constants+locals before construction of the execution context.
+
+    // 11. Let script be scriptRecord.[[ECMAScriptCode]].
+    auto& script = script_record.parse_node();
+
+    // 12. Let result be Completion(GlobalDeclarationInstantiation(script, globalEnv)).
+    auto instantiation_result = script.global_declaration_instantiation(vm, global_environment);
+    Completion result = instantiation_result.is_throw_completion() ? instantiation_result.throw_completion() : normal_completion(js_undefined());
+
+    GC::Ptr<Executable> executable;
+    if (result.type() == Completion::Type::Normal) {
+        auto executable_result = JS::Bytecode::Generator::generate_from_ast_node(vm, script, {});
+
+        if (executable_result.is_error()) {
+            if (auto error_string = executable_result.error().to_string(); error_string.is_error())
+                result = vm.template throw_completion<JS::InternalError>(vm.error_message(JS::VM::ErrorMessage::OutOfMemory));
+            else if (error_string = String::formatted("TODO({})", error_string.value()); error_string.is_error())
+                result = vm.template throw_completion<JS::InternalError>(vm.error_message(JS::VM::ErrorMessage::OutOfMemory));
+            else
+                result = vm.template throw_completion<JS::InternalError>(error_string.release_value());
+        } else {
+            executable = executable_result.release_value();
+
+            if (g_dump_bytecode)
+                executable->dump();
+        }
+    }
+
+    u32 registers_and_constants_and_locals_count = 0;
+    if (executable) {
+        registers_and_constants_and_locals_count = executable->number_of_registers + executable->constants.size() + executable->local_variable_names.size();
+    }
+
     // 2. Let scriptContext be a new ECMAScript code execution context.
-    auto script_context = ExecutionContext::create();
+    ExecutionContext* script_context = nullptr;
+    ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK(script_context, registers_and_constants_and_locals_count, 0);
 
     // 3. Set the Function of scriptContext to null.
     // NOTE: This was done during execution context construction.
@@ -239,38 +276,14 @@ ThrowCompletionOr<Value> Interpreter::run(Script& script_record, GC::Ptr<Environ
     // 10. Push scriptContext onto the execution context stack; scriptContext is now the running execution context.
     TRY(vm.push_execution_context(*script_context, {}));
 
-    // 11. Let script be scriptRecord.[[ECMAScriptCode]].
-    auto& script = script_record.parse_node();
-
-    // 12. Let result be Completion(GlobalDeclarationInstantiation(script, globalEnv)).
-    auto instantiation_result = script.global_declaration_instantiation(vm, global_environment);
-    Completion result = instantiation_result.is_throw_completion() ? instantiation_result.throw_completion() : normal_completion(js_undefined());
-
     // 13. If result.[[Type]] is normal, then
-    if (result.type() == Completion::Type::Normal) {
+    if (executable) {
         // a. Set result to Completion(Evaluation of script).
-        auto executable_result = JS::Bytecode::Generator::generate_from_ast_node(vm, script, {});
-
-        if (executable_result.is_error()) {
-            if (auto error_string = executable_result.error().to_string(); error_string.is_error())
-                result = vm.template throw_completion<JS::InternalError>(vm.error_message(JS::VM::ErrorMessage::OutOfMemory));
-            else if (error_string = String::formatted("TODO({})", error_string.value()); error_string.is_error())
-                result = vm.template throw_completion<JS::InternalError>(vm.error_message(JS::VM::ErrorMessage::OutOfMemory));
-            else
-                result = vm.template throw_completion<JS::InternalError>(error_string.release_value());
-        } else {
-            auto executable = executable_result.release_value();
-
-            if (g_dump_bytecode)
-                executable->dump();
-
-            // a. Set result to the result of evaluating script.
-            auto result_or_error = run_executable(*executable, {}, {});
-            if (result_or_error.value.is_error())
-                result = result_or_error.value.release_error();
-            else {
-                result = result_or_error.return_register_value.is_special_empty_value() ? normal_completion(js_undefined()) : result_or_error.return_register_value;
-            }
+        auto result_or_error = run_executable(*executable, {}, {});
+        if (result_or_error.value.is_error())
+            result = result_or_error.value.release_error();
+        else {
+            result = result_or_error.return_register_value.is_special_empty_value() ? normal_completion(js_undefined()) : result_or_error.return_register_value;
         }
 
         // b. If result is a normal completion and result.[[Value]] is empty, then
@@ -364,7 +377,6 @@ FLATTEN_ON_CLANG void Interpreter::run_bytecode(size_t entry_point)
     }
 
     auto& running_execution_context = this->running_execution_context();
-    auto* arguments = running_execution_context.arguments.data();
     auto& accumulator = this->accumulator();
     auto& executable = current_executable();
     auto const* bytecode = executable.bytecode.data();
@@ -397,18 +409,6 @@ FLATTEN_ON_CLANG void Interpreter::run_bytecode(size_t entry_point)
     start:
         for (;;) {
             goto* bytecode_dispatch_table[static_cast<size_t>((*reinterpret_cast<Instruction const*>(&bytecode[program_counter])).type())];
-
-        handle_GetArgument: {
-            auto const& instruction = *reinterpret_cast<Op::GetArgument const*>(&bytecode[program_counter]);
-            set(instruction.dst(), arguments[instruction.index()]);
-            DISPATCH_NEXT(GetArgument);
-        }
-
-        handle_SetArgument: {
-            auto const& instruction = *reinterpret_cast<Op::SetArgument const*>(&bytecode[program_counter]);
-            arguments[instruction.index()] = get(instruction.src());
-            DISPATCH_NEXT(SetArgument);
-        }
 
         handle_Mov: {
             auto& instruction = *reinterpret_cast<Op::Mov const*>(&bytecode[program_counter]);
@@ -732,12 +732,10 @@ Interpreter::ResultAndReturnRegister Interpreter::run_executable(Executable& exe
 
     auto& running_execution_context = vm().running_execution_context();
     u32 registers_and_constants_and_locals_count = executable.number_of_registers + executable.constants.size() + executable.local_variable_names.size();
-    if (running_execution_context.registers_and_constants_and_locals.size() < registers_and_constants_and_locals_count)
-        running_execution_context.registers_and_constants_and_locals.resize_with_default_value(registers_and_constants_and_locals_count, js_special_empty_value());
+    VERIFY(registers_and_constants_and_locals_count <= running_execution_context.registers_and_constants_and_locals_and_arguments_span().size());
 
     TemporaryChange restore_running_execution_context { m_running_execution_context, &running_execution_context };
-    TemporaryChange restore_arguments { m_arguments, running_execution_context.arguments.span() };
-    TemporaryChange restore_registers_and_constants_and_locals { m_registers_and_constants_and_locals, running_execution_context.registers_and_constants_and_locals.span() };
+    TemporaryChange restore_registers_and_constants_and_locals { m_registers_and_constants_and_locals_arguments, running_execution_context.registers_and_constants_and_locals_and_arguments_span() };
 
     reg(Register::accumulator()) = initial_accumulator_value;
     reg(Register::return_value()) = js_special_empty_value();
@@ -751,8 +749,9 @@ Interpreter::ResultAndReturnRegister Interpreter::run_executable(Executable& exe
 
     running_execution_context.executable = &executable;
 
+    auto* registers_and_constants_and_locals_and_arguments = running_execution_context.registers_and_constants_and_locals_and_arguments();
     for (size_t i = 0; i < executable.constants.size(); ++i) {
-        running_execution_context.registers_and_constants_and_locals[executable.number_of_registers + i] = executable.constants[i];
+        registers_and_constants_and_locals_and_arguments[executable.number_of_registers + i] = executable.constants[i];
     }
 
     run_bytecode(entry_point.value_or(0));
@@ -760,13 +759,12 @@ Interpreter::ResultAndReturnRegister Interpreter::run_executable(Executable& exe
     dbgln_if(JS_BYTECODE_DEBUG, "Bytecode::Interpreter did run unit {:p}", &executable);
 
     if constexpr (JS_BYTECODE_DEBUG) {
-        auto const& registers_and_constants_and_locals = running_execution_context.registers_and_constants_and_locals;
         for (size_t i = 0; i < executable.number_of_registers; ++i) {
             String value_string;
-            if (registers_and_constants_and_locals[i].is_special_empty_value())
+            if (registers_and_constants_and_locals_and_arguments[i].is_special_empty_value())
                 value_string = "(empty)"_string;
             else
-                value_string = registers_and_constants_and_locals[i].to_string_without_side_effects();
+                value_string = registers_and_constants_and_locals_and_arguments[i].to_string_without_side_effects();
             dbgln("[{:3}] {}", i, value_string);
         }
     }
@@ -780,8 +778,8 @@ Interpreter::ResultAndReturnRegister Interpreter::run_executable(Executable& exe
     vm().finish_execution_generation();
 
     if (!exception.is_special_empty_value())
-        return { throw_completion(exception), running_execution_context.registers_and_constants_and_locals[0] };
-    return { return_value, running_execution_context.registers_and_constants_and_locals[0] };
+        return { throw_completion(exception), registers_and_constants_and_locals_and_arguments[0] };
+    return { return_value, registers_and_constants_and_locals_and_arguments[0] };
 }
 
 void Interpreter::enter_unwind_context()
@@ -2323,7 +2321,7 @@ ThrowCompletionOr<void> CreateVariable::execute_impl(Bytecode::Interpreter& inte
 
 void CreateRestParams::execute_impl(Bytecode::Interpreter& interpreter) const
 {
-    auto const& arguments = interpreter.running_execution_context().arguments;
+    auto const arguments = interpreter.running_execution_context().arguments;
     auto arguments_count = interpreter.running_execution_context().passed_argument_count;
     auto array = MUST(Array::create(interpreter.realm(), 0));
     for (size_t rest_index = m_rest_index; rest_index < arguments_count; ++rest_index)
@@ -2334,7 +2332,7 @@ void CreateRestParams::execute_impl(Bytecode::Interpreter& interpreter) const
 void CreateArguments::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto const& function = interpreter.running_execution_context().function;
-    auto const& arguments = interpreter.running_execution_context().arguments;
+    auto const arguments = interpreter.running_execution_context().arguments;
     auto const& environment = interpreter.running_execution_context().lexical_environment;
 
     auto passed_arguments = ReadonlySpan<Value> { arguments.data(), interpreter.running_execution_context().passed_argument_count };
@@ -2618,12 +2616,30 @@ ThrowCompletionOr<void> Call::execute_impl(Bytecode::Interpreter& interpreter) c
 {
     auto callee = interpreter.get(m_callee);
 
-    TRY(throw_if_needed_for_call(interpreter, callee, CallType::Call, expression_string()));
+    if (!callee.is_function()) [[unlikely]] {
+        return throw_type_error_for_callee(interpreter, callee, "function"sv, m_expression_string);
+    }
 
-    auto argument_values = interpreter.allocate_argument_values(m_argument_count);
-    for (size_t i = 0; i < m_argument_count; ++i)
-        argument_values[i] = interpreter.get(m_arguments[i]);
-    interpreter.set(dst(), TRY(perform_call(interpreter, interpreter.get(m_this_value), CallType::Call, callee, argument_values)));
+    auto& function = callee.as_function();
+
+    ExecutionContext* callee_context = nullptr;
+    size_t registers_and_constants_and_locals_count = 0;
+    size_t argument_count = m_argument_count;
+    TRY(function.get_stack_frame_size(registers_and_constants_and_locals_count, argument_count));
+    ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK_WITHOUT_CLEARING_ARGS(callee_context, registers_and_constants_and_locals_count, max(m_argument_count, argument_count));
+
+    auto* callee_context_argument_values = callee_context->arguments.data();
+    auto const callee_context_argument_count = callee_context->arguments.size();
+    auto const insn_argument_count = m_argument_count;
+
+    for (size_t i = 0; i < insn_argument_count; ++i)
+        callee_context_argument_values[i] = interpreter.get(m_arguments[i]);
+    for (size_t i = insn_argument_count; i < callee_context_argument_count; ++i)
+        callee_context_argument_values[i] = js_undefined();
+    callee_context->passed_argument_count = insn_argument_count;
+
+    auto retval = TRY(function.internal_call(*callee_context, interpreter.get(m_this_value)));
+    interpreter.set(m_dst, retval);
     return {};
 }
 
@@ -3209,16 +3225,6 @@ ByteString SetVariableBinding::to_byte_string_impl(Bytecode::Executable const& e
     return ByteString::formatted("SetVariableBinding {}, {}",
         executable.identifier_table->get(m_identifier),
         format_operand("src"sv, src(), executable));
-}
-
-ByteString GetArgument::to_byte_string_impl(Bytecode::Executable const& executable) const
-{
-    return ByteString::formatted("GetArgument {}, {}", index(), format_operand("dst"sv, dst(), executable));
-}
-
-ByteString SetArgument::to_byte_string_impl(Bytecode::Executable const& executable) const
-{
-    return ByteString::formatted("SetArgument {}, {}", index(), format_operand("src"sv, src(), executable));
 }
 
 static StringView property_kind_to_string(PropertyKind kind)

@@ -912,7 +912,7 @@ void StyleComputer::for_each_property_expanding_shorthands(PropertyID property_i
             set_longhand_property(CSS::PropertyID::TransitionProperty, CSSKeywordValue::create(Keyword::All));
             set_longhand_property(CSS::PropertyID::TransitionDuration, TimeStyleValue::create(CSS::Time::make_seconds(0)));
             set_longhand_property(CSS::PropertyID::TransitionDelay, TimeStyleValue::create(CSS::Time::make_seconds(0)));
-            set_longhand_property(CSS::PropertyID::TransitionTimingFunction, CSSKeywordValue::create(Keyword::Ease));
+            set_longhand_property(CSS::PropertyID::TransitionTimingFunction, EasingStyleValue::create(EasingStyleValue::CubicBezier::ease()));
             return;
         }
         auto const& transitions = value.as_transition().transitions();
@@ -1341,6 +1341,12 @@ static void compute_transitioned_properties(ComputedProperties const& style, DOM
     auto normalize_transition_length_list = [&properties, &style](PropertyID property, auto make_default_value) {
         auto const* style_value = style.maybe_null_property(property);
         StyleValueVector list;
+
+        if (style_value && !style_value->is_value_list()) {
+            for (size_t i = 0; i < properties.size(); i++)
+                list.append(*style_value);
+            return list;
+        }
 
         if (!style_value || !style_value->is_value_list() || style_value->as_value_list().size() == 0) {
             auto default_value = make_default_value();

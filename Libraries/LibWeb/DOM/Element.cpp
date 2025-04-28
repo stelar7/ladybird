@@ -8,6 +8,7 @@
 #include <AK/AnyOf.h>
 #include <AK/Debug.h>
 #include <AK/StringBuilder.h>
+#include <LibJS/Runtime/NativeFunction.h>
 #include <LibUnicode/CharacterTypes.h>
 #include <LibUnicode/Locale.h>
 #include <LibWeb/Animations/Animation.h>
@@ -63,7 +64,7 @@
 #include <LibWeb/HTML/HTMLUListElement.h>
 #include <LibWeb/HTML/Numbers.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
-#include <LibWeb/HTML/Scripting/Agent.h>
+#include <LibWeb/HTML/Scripting/SimilarOriginWindowAgent.h>
 #include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
 #include <LibWeb/HTML/TraversableNavigable.h>
 #include <LibWeb/HTML/Window.h>
@@ -105,8 +106,8 @@ void Element::visit_edges(Cell::Visitor& visitor)
     Base::visit_edges(visitor);
     SlottableMixin::visit_edges(visitor);
     Animatable::visit_edges(visitor);
+    ARIAMixin::visit_edges(visitor);
 
-    visitor.visit(m_aria_active_descendant_element);
     visitor.visit(m_attributes);
     visitor.visit(m_inline_style);
     visitor.visit(m_class_list);
@@ -428,6 +429,93 @@ Vector<String> Element::get_attribute_names() const
         names.append(attribute->name().to_string());
     }
     return names;
+}
+
+// https://html.spec.whatwg.org/multipage/common-dom-interfaces.html#attr-associated-element
+GC::Ptr<DOM::Element> Element::get_the_attribute_associated_element(FlyString const& content_attribute, GC::Ptr<DOM::Element> explicitly_set_attribute_element) const
+{
+    // 1. Let element be the result of running reflectedTarget's get the element.
+    auto const& element = *this;
+
+    // 2. Let contentAttributeValue be the result of running reflectedTarget's get the content attribute.
+    auto content_attribute_value = element.get_attribute(content_attribute);
+
+    // 3. If reflectedTarget's explicitly set attr-element is not null:
+    if (explicitly_set_attribute_element) {
+        // 1. If reflectedTarget's explicitly set attr-element is a descendant of any of element's shadow-including
+        //    ancestors, then return reflectedTarget's explicitly set attr-element.
+        if (&explicitly_set_attribute_element->root() == &element.shadow_including_root())
+            return *explicitly_set_attribute_element;
+
+        // 2. Return null.
+        return {};
+    }
+
+    // 4. Otherwise, if contentAttributeValue is not null, return the first element candidate, in tree order, that meets
+    //    the following criteria:
+    //     * candidate's root is the same as element's root;
+    //     * candidate's ID is contentAttributeValue; and
+    //     * candidate implements T.
+    if (content_attribute_value.has_value())
+        return element.document().get_element_by_id(*content_attribute_value);
+
+    // 5. If no such element exists, then return null.
+    // 6. Return null.
+    return {};
+}
+
+// https://html.spec.whatwg.org/multipage/common-dom-interfaces.html#attr-associated-elements
+Optional<GC::RootVector<GC::Ref<DOM::Element>>> Element::get_the_attribute_associated_elements(FlyString const& content_attribute, Optional<Vector<WeakPtr<DOM::Element>>> const& explicitly_set_attribute_elements) const
+{
+    // 1. Let elements be an empty list.
+    GC::RootVector<GC::Ref<DOM::Element>> elements(heap());
+
+    // 2. Let element be the result of running reflectedTarget's get the element.
+    auto const& element = *this;
+
+    // 3. If reflectedTarget's explicitly set attr-elements is not null:
+    if (explicitly_set_attribute_elements.has_value()) {
+        // 1. For each attrElement in reflectedTarget's explicitly set attr-elements:
+        for (auto const& attribute_element : *explicitly_set_attribute_elements) {
+            // 1. If attrElement is not a descendant of any of element's shadow-including ancestors, then continue.
+            if (!attribute_element || &attribute_element->root() != &element.shadow_including_root())
+                continue;
+
+            // 2. Append attrElement to elements.
+            elements.append(*attribute_element);
+        }
+    }
+    // 4. Otherwise:
+    else {
+        // 1. Let contentAttributeValue be the result of running reflectedTarget's get the content attribute.
+        auto content_attribute_value = element.get_attribute(content_attribute);
+
+        // 2. If contentAttributeValue is null, then return null.
+        if (!content_attribute_value.has_value())
+            return {};
+
+        // 3. Let tokens be contentAttributeValue, split on ASCII whitespace.
+        auto tokens = content_attribute_value->bytes_as_string_view().split_view_if(Infra::is_ascii_whitespace);
+
+        // 4. For each id of tokens:
+        for (auto id : tokens) {
+            // 1. Let candidate be the first element, in tree order, that meets the following criteria:
+            //     * candidate's root is the same as element's root;
+            //     * candidate's ID is id; and
+            //     * candidate implements T.
+            auto candidate = element.document().get_element_by_id(MUST(FlyString::from_utf8(id)));
+
+            // 2. If no such element exists, then continue.
+            if (!candidate)
+                continue;
+
+            // 3. Append candidate to elements.
+            elements.append(*candidate);
+        }
+    }
+
+    // 5. Return elements.
+    return elements;
 }
 
 GC::Ptr<Layout::Node> Element::create_layout_node(GC::Ref<CSS::ComputedProperties> style)
@@ -1196,6 +1284,11 @@ void Element::removed_from(Node* old_parent, Node& old_root)
         if (m_name.has_value())
             document().element_with_name_was_removed({}, *this);
     }
+}
+
+void Element::moved_from(GC::Ptr<Node> old_parent)
+{
+    Base::moved_from(old_parent);
 }
 
 void Element::children_changed(ChildrenChangedMetadata const* metadata)
@@ -2401,7 +2494,7 @@ bool Element::include_in_accessibility_tree() const
 void Element::enqueue_an_element_on_the_appropriate_element_queue()
 {
     // 1. Let reactionsStack be element's relevant agent's custom element reactions stack.
-    auto& relevant_agent = HTML::relevant_agent(*this);
+    auto& relevant_agent = HTML::relevant_similar_origin_window_agent(*this);
     auto& reactions_stack = relevant_agent.custom_element_reactions_stack;
 
     // 2. If reactionsStack is empty, then:
@@ -2419,7 +2512,7 @@ void Element::enqueue_an_element_on_the_appropriate_element_queue()
         // 4. Queue a microtask to perform the following steps:
         // NOTE: `this` is protected by GC::Function
         HTML::queue_a_microtask(&document(), GC::create_function(heap(), [this]() {
-            auto& reactions_stack = HTML::relevant_agent(*this).custom_element_reactions_stack;
+            auto& reactions_stack = HTML::relevant_similar_origin_window_agent(*this).custom_element_reactions_stack;
 
             // 1. Invoke custom element reactions in reactionsStack's backup element queue.
             Bindings::invoke_custom_element_reactions(reactions_stack.backup_element_queue);
@@ -2445,22 +2538,54 @@ void Element::enqueue_a_custom_element_upgrade_reaction(HTML::CustomElementDefin
     enqueue_an_element_on_the_appropriate_element_queue();
 }
 
+// https://html.spec.whatwg.org/multipage/custom-elements.html#enqueue-a-custom-element-callback-reaction
 void Element::enqueue_a_custom_element_callback_reaction(FlyString const& callback_name, GC::RootVector<JS::Value> arguments)
 {
     // 1. Let definition be element's custom element definition.
     auto& definition = m_custom_element_definition;
 
     // 2. Let callback be the value of the entry in definition's lifecycle callbacks with key callbackName.
-    auto callback_iterator = definition->lifecycle_callbacks().find(callback_name);
+    GC::Ptr<Web::WebIDL::CallbackType> callback;
+    if (auto callback_iterator = definition->lifecycle_callbacks().find(callback_name); callback_iterator != definition->lifecycle_callbacks().end())
+        callback = callback_iterator->value;
+
+    // 3. If callbackName is "connectedMoveCallback" and callback is null:
+    if (callback_name == HTML::CustomElementReactionNames::connectedMoveCallback && !callback) {
+        // 1. Let disconnectedCallback be the value of the entry in definition's lifecycle callbacks with key "disconnectedCallback".
+        GC::Ptr<WebIDL::CallbackType> disconnected_callback;
+        if (auto it = definition->lifecycle_callbacks().find(HTML::CustomElementReactionNames::disconnectedCallback); it != definition->lifecycle_callbacks().end())
+            disconnected_callback = it->value;
+
+        // 2. Let connectedCallback be the value of the entry in definition's lifecycle callbacks with key "connectedCallback".
+        GC::Ptr<WebIDL::CallbackType> connected_callback;
+        if (auto it = definition->lifecycle_callbacks().find(HTML::CustomElementReactionNames::connectedCallback); it != definition->lifecycle_callbacks().end())
+            connected_callback = it->value;
+
+        // 3. If connectedCallback and disconnectedCallback are null, then return.
+        if (!connected_callback && !disconnected_callback)
+            return;
+
+        // 4. Set callback to the following steps:
+        auto steps = JS::NativeFunction::create(realm(), [this, disconnected_callback, connected_callback](JS::VM&) {
+            GC::RootVector<JS::Value> no_arguments { heap() };
+
+            // 1. If disconnectedCallback is not null, then call disconnectedCallback with no arguments.
+            if (disconnected_callback)
+                (void)WebIDL::invoke_callback(*disconnected_callback, this, WebIDL::ExceptionBehavior::Report, no_arguments);
+
+            // 2. If connectedCallback is not null, then call connectedCallback with no arguments.
+            if (connected_callback)
+                (void)WebIDL::invoke_callback(*connected_callback, this, WebIDL::ExceptionBehavior::Report, no_arguments);
+
+            return JS::js_undefined(); }, 0, FlyString {}, &realm());
+        callback = realm().heap().allocate<WebIDL::CallbackType>(steps, realm());
+    }
 
     // 3. If callback is null, then return.
-    if (callback_iterator == definition->lifecycle_callbacks().end())
+    if (!callback)
         return;
 
-    if (!callback_iterator->value)
-        return;
-
-    // 4. If callbackName is "attributeChangedCallback", then:
+    // 5. If callbackName is "attributeChangedCallback":
     if (callback_name == HTML::CustomElementReactionNames::attributeChangedCallback) {
         // 1. Let attributeName be the first element of args.
         VERIFY(!arguments.is_empty());
@@ -2473,10 +2598,10 @@ void Element::enqueue_a_custom_element_callback_reaction(FlyString const& callba
             return;
     }
 
-    // 5. Add a new callback reaction to element's custom element reaction queue, with callback function callback and arguments args.
-    ensure_custom_element_reaction_queue().append(CustomElementCallbackReaction { .callback = callback_iterator->value, .arguments = move(arguments) });
+    // 6. Add a new callback reaction to element's custom element reaction queue, with callback function callback and arguments args.
+    ensure_custom_element_reaction_queue().append(CustomElementCallbackReaction { .callback = callback, .arguments = move(arguments) });
 
-    // 6. Enqueue an element on the appropriate element queue given element.
+    // 7. Enqueue an element on the appropriate element queue given element.
     enqueue_an_element_on_the_appropriate_element_queue();
 }
 
@@ -3604,11 +3729,29 @@ void Element::attribute_changed(FlyString const& local_name, Optional<String> co
             m_dir = Dir::Auto;
         else
             m_dir = {};
-    } else if (local_name == ARIA::AttributeNames::aria_active_descendant) {
-        // https://html.spec.whatwg.org/multipage/common-dom-interfaces.html#reflecting-content-attributes-in-idl-attributes:concept-element-attributes-change-ext
-        // Set element's explicitly set attr-element to null.
-        m_aria_active_descendant_element = nullptr;
     }
+
+    // https://html.spec.whatwg.org/multipage/common-dom-interfaces.html#reflecting-content-attributes-in-idl-attributes:concept-element-attributes-change-ext
+    // 1. If localName is not attr or namespace is not null, then return.
+    // 2. Set element's explicitly set attr-element to null.
+#define __ENUMERATE_ARIA_ATTRIBUTE(attribute, referencing_attribute)                               \
+    else if (local_name == ARIA::AttributeNames::referencing_attribute && !namespace_.has_value()) \
+    {                                                                                              \
+        set_##attribute({});                                                                       \
+    }
+    ENUMERATE_ARIA_ELEMENT_REFERENCING_ATTRIBUTES
+#undef __ENUMERATE_ARIA_ATTRIBUTE
+
+    // https://html.spec.whatwg.org/multipage/common-dom-interfaces.html#reflecting-content-attributes-in-idl-attributes:concept-element-attributes-change-ext-2
+    // 1. If localName is not attr or namespace is not null, then return.
+    // 2. Set element's explicitly set attr-elements to null.
+#define __ENUMERATE_ARIA_ATTRIBUTE(attribute, referencing_attribute)                               \
+    else if (local_name == ARIA::AttributeNames::referencing_attribute && !namespace_.has_value()) \
+    {                                                                                              \
+        set_##attribute({});                                                                       \
+    }
+    ENUMERATE_ARIA_ELEMENT_LIST_REFERENCING_ATTRIBUTES
+#undef __ENUMERATE_ARIA_ATTRIBUTE
 }
 
 auto Element::ensure_custom_element_reaction_queue() -> CustomElementReactionQueue&

@@ -2,6 +2,7 @@
  * Copyright (c) 2020-2024, Andreas Kling <andreas@ladybird.org>
  * Copyright (c) 2020-2021, Linus Groh <linusg@serenityos.org>
  * Copyright (c) 2022, Luke Wilde <lukew@serenityos.org>
+ * Copyright (c) 2024-2025, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -32,7 +33,7 @@ struct CachedSourceRange : public RefCounted<CachedSourceRange> {
 
 // 9.4 Execution Contexts, https://tc39.es/ecma262/#sec-execution-contexts
 struct ExecutionContext {
-    static NonnullOwnPtr<ExecutionContext> create();
+    static NonnullOwnPtr<ExecutionContext> create(u32 registers_and_constants_and_locals_count, u32 arguments_count);
     [[nodiscard]] NonnullOwnPtr<ExecutionContext> copy() const;
 
     ~ExecutionContext();
@@ -42,9 +43,9 @@ struct ExecutionContext {
 private:
     friend class ExecutionContextAllocator;
 
-    ExecutionContext();
-
 public:
+    ExecutionContext(u32 registers_and_constants_and_locals_count, u32 arguments_count);
+
     void operator delete(void* ptr);
 
     GC::Ptr<FunctionObject> function;                // [[Function]]
@@ -70,6 +71,16 @@ public:
     // FIXME: Move this out of LibJS (e.g. by using the CustomData concept), as it's used exclusively by LibWeb.
     size_t skip_when_determining_incumbent_counter { 0 };
 
+    Span<Value> registers_and_constants_and_locals_and_arguments_span()
+    {
+        return { registers_and_constants_and_locals_and_arguments(), registers_and_constants_and_locals_and_arguments_count };
+    }
+
+    Value const* registers_and_constants_and_locals_and_arguments() const
+    {
+        return reinterpret_cast<Value*>(reinterpret_cast<uintptr_t>(this) + sizeof(ExecutionContext));
+    }
+
     Value argument(size_t index) const
     {
         if (index >= arguments.size()) [[unlikely]]
@@ -79,18 +90,55 @@ public:
 
     Value& local(size_t index)
     {
-        return registers_and_constants_and_locals[index];
+        return registers_and_constants_and_locals_and_arguments()[index];
     }
 
+    u32 arguments_offset { 0 };
     u32 passed_argument_count { 0 };
     bool is_strict_mode { false };
 
-    Vector<Value> arguments;
-    Vector<Value> registers_and_constants_and_locals;
+    Span<Value> arguments;
+
     Vector<Bytecode::UnwindInfo> unwind_contexts;
     Vector<Optional<size_t>> previously_scheduled_jumps;
     Vector<GC::Ptr<Environment>> saved_lexical_environments;
+
+private:
+    friend class Bytecode::Interpreter;
+
+    Value* registers_and_constants_and_locals_and_arguments()
+    {
+        return reinterpret_cast<Value*>(reinterpret_cast<uintptr_t>(this) + sizeof(ExecutionContext));
+    }
+
+    u32 registers_and_constants_and_locals_and_arguments_count { 0 };
 };
+
+#define ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK_WITHOUT_CLEARING_ARGS(execution_context,  \
+    registers_and_constants_and_locals_count,                                                \
+    arguments_count)                                                                         \
+    auto execution_context_size = sizeof(JS::ExecutionContext)                               \
+        + (((registers_and_constants_and_locals_count) + (arguments_count))                  \
+            * sizeof(JS::Value));                                                            \
+                                                                                             \
+    void* execution_context_memory = alloca(execution_context_size);                         \
+                                                                                             \
+    execution_context = new (execution_context_memory)                                       \
+        JS::ExecutionContext((registers_and_constants_and_locals_count), (arguments_count)); \
+                                                                                             \
+    ScopeGuard run_execution_context_destructor([execution_context] {                        \
+        execution_context->~ExecutionContext();                                              \
+    })
+
+#define ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK(execution_context, registers_and_constants_and_locals_count, \
+    arguments_count)                                                                                            \
+    ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK_WITHOUT_CLEARING_ARGS(execution_context,                         \
+        registers_and_constants_and_locals_count, arguments_count);                                             \
+    do {                                                                                                        \
+        for (size_t i = 0; i < execution_context->arguments.size(); i++) {                                      \
+            execution_context->arguments[i] = JS::js_undefined();                                               \
+        }                                                                                                       \
+    } while (0)
 
 struct StackTraceElement {
     ExecutionContext* execution_context;

@@ -33,6 +33,7 @@ class Key : public JS::Cell {
 public:
     // A key has an associated type which is one of: number, date, string, binary, or array.
     enum KeyType {
+        Invalid,
         Number,
         Date,
         String,
@@ -46,6 +47,8 @@ public:
 
     [[nodiscard]] KeyType type() { return m_type; }
     [[nodiscard]] KeyValue value() { return m_value; }
+    [[nodiscard]] bool is_invalid() { return m_type == Invalid; }
+
     [[nodiscard]] bool is_invalid() { return m_type == Invalid; }
 
     [[nodiscard]] double value_as_double() { return m_value.get<double>(); }

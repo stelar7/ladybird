@@ -21,6 +21,7 @@
     M(BigIntBadOperatorOtherType, "Cannot use {} operator with BigInt and other type")                                              \
     M(BigIntFromNonIntegral, "Cannot convert non-integral number to BigInt")                                                        \
     M(BigIntInvalidValue, "Invalid value for BigInt: {}")                                                                           \
+    M(BigIntSizeExceeded, "Maximum BigInt size exceeded")                                                                           \
     M(BindingNotInitialized, "Binding {} is not initialized")                                                                       \
     M(BufferOutOfBounds, "{} contains a property which references a value at an index not contained within its buffer's bounds")    \
     M(ByteLengthExceedsMaxByteLength, "ArrayBuffer byte length of {} exceeds the max byte length of {}")                            \
@@ -96,6 +97,7 @@
     M(JsonBigInt, "Cannot serialize BigInt value to JSON")                                                                          \
     M(JsonCircular, "Cannot stringify circular object")                                                                             \
     M(JsonMalformed, "Malformed JSON string")                                                                                       \
+    M(JsonRawJSONNonPrimitive, "JSON.rawJSON cannot accept object or array as outermost value")                                     \
     M(MathSumPreciseOverflow, "Overflow in Math.sumPrecise")                                                                        \
     M(MissingRequiredProperty, "Required property {} is missing or undefined")                                                      \
     M(ModuleNoEnvironment, "Cannot find module environment for imported binding")                                                   \

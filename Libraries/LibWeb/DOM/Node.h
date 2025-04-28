@@ -52,6 +52,8 @@ enum class ShouldComputeRole {
     X(AdoptedStyleSheetsList)                       \
     X(CSSFontLoaded)                                \
     X(CSSImportRule)                                \
+    X(CSSStylePropertiesRemoveProperty)             \
+    X(CSSStylePropertiesSetProperty)                \
     X(CSSStylePropertiesTextChange)                 \
     X(CustomElementStateChange)                     \
     X(DidLoseFocus)                                 \
@@ -205,6 +207,8 @@ public:
     virtual bool is_html_form_element() const { return false; }
     virtual bool is_html_image_element() const { return false; }
     virtual bool is_html_iframe_element() const { return false; }
+    virtual bool is_html_div_element() const { return false; }
+    virtual bool is_html_span_element() const { return false; }
     virtual bool is_html_frameset_element() const { return false; }
     virtual bool is_html_fieldset_element() const { return false; }
     virtual bool is_navigable_container() const { return false; }
@@ -237,6 +241,8 @@ public:
     WebIDL::ExceptionOr<GC::Ref<Node>> clone_node(Document* document = nullptr, bool subtree = false, Node* parent = nullptr) const;
     WebIDL::ExceptionOr<GC::Ref<Node>> clone_single_node(Document&) const;
     WebIDL::ExceptionOr<GC::Ref<Node>> clone_node_binding(bool subtree);
+
+    WebIDL::ExceptionOr<void> move_node(Node& new_parent, Node* child);
 
     // NOTE: This is intended for the JS bindings.
     bool has_child_nodes() const { return has_children(); }
@@ -296,6 +302,8 @@ public:
     virtual void inserted();
     virtual void post_connection();
     virtual void removed_from(Node* old_parent, Node& old_root);
+    virtual void moved_from(GC::Ptr<Node> old_parent);
+
     struct ChildrenChangedMetadata {
         enum class Type {
             Inserted,
@@ -586,6 +594,8 @@ protected:
 
 private:
     void queue_tree_mutation_record(Vector<GC::Root<Node>> added_nodes, Vector<GC::Root<Node>> removed_nodes, Node* previous_sibling, Node* next_sibling);
+
+    void live_range_pre_remove();
 
     void insert_before_impl(GC::Ref<Node>, GC::Ptr<Node> child);
     void append_child_impl(GC::Ref<Node>);

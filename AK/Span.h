@@ -186,8 +186,8 @@ public:
     ALWAYS_INLINE constexpr void overwrite(size_t offset, void const* data, size_t data_size)
     {
         // make sure we're not told to write past the end
-        VERIFY(offset + data_size <= size());
-        __builtin_memmove(this->data() + offset, data, data_size);
+        VERIFY(offset + data_size <= size() * sizeof(T));
+        TypedTransfer<T>::copy(this->data() + offset, static_cast<T const*>(data), data_size / sizeof(T));
     }
 
     ALWAYS_INLINE constexpr size_t copy_to(Span<RemoveConst<T>> other) const

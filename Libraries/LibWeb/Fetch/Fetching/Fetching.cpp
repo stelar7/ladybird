@@ -83,6 +83,7 @@ WebIDL::ExceptionOr<GC::Ref<Infrastructure::FetchController>> fetch(JS::Realm& r
     dbgln_if(WEB_FETCH_DEBUG, "Fetch: Running 'fetch' with: request @ {}", &request);
 
     auto& vm = realm.vm();
+    auto& heap = vm.heap();
 
     // 1. Assert: request’s mode is "navigate" or processEarlyHintsResponse is null.
     VERIFY(request.mode() == Infrastructure::Request::Mode::Navigate || !algorithms.process_early_hints_response());
@@ -185,10 +186,10 @@ WebIDL::ExceptionOr<GC::Ref<Infrastructure::FetchController>> fetch(JS::Realm& r
         // 1. If request’s client is non-null, then set request’s policy container to a clone of request’s client’s
         //    policy container.
         if (request.client() != nullptr)
-            request.set_policy_container(request.client()->policy_container()->clone(realm));
+            request.set_policy_container(request.client()->policy_container()->clone(heap));
         // 2. Otherwise, set request’s policy container to a new policy container.
         else
-            request.set_policy_container(realm.create<HTML::PolicyContainer>(realm));
+            request.set_policy_container(heap.allocate<HTML::PolicyContainer>(heap));
     }
 
     // 13. If request’s header list does not contain `Accept`, then:
@@ -333,14 +334,13 @@ WebIDL::ExceptionOr<GC::Ptr<PendingResponse>> main_fetch(JS::Realm& realm, Infra
         //          superdomain match with an asserted includeSubDomains directive or a congruent match (with or without an
         //          asserted includeSubDomains directive) [HSTS]; or DNS resolution for the request finds a matching HTTPS RR
         //          per section 9.5 of [SVCB].
-        && false
-
-    ) {
+        && false) {
         request->current_url().set_scheme("https"_string);
     }
 
     auto get_response = GC::create_function(vm.heap(), [&realm, &vm, &fetch_params, request]() -> WebIDL::ExceptionOr<GC::Ref<PendingResponse>> {
         dbgln_if(WEB_FETCH_DEBUG, "Fetch: Running 'main fetch' get_response() function");
+        auto const* origin = request->origin().get_pointer<URL::Origin>();
 
         // -> fetchParams’s preloaded response candidate is not null
         if (!fetch_params.preloaded_response_candidate().has<Empty>()) {
@@ -355,12 +355,12 @@ WebIDL::ExceptionOr<GC::Ptr<PendingResponse>> main_fetch(JS::Realm& realm, Infra
             // 3. Return fetchParams’s preloaded response candidate.
             return PendingResponse::create(vm, request, fetch_params.preloaded_response_candidate().get<GC::Ref<Infrastructure::Response>>());
         }
-        // -> request’s current URL’s origin is same origin with request’s origin, and request’s response tainting
-        //    is "basic"
+
+        // -> request’s current URL’s origin is same origin with request’s origin, and request’s response tainting is "basic"
         // -> request’s current URL’s scheme is "data"
         // -> request’s mode is "navigate" or "websocket"
-        else if (
-            (request->origin().has<URL::Origin>() && request->current_url().origin().is_same_origin(request->origin().get<URL::Origin>()) && request->response_tainting() == Infrastructure::Request::ResponseTainting::Basic)
+        if (
+            (origin && request->current_url().origin().is_same_origin(*origin) && request->response_tainting() == Infrastructure::Request::ResponseTainting::Basic)
             || request->current_url().scheme() == "data"sv
             || (request->mode() == Infrastructure::Request::Mode::Navigate || request->mode() == Infrastructure::Request::Mode::WebSocket)) {
             // 1. Set request’s response tainting to "basic".
@@ -372,13 +372,15 @@ WebIDL::ExceptionOr<GC::Ptr<PendingResponse>> main_fetch(JS::Realm& realm, Infra
             // NOTE: HTML assigns any documents and workers created from URLs whose scheme is "data" a unique
             //       opaque origin. Service workers can only be created from URLs whose scheme is an HTTP(S) scheme.
         }
+
         // -> request’s mode is "same-origin"
-        else if (request->mode() == Infrastructure::Request::Mode::SameOrigin) {
+        if (request->mode() == Infrastructure::Request::Mode::SameOrigin) {
             // Return a network error.
             return PendingResponse::create(vm, request, Infrastructure::Response::network_error(vm, "Request with 'same-origin' mode must have same URL and request origin"_string));
         }
+
         // -> request’s mode is "no-cors"
-        else if (request->mode() == Infrastructure::Request::Mode::NoCORS) {
+        if (request->mode() == Infrastructure::Request::Mode::NoCORS) {
             // 1. If request’s redirect mode is not "follow", then return a network error.
             if (request->redirect_mode() != Infrastructure::Request::RedirectMode::Follow)
                 return PendingResponse::create(vm, request, Infrastructure::Response::network_error(vm, "Request with 'no-cors' mode must have redirect mode set to 'follow'"_string));
@@ -389,18 +391,22 @@ WebIDL::ExceptionOr<GC::Ptr<PendingResponse>> main_fetch(JS::Realm& realm, Infra
             // 3. Return the result of running scheme fetch given fetchParams.
             return scheme_fetch(realm, fetch_params);
         }
+
         // -> request’s current URL’s scheme is not an HTTP(S) scheme
-        else if (!Infrastructure::is_http_or_https_scheme(request->current_url().scheme())) {
+        // AD-HOC: We allow CORS requests for resource:// URLs from opaque origins to enable requesting JS modules from internal pages.
+        if (!Infrastructure::is_http_or_https_scheme(request->current_url().scheme())
+            && !(origin && origin->is_opaque() && request->current_url().scheme() == "resource"sv)) {
             // NOTE: At this point all other request modes have been handled. Ensure we're not lying in the error message :^)
             VERIFY(request->mode() == Infrastructure::Request::Mode::CORS);
 
             // Return a network error.
             return PendingResponse::create(vm, request, Infrastructure::Response::network_error(vm, "Request with 'cors' mode must have URL with HTTP or HTTPS scheme"_string));
         }
+
         // -> request’s use-CORS-preflight flag is set
         // -> request’s unsafe-request flag is set and either request’s method is not a CORS-safelisted method or
         //    CORS-unsafe request-header names with request’s header list is not empty
-        else if (
+        if (
             request->use_cors_preflight()
             || (request->unsafe_request()
                 && (!Infrastructure::is_cors_safelisted_method(request->method())
@@ -425,14 +431,13 @@ WebIDL::ExceptionOr<GC::Ptr<PendingResponse>> main_fetch(JS::Realm& realm, Infra
 
             return returned_pending_response;
         }
-        // -> Otherwise
-        else {
-            // 1. Set request’s response tainting to "cors".
-            request->set_response_tainting(Infrastructure::Request::ResponseTainting::CORS);
 
-            // 2. Return the result of running HTTP fetch given fetchParams.
-            return http_fetch(realm, fetch_params);
-        }
+        // -> Otherwise
+        //     1. Set request’s response tainting to "cors".
+        request->set_response_tainting(Infrastructure::Request::ResponseTainting::CORS);
+
+        //     2. Return the result of running HTTP fetch given fetchParams.
+        return http_fetch(realm, fetch_params);
     });
 
     if (recursive == Recursive::Yes) {

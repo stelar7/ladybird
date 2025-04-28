@@ -31,15 +31,16 @@
 #include <LibWeb/HTML/HTMLSlotElement.h>
 #include <LibWeb/HTML/Location.h>
 #include <LibWeb/HTML/PromiseRejectionEvent.h>
-#include <LibWeb/HTML/Scripting/Agent.h>
 #include <LibWeb/HTML/Scripting/ClassicScript.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Scripting/ExceptionReporter.h>
 #include <LibWeb/HTML/Scripting/Fetching.h>
 #include <LibWeb/HTML/Scripting/ModuleScript.h>
 #include <LibWeb/HTML/Scripting/Script.h>
+#include <LibWeb/HTML/Scripting/SimilarOriginWindowAgent.h>
 #include <LibWeb/HTML/Scripting/SyntheticRealmSettings.h>
 #include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
+#include <LibWeb/HTML/Scripting/WorkerAgent.h>
 #include <LibWeb/HTML/ShadowRealmGlobalScope.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HTML/WindowProxy.h>
@@ -72,14 +73,28 @@ HTML::Script* active_script()
         });
 }
 
-ErrorOr<void> initialize_main_thread_vm(HTML::EventLoop::Type type)
+static NonnullOwnPtr<JS::Agent> create_agent(GC::Heap& heap, AgentType type)
+{
+    switch (type) {
+    case AgentType::SimilarOriginWindow:
+        return HTML::SimilarOriginWindowAgent::create(heap);
+    case AgentType::DedicatedWorker:
+    case AgentType::SharedWorker:
+        return HTML::WorkerAgent::create(heap, JS::Agent::CanBlock::Yes);
+    case AgentType::ServiceWorker:
+        return HTML::WorkerAgent::create(heap, JS::Agent::CanBlock::No);
+    default:
+        break;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+void initialize_main_thread_vm(AgentType type)
 {
     VERIFY(!s_main_thread_vm);
 
-    s_main_thread_vm = TRY(JS::VM::create(make<HTML::Agent>()));
-
-    auto& agent = as<HTML::Agent>(*s_main_thread_vm->agent());
-    agent.event_loop = s_main_thread_vm->heap().allocate<HTML::EventLoop>(type);
+    s_main_thread_vm = JS::VM::create();
+    s_main_thread_vm->set_agent(create_agent(s_main_thread_vm->heap(), type));
 
     s_main_thread_vm->on_unimplemented_property_access = [](auto const& object, auto const& property_key) {
         dbgln("FIXME: Unimplemented IDL interface: '{}.{}'", object.class_name(), property_key.to_string());
@@ -281,7 +296,7 @@ ErrorOr<void> initialize_main_thread_vm(HTML::EventLoop::Type type)
                 // FIXME: We need to setup a dummy execution context in case a JS::NativeFunction is called when processing the job.
                 //        This is because JS::NativeFunction::call excepts something to be on the execution context stack to be able to get the caller context to initialize the environment.
                 //        Do note that the JS spec gives _no_ guarantee that the execution context stack has something on it if HostEnqueuePromiseJob was called with a null realm: https://tc39.es/ecma262/#job-preparedtoevaluatecode
-                dummy_execution_context = JS::ExecutionContext::create();
+                dummy_execution_context = JS::ExecutionContext::create(0, 0);
                 dummy_execution_context->script_or_module = script_or_module;
                 vm.push_execution_context(*dummy_execution_context);
             }
@@ -324,7 +339,7 @@ ErrorOr<void> initialize_main_thread_vm(HTML::EventLoop::Type type)
         // 4. If active script is not null, set script execution context to a new JavaScript execution context, with its Function field set to null,
         //    its Realm field set to active script's realm, and its ScriptOrModule set to active script's record.
         if (script) {
-            script_execution_context = JS::ExecutionContext::create();
+            script_execution_context = JS::ExecutionContext::create(0, 0);
             script_execution_context->function = nullptr;
             script_execution_context->realm = &script->realm();
             if (is<HTML::ClassicScript>(script)) {
@@ -585,7 +600,8 @@ ErrorOr<void> initialize_main_thread_vm(HTML::EventLoop::Type type)
             // 5. Perform FinishLoadingImportedModule(referrer, moduleRequest, payload, completion).
             // NON-STANDARD: To ensure that LibJS can find the module on the stack, we push a new execution context.
 
-            auto module_execution_context = JS::ExecutionContext::create();
+            JS::ExecutionContext* module_execution_context = nullptr;
+            ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK(module_execution_context, 0, 0);
             module_execution_context->realm = realm;
             if (module)
                 module_execution_context->script_or_module = GC::Ref { *module };
@@ -644,8 +660,6 @@ ErrorOr<void> initialize_main_thread_vm(HTML::EventLoop::Type type)
     s_main_thread_vm->host_unrecognized_date_string = [](StringView date) {
         dbgln("Unable to parse date string: \"{}\"", date);
     };
-
-    return {};
 }
 
 JS::VM& main_thread_vm()
@@ -658,7 +672,7 @@ JS::VM& main_thread_vm()
 void queue_mutation_observer_microtask(DOM::Document const& document)
 {
     auto& vm = main_thread_vm();
-    auto& surrounding_agent = as<HTML::Agent>(*vm.agent());
+    auto& surrounding_agent = as<HTML::SimilarOriginWindowAgent>(*vm.agent());
 
     // 1. If the surrounding agent’s mutation observer microtask queued is true, then return.
     if (surrounding_agent.mutation_observer_microtask_queued)

@@ -172,6 +172,18 @@ static StringView sequence_storage_type_to_cpp_storage_type_name(SequenceStorage
     }
 }
 
+static bool is_nullable_frozen_array_of_single_type(Type const& type, StringView type_name)
+{
+    if (!type.is_nullable() || type.name() != "FrozenArray"sv)
+        return false;
+
+    auto const& parameters = type.as_parameterized().parameters();
+    if (parameters.size() != 1)
+        return false;
+
+    return parameters.first()->name() == type_name;
+}
+
 CppType idl_type_name_to_cpp_type(Type const& type, Interface const& interface);
 
 static ByteString union_type_to_variant(UnionType const& union_type, Interface const& interface)
@@ -265,7 +277,7 @@ CppType idl_type_name_to_cpp_type(Type const& type, Interface const& interface)
     if (type.name() == "Promise")
         return { .name = "GC::Root<WebIDL::Promise>", .sequence_storage_type = SequenceStorageType::RootVector };
 
-    if (type.name() == "sequence") {
+    if (type.name().is_one_of("sequence"sv, "FrozenArray"sv)) {
         auto& parameterized_type = as<ParameterizedType>(type);
         auto& sequence_type = parameterized_type.parameters().first();
         auto sequence_cpp_type = idl_type_name_to_cpp_type(sequence_type, interface);
@@ -1011,34 +1023,33 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
     auto @cpp_name@ = vm.heap().allocate<WebIDL::CallbackType>(@js_name@@js_suffix@.as_object(), HTML::incumbent_realm(), @operation_returns_promise@);
 )~~~");
         }
-    } else if (parameter.type->name() == "sequence") {
-        // https://webidl.spec.whatwg.org/#es-sequence
+    } else if (parameter.type->name().is_one_of("sequence"sv, "FrozenArray"sv)) {
+        // https://webidl.spec.whatwg.org/#js-sequence
+        // https://webidl.spec.whatwg.org/#js-frozen-array
 
         auto sequence_generator = scoped_generator.fork();
         auto& parameterized_type = as<IDL::ParameterizedType>(*parameter.type);
         sequence_generator.set("recursion_depth", ByteString::number(recursion_depth));
 
-        // An ECMAScript value V is converted to an IDL sequence<T> value as follows:
-        // 1. If Type(V) is not Object, throw a TypeError.
-        // 2. Let method be ? GetMethod(V, @@iterator).
+        // A JavaScript value V is converted to an IDL sequence<T> value as follows:
+        // 1. If V is not an Object, throw a TypeError.
+        // 2. Let method be ? GetMethod(V, %Symbol.iterator%).
         // 3. If method is undefined, throw a TypeError.
         // 4. Return the result of creating a sequence from V and method.
 
-        if (optional) {
+        // A JavaScript value V is converted to an IDL FrozenArray<T> value by running the following algorithm:
+        // 1. Let values be the result of converting V to IDL type sequence<T>.
+        // 2. Return the result of creating a frozen array from values.
+
+        if (optional || parameter.type->is_nullable()) {
             auto sequence_cpp_type = idl_type_name_to_cpp_type(parameterized_type.parameters().first(), interface);
             sequence_generator.set("sequence.type", sequence_cpp_type.name);
             sequence_generator.set("sequence.storage_type", sequence_storage_type_to_cpp_storage_type_name(sequence_cpp_type.sequence_storage_type));
 
             if (!optional_default_value.has_value()) {
-                if (sequence_cpp_type.sequence_storage_type == IDL::SequenceStorageType::Vector) {
-                    sequence_generator.append(R"~~~(
+                sequence_generator.append(R"~~~(
     Optional<@sequence.storage_type@<@sequence.type@>> @cpp_name@;
 )~~~");
-                } else {
-                    sequence_generator.append(R"~~~(
-    Optional<@sequence.storage_type@> @cpp_name@;
-)~~~");
-                }
             } else {
                 if (optional_default_value != "[]")
                     TODO();
@@ -1054,9 +1065,15 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
                 }
             }
 
-            sequence_generator.append(R"~~~(
+            if (optional) {
+                sequence_generator.append(R"~~~(
     if (!@js_name@@js_suffix@.is_undefined()) {
 )~~~");
+            } else {
+                sequence_generator.append(R"~~~(
+    if (!@js_name@@js_suffix@.is_nullish()) {
+)~~~");
+            }
         }
 
         sequence_generator.append(R"~~~(
@@ -1068,9 +1085,9 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
         return vm.throw_completion<JS::TypeError>(JS::ErrorType::NotIterable, @js_name@@js_suffix@.to_string_without_side_effects());
 )~~~");
 
-        parameterized_type.generate_sequence_from_iterable(sequence_generator, ByteString::formatted("{}{}", acceptable_cpp_name, optional ? "_non_optional" : ""), ByteString::formatted("{}{}", js_name, js_suffix), ByteString::formatted("{}{}_iterator_method{}", js_name, js_suffix, recursion_depth), interface, recursion_depth + 1);
+        parameterized_type.generate_sequence_from_iterable(sequence_generator, ByteString::formatted("{}{}", acceptable_cpp_name, optional || parameter.type->is_nullable() ? "_non_optional" : ""), ByteString::formatted("{}{}", js_name, js_suffix), ByteString::formatted("{}{}_iterator_method{}", js_name, js_suffix, recursion_depth), interface, recursion_depth + 1);
 
-        if (optional) {
+        if (optional || parameter.type->is_nullable()) {
             sequence_generator.append(R"~~~(
         @cpp_name@ = move(@cpp_name@_non_optional);
     }
@@ -1802,7 +1819,7 @@ static void generate_wrap_statement(SourceGenerator& generator, ByteString const
             scoped_generator.append(R"~~~(
     if (@value@.has_value()) {
 )~~~");
-        } else if (type.name() == "sequence") {
+        } else if (type.name().is_one_of("sequence"sv, "FrozenArray"sv)) {
             scoped_generator.append(R"~~~(
     if (@value@.has_value()) {
 )~~~");
@@ -1830,8 +1847,9 @@ static void generate_wrap_statement(SourceGenerator& generator, ByteString const
     @result_expression@ JS::PrimitiveString::create(vm, @value@);
 )~~~");
         }
-    } else if (type.name() == "sequence") {
-        // https://webidl.spec.whatwg.org/#es-sequence
+    } else if (type.name().is_one_of("sequence"sv, "FrozenArray"sv)) {
+        // https://webidl.spec.whatwg.org/#js-sequence
+        // https://webidl.spec.whatwg.org/#js-frozen-array
         auto& sequence_generic_type = as<IDL::ParameterizedType>(type);
 
         scoped_generator.append(R"~~~(
@@ -1856,7 +1874,7 @@ static void generate_wrap_statement(SourceGenerator& generator, ByteString const
         // This might need to change if we switch to a RootVector.
         if (is_platform_object(sequence_generic_type.parameters().first())) {
             scoped_generator.append(R"~~~(
-            auto* wrapped_element@recursion_depth@ = &(*element@recursion_depth@);
+        auto* wrapped_element@recursion_depth@ = &(*element@recursion_depth@);
 )~~~");
         } else {
             scoped_generator.append("JS::Value wrapped_element@recursion_depth@;\n"sv);
@@ -1867,7 +1885,15 @@ static void generate_wrap_statement(SourceGenerator& generator, ByteString const
         auto property_index@recursion_depth@ = JS::PropertyKey { i@recursion_depth@ };
         MUST(new_array@recursion_depth@->create_data_property(property_index@recursion_depth@, wrapped_element@recursion_depth@));
     }
+)~~~");
 
+        if (type.name() == "FrozenArray"sv) {
+            scoped_generator.append(R"~~~(
+    TRY(new_array@recursion_depth@->set_integrity_level(IntegrityLevel::Frozen));
+)~~~");
+        }
+
+        scoped_generator.append(R"~~~(
     @result_expression@ new_array@recursion_depth@;
 )~~~");
     } else if (type.name() == "record") {
@@ -2169,7 +2195,7 @@ JS_DEFINE_NATIVE_FUNCTION(@class_name@::@function.name:snakecase@@overload_suffi
         if (function.extended_attributes.contains("CEReactions")) {
             // 1. Push a new element queue onto this object's relevant agent's custom element reactions stack.
             function_generator.append(R"~~~(
-    auto& reactions_stack = HTML::relevant_agent(*impl).custom_element_reactions_stack;
+    auto& reactions_stack = HTML::relevant_similar_origin_window_agent(*impl).custom_element_reactions_stack;
     reactions_stack.element_queue_stack.append({});
 )~~~");
         }
@@ -3722,6 +3748,9 @@ static void generate_prototype_or_global_mixin_definitions(IDL::Interface const&
     for (auto& attribute : interface.attributes) {
         if (attribute.extended_attributes.contains("FIXME"))
             continue;
+
+        bool generated_reflected_element_array = false;
+
         auto attribute_generator = generator.fork();
         attribute_generator.set("attribute.name", attribute.name);
         attribute_generator.set("attribute.getter_callback", attribute.getter_callback_name);
@@ -3767,7 +3796,7 @@ JS_DEFINE_NATIVE_FUNCTION(@class_name@::@attribute.getter_callback@)
         if (attribute.extended_attributes.contains("CEReactions")) {
             // 1. Push a new element queue onto this object's relevant agent's custom element reactions stack.
             attribute_generator.append(R"~~~(
-    auto& reactions_stack = HTML::relevant_agent(*impl).custom_element_reactions_stack;
+    auto& reactions_stack = HTML::relevant_similar_origin_window_agent(*impl).custom_element_reactions_stack;
     reactions_stack.element_queue_stack.append({});
 )~~~");
         }
@@ -4013,53 +4042,29 @@ JS_DEFINE_NATIVE_FUNCTION(@class_name@::@attribute.getter_callback@)
         retval = MUST(Infra::convert_to_scalar_value_string(*content_attribute_value));
 )~~~");
             }
-            // If a reflected IDL attribute has the type T?, where T is either Element
-            // FIXME: or an interface that inherits from Element,
-            // then with attr being the reflected content attribute name:
+            // If a reflected IDL attribute has the type T?, where T is either Element or an interface that inherits
+            // from Element, then with attr being the reflected content attribute name:
+            // FIXME: Handle "an interface that inherits from Element".
             else if (attribute.type->is_nullable() && attribute.type->name() == "Element") {
                 // The getter steps are to return the result of running this's get the attr-associated element.
                 attribute_generator.append(R"~~~(
-    auto retval = GC::Ptr<Element> {};
-)~~~");
+    static auto content_attribute = "@attribute.reflect_name@"_fly_string;
 
-                // 1. Let element be the result of running reflectedTarget's get the element.
-                // 2. Let contentAttributeValue be the result of running reflectedTarget's get the content attribute.
-                attribute_generator.append(R"~~~(
-    auto contentAttributeValue = impl->attribute("@attribute.reflect_name@"_fly_string);
+    auto retval = impl->get_the_attribute_associated_element(content_attribute, TRY(throw_dom_exception_if_needed(vm, [&] { return impl->@attribute.cpp_name@(); })));
 )~~~");
-                // 3. If reflectedTarget's explicitly set attr-element is not null:
-                //      1. If reflectedTarget's explicitly set attr-element is a descendant of any of element's shadow-including ancestors, then return reflectedTarget's explicitly set attr-element.
-                //      2. Return null.
-                attribute_generator.append(R"~~~(
-    auto const explicitly_set_attr = TRY(throw_dom_exception_if_needed(vm, [&] { return impl->@attribute.cpp_name@(); }));
-    if (explicitly_set_attr) {
-        if (&impl->shadow_including_root() == &explicitly_set_attr->root()) {
-            retval = explicitly_set_attr;
-        } else {
-            retval = GC::Ptr<Element> {};
-        }
-    }
-)~~~");
-                // 4. Otherwise, if contentAttributeValue is not null, return the first element candidate, in tree order, that meets the following criteria:
-                //      candidate's root is the same as element's root;
-                //      candidate's ID is contentAttributeValue; and
-                //      FIXME: candidate implements T.
-                // If no such element exists, then return null.
-                // 5. Return null.
-
-                // FIXME: This works when T is Element but will need adjustment when we handle subtypes too
-                attribute_generator.append(R"~~~(
-    else if (contentAttributeValue.has_value()) {
-        impl->root().for_each_in_inclusive_subtree_of_type<DOM::Element>([&](auto& candidate) {
-            if (candidate.attribute(HTML::AttributeNames::id) == contentAttributeValue.value()) {
-                retval = &candidate;
-                return TraversalDecision::Break;
             }
-            return TraversalDecision::Continue;
-        });
-    }
-)~~~");
+            // If a reflected IDL attribute has the type FrozenArray<T>?, where T is either Element or an interface that
+            // inherits from Element, then with attr being the reflected content attribute name:
+            // FIXME: Handle "an interface that inherits from Element".
+            else if (is_nullable_frozen_array_of_single_type(attribute.type, "Element"sv)) {
+                generated_reflected_element_array = true;
 
+                // 1. Let elements be the result of running this's get the attr-associated elements.
+                attribute_generator.append(R"~~~(
+    static auto content_attribute = "@attribute.reflect_name@"_fly_string;
+
+    auto retval = impl->get_the_attribute_associated_elements(content_attribute, TRY(throw_dom_exception_if_needed(vm, [&] { return impl->@attribute.cpp_name@(); })));
+)~~~");
             } else {
                 attribute_generator.append(R"~~~(
     auto retval = impl->get_attribute_value("@attribute.reflect_name@"_fly_string);
@@ -4077,6 +4082,19 @@ JS_DEFINE_NATIVE_FUNCTION(@class_name@::@attribute.getter_callback@)
     Bindings::invoke_custom_element_reactions(queue);
 )~~~");
             }
+
+            if (generated_reflected_element_array) {
+                // 2. If the contents of elements is equal to the contents of this's cached attr-associated elements,
+                //    then return this's cached attr-associated elements object.
+                attribute_generator.append(R"~~~(
+    auto cached_@attribute.cpp_name@ = TRY(throw_dom_exception_if_needed(vm, [&] { return impl->cached_@attribute.cpp_name@(); }));
+    if (WebIDL::lists_contain_same_elements(cached_@attribute.cpp_name@, retval))
+        return cached_@attribute.cpp_name@;
+
+    auto result = TRY([&]() -> JS::ThrowCompletionOr<JS::Value> {
+)~~~");
+            }
+
         } else {
             if (!attribute.extended_attributes.contains("CEReactions")) {
                 attribute_generator.append(R"~~~(
@@ -4121,6 +4139,24 @@ JS_DEFINE_NATIVE_FUNCTION(@class_name@::@attribute.getter_callback@)
 
         generate_return_statement(generator, *attribute.type, interface);
 
+        if (generated_reflected_element_array) {
+            // 3. Let elementsAsFrozenArray be elements, converted to a FrozenArray<T>?.
+            // 4. Set this's cached attr-associated elements to elements.
+            // 5. Set this's cached attr-associated elements object to elementsAsFrozenArray.
+            attribute_generator.append(R"~~~(
+    }());
+
+    if (result.is_null()) {
+        TRY(throw_dom_exception_if_needed(vm, [&] { impl->set_cached_@attribute.cpp_name@({}); }));
+    } else {
+        auto& array = as<JS::Array>(result.as_object());
+        TRY(throw_dom_exception_if_needed(vm, [&] { impl->set_cached_@attribute.cpp_name@(&array); }));
+    }
+
+    return result;
+)~~~");
+        }
+
         attribute_generator.append(R"~~~(
 }
 )~~~");
@@ -4143,7 +4179,7 @@ JS_DEFINE_NATIVE_FUNCTION(@class_name@::@attribute.setter_callback@)
             if (attribute.extended_attributes.contains("CEReactions")) {
                 // 1. Push a new element queue onto this object's relevant agent's custom element reactions stack.
                 attribute_generator.append(R"~~~(
-    auto& reactions_stack = HTML::relevant_agent(*impl).custom_element_reactions_stack;
+    auto& reactions_stack = HTML::relevant_similar_origin_window_agent(*impl).custom_element_reactions_stack;
     reactions_stack.element_queue_stack.append({});
 )~~~");
             }
@@ -4179,29 +4215,69 @@ JS_DEFINE_NATIVE_FUNCTION(@class_name@::@attribute.setter_callback@)
     MUST(impl->set_attribute("@attribute.reflect_name@"_fly_string, String::number(cpp_value)));
 )~~~");
                 }
-                // If a reflected IDL attribute has the type T?, where T is either Element
-                // FIXME: or an interface that inherits from Element,
-                // then with attr being the reflected content attribute name:
+                // If a reflected IDL attribute has the type T?, where T is either Element or an interface that inherits
+                // from Element, then with attr being the reflected content attribute name:
+                // FIXME: Handle "an interface that inherits from Element".
                 else if (attribute.type->is_nullable() && attribute.type->name() == "Element") {
                     // The setter steps are:
                     // 1. If the given value is null, then:
-                    //      1. Set this's explicitly set attr-element to null.
-                    //      2. Run this's delete the content attribute.
-                    //      3. Return.
+                    //     1. Set this's explicitly set attr-element to null.
+                    //     2. Run this's delete the content attribute.
+                    //     3. Return.
                     attribute_generator.append(R"~~~(
+    static auto content_attribute = "@attribute.reflect_name@"_fly_string;
+
     if (!cpp_value) {
-        TRY(throw_dom_exception_if_needed(vm, [&] { return impl->set_@attribute.cpp_name@(nullptr); }));
-        impl->remove_attribute("@attribute.reflect_name@"_fly_string);
+        TRY(throw_dom_exception_if_needed(vm, [&] { return impl->set_@attribute.cpp_name@({}); }));
+        impl->remove_attribute(content_attribute);
         return JS::js_undefined();
     }
 )~~~");
                     // 2. Run this's set the content attribute with the empty string.
                     attribute_generator.append(R"~~~(
-    MUST(impl->set_attribute("@attribute.reflect_name@"_fly_string, String {}));
+    MUST(impl->set_attribute(content_attribute, String {}));
 )~~~");
                     // 3. Set this's explicitly set attr-element to a weak reference to the given value.
                     attribute_generator.append(R"~~~(
-    TRY(throw_dom_exception_if_needed(vm, [&] { return impl->set_@attribute.cpp_name@(cpp_value); }));
+    TRY(throw_dom_exception_if_needed(vm, [&] { return impl->set_@attribute.cpp_name@(*cpp_value); }));
+)~~~");
+                }
+                // If a reflected IDL attribute has the type FrozenArray<T>?, where T is either Element or an interface
+                // that inherits from Element, then with attr being the reflected content attribute name:
+                // FIXME: Handle "an interface that inherits from Element".
+                else if (is_nullable_frozen_array_of_single_type(attribute.type, "Element"sv)) {
+                    // 1. If the given value is null:
+                    //     1. Set this's explicitly set attr-elements to null.
+                    //     2. Run this's delete the content attribute.
+                    //     3. Return.
+                    attribute_generator.append(R"~~~(
+    static auto content_attribute = "@attribute.reflect_name@"_fly_string;
+
+    if (!cpp_value.has_value()) {
+        TRY(throw_dom_exception_if_needed(vm, [&] { return impl->set_@attribute.cpp_name@({}); }));
+        impl->remove_attribute(content_attribute);
+        return JS::js_undefined();
+    }
+)~~~");
+
+                    // 2. Run this's set the content attribute with the empty string.
+                    attribute_generator.append(R"~~~(
+    MUST(impl->set_attribute(content_attribute, String {}));
+)~~~");
+
+                    // 3. Let elements be an empty list.
+                    // 4. For each element in the given value:
+                    //     1. Append a weak reference to element to elements.
+                    // 5. Set this's explicitly set attr-elements to elements.
+                    attribute_generator.append(R"~~~(
+    Vector<WeakPtr<DOM::Element>> elements;
+    elements.ensure_capacity(cpp_value->size());
+
+    for (auto const& element : *cpp_value) {
+        elements.unchecked_append(*element);
+    }
+
+    TRY(throw_dom_exception_if_needed(vm, [&] { return impl->set_@attribute.cpp_name@(move(elements)); }));
 )~~~");
                 } else if (attribute.type->is_nullable()) {
                     attribute_generator.append(R"~~~(
@@ -5144,8 +5220,8 @@ void generate_prototype_implementation(IDL::Interface const& interface, StringBu
 #include <LibWeb/DOM/NodeFilter.h>
 #include <LibWeb/DOM/Range.h>
 #include <LibWeb/HTML/Numbers.h>
-#include <LibWeb/HTML/Scripting/Agent.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/Scripting/SimilarOriginWindowAgent.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HTML/WindowProxy.h>
 #include <LibWeb/Infra/Strings.h>

@@ -176,7 +176,7 @@ Optional<FormattingContext::Type> FormattingContext::formatting_context_type_cre
 // FIXME: This is a hack. Get rid of it.
 struct ReplacedFormattingContext : public FormattingContext {
     ReplacedFormattingContext(LayoutState& state, LayoutMode layout_mode, Box const& box)
-        : FormattingContext(Type::Block, layout_mode, state, box)
+        : FormattingContext(Type::InternalReplaced, layout_mode, state, box)
     {
     }
     virtual CSSPixels automatic_content_width() const override { return 0; }
@@ -187,7 +187,7 @@ struct ReplacedFormattingContext : public FormattingContext {
 // FIXME: This is a hack. Get rid of it.
 struct DummyFormattingContext : public FormattingContext {
     DummyFormattingContext(LayoutState& state, LayoutMode layout_mode, Box const& box)
-        : FormattingContext(Type::Block, layout_mode, state, box)
+        : FormattingContext(Type::InternalDummy, layout_mode, state, box)
     {
     }
     virtual CSSPixels automatic_content_width() const override { return 0; }
@@ -1914,8 +1914,6 @@ bool FormattingContext::should_treat_max_width_as_none(Box const& box, Available
         return true;
     if (available_width.is_max_content() && max_width.is_max_content())
         return true;
-    if (box.is_absolutely_positioned())
-        return false;
     if (max_width.contains_percentage()) {
         if (available_width.is_max_content())
             return true;
@@ -1942,8 +1940,6 @@ bool FormattingContext::should_treat_max_height_as_none(Box const& box, Availabl
     auto const& max_height = box.computed_values().max_height();
     if (max_height.is_none())
         return true;
-    if (box.is_absolutely_positioned())
-        return false;
     if (max_height.contains_percentage()) {
         if (available_height.is_min_content())
             return false;

@@ -481,34 +481,42 @@ void ECMAScriptFunctionObject::initialize(Realm& realm)
     }
 }
 
+ThrowCompletionOr<void> ECMAScriptFunctionObject::get_stack_frame_size(size_t& registers_and_constants_and_locals_count, size_t& argument_count)
+{
+    if (!m_bytecode_executable) {
+        if (!ecmascript_code().bytecode_executable()) {
+            if (is_module_wrapper()) {
+                const_cast<Statement&>(ecmascript_code()).set_bytecode_executable(TRY(Bytecode::compile(vm(), ecmascript_code(), kind(), name())));
+            } else {
+                const_cast<Statement&>(ecmascript_code()).set_bytecode_executable(TRY(Bytecode::compile(vm(), *this)));
+            }
+        }
+        m_bytecode_executable = ecmascript_code().bytecode_executable();
+    }
+    registers_and_constants_and_locals_count = m_bytecode_executable->number_of_registers + m_bytecode_executable->constants.size() + m_bytecode_executable->local_variable_names.size();
+    argument_count = max(argument_count, formal_parameters().size());
+    return {};
+}
+
 // 10.2.1 [[Call]] ( thisArgument, argumentsList ), https://tc39.es/ecma262/#sec-ecmascript-function-objects-call-thisargument-argumentslist
-ThrowCompletionOr<Value> ECMAScriptFunctionObject::internal_call(Value this_argument, ReadonlySpan<Value> arguments_list)
+FLATTEN ThrowCompletionOr<Value> ECMAScriptFunctionObject::internal_call(ExecutionContext& callee_context, Value this_argument)
 {
     auto& vm = this->vm();
+
+    ASSERT(m_bytecode_executable);
 
     // 1. Let callerContext be the running execution context.
     // NOTE: No-op, kept by the VM in its execution context stack.
 
-    auto callee_context = ExecutionContext::create();
-
-    // Non-standard
-    callee_context->arguments.ensure_capacity(max(arguments_list.size(), formal_parameters().size()));
-    callee_context->arguments.append(arguments_list.data(), arguments_list.size());
-    callee_context->passed_argument_count = arguments_list.size();
-    if (arguments_list.size() < formal_parameters().size()) {
-        for (size_t i = arguments_list.size(); i < formal_parameters().size(); ++i)
-            callee_context->arguments.append(js_undefined());
-    }
-
     // 2. Let calleeContext be PrepareForOrdinaryCall(F, undefined).
     // NOTE: We throw if the end of the native stack is reached, so unlike in the spec this _does_ need an exception check.
-    TRY(prepare_for_ordinary_call(*callee_context, nullptr));
+    TRY(prepare_for_ordinary_call(vm, callee_context, nullptr));
 
     // 3. Assert: calleeContext is now the running execution context.
-    VERIFY(&vm.running_execution_context() == callee_context);
+    ASSERT(&vm.running_execution_context() == &callee_context);
 
     // 4. If F.[[IsClassConstructor]] is true, then
-    if (is_class_constructor()) {
+    if (is_class_constructor()) [[unlikely]] {
         // a. Let error be a newly created TypeError object.
         // b. NOTE: error is created in calleeContext with F's associated Realm Record.
         auto throw_completion = vm.throw_completion<TypeError>(ErrorType::ClassConstructorWithoutNew, name());
@@ -522,23 +530,18 @@ ThrowCompletionOr<Value> ECMAScriptFunctionObject::internal_call(Value this_argu
 
     // 5. Perform OrdinaryCallBindThis(F, calleeContext, thisArgument).
     if (uses_this())
-        ordinary_call_bind_this(*callee_context, this_argument);
+        ordinary_call_bind_this(vm, callee_context, this_argument);
 
     // 6. Let result be Completion(OrdinaryCallEvaluateBody(F, argumentsList)).
-    auto result = ordinary_call_evaluate_body();
+    auto result = ordinary_call_evaluate_body(vm);
 
     // 7. Remove calleeContext from the execution context stack and restore callerContext as the running execution context.
     vm.pop_execution_context();
 
     // 8. If result.[[Type]] is return, return result.[[Value]].
-    if (result.type() == Completion::Type::Return)
-        return result.value();
-
     // 9. Assert: result is a throw completion.
-    VERIFY(result.type() == Completion::Type::Throw);
-
     // 10. Return ? result.
-    return result.release_error();
+    return result;
 }
 
 // 10.2.2 [[Construct]] ( argumentsList, newTarget ), https://tc39.es/ecma262/#sec-ecmascript-function-objects-construct-argumentslist-newtarget
@@ -546,15 +549,30 @@ ThrowCompletionOr<GC::Ref<Object>> ECMAScriptFunctionObject::internal_construct(
 {
     auto& vm = this->vm();
 
-    auto callee_context = ExecutionContext::create();
+    if (!m_bytecode_executable) {
+        if (!ecmascript_code().bytecode_executable()) {
+            if (is_module_wrapper()) {
+                const_cast<Statement&>(ecmascript_code()).set_bytecode_executable(TRY(Bytecode::compile(vm, ecmascript_code(), kind(), name())));
+            } else {
+                const_cast<Statement&>(ecmascript_code()).set_bytecode_executable(TRY(Bytecode::compile(vm, *this)));
+            }
+        }
+        m_bytecode_executable = ecmascript_code().bytecode_executable();
+    }
+
+    u32 arguments_count = max(arguments_list.size(), formal_parameters().size());
+    auto registers_and_constants_and_locals_count = m_bytecode_executable->number_of_registers + m_bytecode_executable->constants.size() + m_bytecode_executable->local_variable_names.size();
+    ExecutionContext* callee_context = nullptr;
+    ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK(callee_context, registers_and_constants_and_locals_count, arguments_count);
 
     // Non-standard
-    callee_context->arguments.ensure_capacity(max(arguments_list.size(), formal_parameters().size()));
-    callee_context->arguments.append(arguments_list.data(), arguments_list.size());
+    auto arguments = callee_context->arguments;
+    if (!arguments_list.is_empty())
+        arguments.overwrite(0, arguments_list.data(), arguments_list.size() * sizeof(Value));
     callee_context->passed_argument_count = arguments_list.size();
     if (arguments_list.size() < formal_parameters().size()) {
         for (size_t i = arguments_list.size(); i < formal_parameters().size(); ++i)
-            callee_context->arguments.append(js_undefined());
+            arguments[i] = js_undefined();
     }
 
     // 1. Let callerContext be the running execution context.
@@ -573,7 +591,7 @@ ThrowCompletionOr<GC::Ref<Object>> ECMAScriptFunctionObject::internal_construct(
 
     // 4. Let calleeContext be PrepareForOrdinaryCall(F, newTarget).
     // NOTE: We throw if the end of the native stack is reached, so unlike in the spec this _does_ need an exception check.
-    TRY(prepare_for_ordinary_call(*callee_context, &new_target));
+    TRY(prepare_for_ordinary_call(vm, *callee_context, &new_target));
 
     // 5. Assert: calleeContext is now the running execution context.
     VERIFY(&vm.running_execution_context() == callee_context);
@@ -582,7 +600,7 @@ ThrowCompletionOr<GC::Ref<Object>> ECMAScriptFunctionObject::internal_construct(
     if (kind == ConstructorKind::Base) {
         // a. Perform OrdinaryCallBindThis(F, calleeContext, thisArgument).
         if (uses_this())
-            ordinary_call_bind_this(*callee_context, this_argument);
+            ordinary_call_bind_this(vm, *callee_context, this_argument);
 
         // b. Let initializeResult be Completion(InitializeInstanceElements(thisArgument, F)).
         auto initialize_result = this_argument->initialize_instance_elements(*this);
@@ -601,23 +619,23 @@ ThrowCompletionOr<GC::Ref<Object>> ECMAScriptFunctionObject::internal_construct(
     auto constructor_env = callee_context->lexical_environment;
 
     // 8. Let result be Completion(OrdinaryCallEvaluateBody(F, argumentsList)).
-    auto result = ordinary_call_evaluate_body();
+    auto result = ordinary_call_evaluate_body(vm);
 
     // 9. Remove calleeContext from the execution context stack and restore callerContext as the running execution context.
     vm.pop_execution_context();
 
     // 10. If result is a throw completion, then
-    if (result.type() == Completion::Type::Throw) {
+    if (result.is_error()) {
         // a. Return ? result.
         return result.release_error();
     }
 
     // 11. Assert: result is a return completion.
-    VERIFY(result.type() == Completion::Type::Return);
+    // NOTE: We already checked !is_error() above.
 
     // 12. If Type(result.[[Value]]) is Object, return result.[[Value]].
     if (result.value().is_object())
-        return result.value().as_object();
+        return GC::Ref<Object> { const_cast<Object&>(result.value().as_object()) };
 
     // 13. If kind is base, return thisArgument.
     if (kind == ConstructorKind::Base)
@@ -682,10 +700,8 @@ void ECMAScriptFunctionObject::make_method(Object& home_object)
 }
 
 // 10.2.1.1 PrepareForOrdinaryCall ( F, newTarget ), https://tc39.es/ecma262/#sec-prepareforordinarycall
-ThrowCompletionOr<void> ECMAScriptFunctionObject::prepare_for_ordinary_call(ExecutionContext& callee_context, Object* new_target)
+ThrowCompletionOr<void> ECMAScriptFunctionObject::prepare_for_ordinary_call(VM& vm, ExecutionContext& callee_context, Object* new_target)
 {
-    auto& vm = this->vm();
-
     // Non-standard
     callee_context.is_strict_mode = is_strict_mode();
 
@@ -732,10 +748,8 @@ ThrowCompletionOr<void> ECMAScriptFunctionObject::prepare_for_ordinary_call(Exec
 }
 
 // 10.2.1.2 OrdinaryCallBindThis ( F, calleeContext, thisArgument ), https://tc39.es/ecma262/#sec-ordinarycallbindthis
-void ECMAScriptFunctionObject::ordinary_call_bind_this(ExecutionContext& callee_context, Value this_argument)
+void ECMAScriptFunctionObject::ordinary_call_bind_this(VM& vm, ExecutionContext& callee_context, Value this_argument)
 {
-    auto& vm = this->vm();
-
     // 1. Let thisMode be F.[[ThisMode]].
     // If thisMode is lexical, return unused.
     if (this_mode() == ThisMode::Lexical)
@@ -885,23 +899,9 @@ template void async_function_start(VM&, PromiseCapability const&, GC::Function<C
 
 // 10.2.1.4 OrdinaryCallEvaluateBody ( F, argumentsList ), https://tc39.es/ecma262/#sec-ordinarycallevaluatebody
 // 15.8.4 Runtime Semantics: EvaluateAsyncFunctionBody, https://tc39.es/ecma262/#sec-runtime-semantics-evaluatefunctionbody
-Completion ECMAScriptFunctionObject::ordinary_call_evaluate_body()
+ThrowCompletionOr<Value> ECMAScriptFunctionObject::ordinary_call_evaluate_body(VM& vm)
 {
-    auto& vm = this->vm();
     auto& realm = *vm.current_realm();
-
-    if (!m_bytecode_executable) {
-        if (!ecmascript_code().bytecode_executable()) {
-            if (is_module_wrapper()) {
-                const_cast<Statement&>(ecmascript_code()).set_bytecode_executable(TRY(Bytecode::compile(vm, ecmascript_code(), kind(), name())));
-            } else {
-                const_cast<Statement&>(ecmascript_code()).set_bytecode_executable(TRY(Bytecode::compile(vm, *this)));
-            }
-        }
-        m_bytecode_executable = ecmascript_code().bytecode_executable();
-    }
-
-    vm.running_execution_context().registers_and_constants_and_locals.resize_with_default_value(local_variables_names().size() + m_bytecode_executable->number_of_registers + m_bytecode_executable->constants.size(), js_special_empty_value());
 
     auto result_and_frame = vm.bytecode_interpreter().run_executable(*m_bytecode_executable, {});
 
@@ -913,11 +913,11 @@ Completion ECMAScriptFunctionObject::ordinary_call_evaluate_body()
     // NOTE: Running the bytecode should eventually return a completion.
     // Until it does, we assume "return" and include the undefined fallback from the call site.
     if (kind() == FunctionKind::Normal)
-        return { Completion::Type::Return, result };
+        return result;
 
     if (kind() == FunctionKind::AsyncGenerator) {
         auto async_generator_object = TRY(AsyncGenerator::create(realm, result, this, vm.running_execution_context().copy()));
-        return { Completion::Type::Return, async_generator_object };
+        return async_generator_object;
     }
 
     auto generator_object = TRY(GeneratorObject::create(realm, result, this, vm.running_execution_context().copy()));
@@ -925,10 +925,10 @@ Completion ECMAScriptFunctionObject::ordinary_call_evaluate_body()
     // NOTE: Async functions are entirely transformed to generator functions, and wrapped in a custom driver that returns a promise
     //       See AwaitExpression::generate_bytecode() for the transformation.
     if (kind() == FunctionKind::Async)
-        return { Completion::Type::Return, AsyncFunctionDriverWrapper::create(realm, generator_object) };
+        return AsyncFunctionDriverWrapper::create(realm, generator_object);
 
     VERIFY(kind() == FunctionKind::Generator);
-    return { Completion::Type::Return, generator_object };
+    return generator_object;
 }
 
 void ECMAScriptFunctionObject::set_name(FlyString const& name)

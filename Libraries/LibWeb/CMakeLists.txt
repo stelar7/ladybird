@@ -504,9 +504,11 @@ set(SOURCES
     HTML/Scripting/ModuleMap.cpp
     HTML/Scripting/ModuleScript.cpp
     HTML/Scripting/Script.cpp
+    HTML/Scripting/SimilarOriginWindowAgent.cpp
     HTML/Scripting/SyntheticRealmSettings.cpp
     HTML/Scripting/TemporaryExecutionContext.cpp
     HTML/Scripting/WindowEnvironmentSettingsObject.cpp
+    HTML/Scripting/WorkerAgent.cpp
     HTML/Scripting/WorkerEnvironmentSettingsObject.cpp
     HTML/Scripting/SerializedEnvironmentSettingsObject.cpp
     HTML/SelectedFile.cpp
@@ -545,7 +547,7 @@ set(SOURCES
     HTML/WindowOrWorkerGlobalScope.cpp
     HTML/WindowProxy.cpp
     HTML/Worker.cpp
-    HTML/WorkerAgent.cpp
+    HTML/WorkerAgentParent.cpp
     HTML/WorkerDebugConsoleClient.cpp
     HTML/WorkerGlobalScope.cpp
     HTML/WorkerLocation.cpp
@@ -725,6 +727,7 @@ set(SOURCES
     ResizeObserver/ResizeObserverSize.cpp
     ResourceTiming/PerformanceResourceTiming.cpp
     SecureContexts/AbstractOperations.cpp
+    ServiceWorker/EventNames.cpp
     ServiceWorker/Job.cpp
     ServiceWorker/Registration.cpp
     ServiceWorker/ServiceWorker.cpp

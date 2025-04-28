@@ -197,7 +197,7 @@ public:
 
     virtual bool is_function() const { return false; }
     virtual bool is_promise() const { return false; }
-    virtual bool is_error() const { return false; }
+    virtual bool is_error_object() const { return false; }
     virtual bool is_date() const { return false; }
     virtual bool is_number_object() const { return false; }
     virtual bool is_boolean_object() const { return false; }
@@ -210,6 +210,7 @@ public:
     virtual bool is_native_function() const { return false; }
     virtual bool is_ecmascript_function_object() const { return false; }
     virtual bool is_array_iterator() const { return false; }
+    virtual bool is_raw_json_object() const { return false; }
 
     // B.3.7 The [[IsHTMLDDA]] Internal Slot, https://tc39.es/ecma262/#sec-IsHTMLDDA-internal-slot
     virtual bool is_htmldda() const { return false; }

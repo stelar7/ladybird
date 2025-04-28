@@ -7,6 +7,7 @@
 #pragma once
 
 #include <LibGC/Ptr.h>
+#include <LibWeb/Bindings/IDBDatabasePrototype.h>
 #include <LibWeb/Bindings/IDBTransactionPrototype.h>
 #include <LibWeb/DOM/EventTarget.h>
 #include <LibWeb/HTML/DOMStringList.h>

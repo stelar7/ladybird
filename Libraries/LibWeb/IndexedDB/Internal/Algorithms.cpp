@@ -254,7 +254,7 @@ WebIDL::ExceptionOr<GC::Ref<Key>> convert_a_value_to_a_key(JS::Realm& realm, JS:
     // - If input is a buffer source type
     if (input.is_object() && (is<JS::TypedArrayBase>(input.as_object()) || is<JS::ArrayBuffer>(input.as_object()) || is<JS::DataView>(input.as_object()))) {
 
-        // 1. If input is [detached] then return invalid.
+        // 1. If input is detached then return invalid.
         if (WebIDL::is_buffer_source_detached(input))
             return Key::create_invalid(realm, "Detached buffer is not supported as key"_string);
 
@@ -403,14 +403,13 @@ GC::Ref<IDBTransaction> upgrade_a_database(JS::Realm& realm, GC::Ref<IDBDatabase
         // 5. Let didThrow be the result of firing a version change event named upgradeneeded at request with old version and version.
         auto did_throw = fire_a_version_change_event(realm, HTML::EventNames::upgradeneeded, request, old_version, version);
 
-        // AD-HOC: If the transaction was aborted by the event, then DONT set the transaction back to inactive.
-        // https://github.com/w3c/IndexedDB/issues/436#issuecomment-2791113467
-        if (transaction->state() != IDBTransaction::TransactionState::Finished) {
+        // 6. If transaction’s state is active, then:
+        if (transaction->state() == IDBTransaction::TransactionState::Active) {
 
-            // 6. Set transaction’s state to inactive.
+            // 1. Set transaction’s state to inactive.
             transaction->set_state(IDBTransaction::TransactionState::Inactive);
 
-            // 7. If didThrow is true, run abort a transaction with transaction and a newly created "AbortError" DOMException.
+            // 2. If didThrow is true, run abort a transaction with transaction and a newly created "AbortError" DOMException.
             if (did_throw)
                 abort_a_transaction(transaction, WebIDL::AbortError::create(realm, "Version change event threw an exception"_string));
 
@@ -1254,7 +1253,7 @@ void possibly_update_the_key_generator(GC::Ref<ObjectStore> store, GC::Ref<Key> 
     u64 value = floor(temp_value);
 
     // 5. Let generator be store’s key generator.
-    auto generator = store->key_generator();
+    auto& generator = store->key_generator();
 
     // 6. If value is greater than or equal to generator’s current number, then set generator’s current number to value + 1.
     if (value >= generator.current_number())
@@ -1371,15 +1370,22 @@ WebIDL::ExceptionOr<GC::Ptr<Key>> store_a_record_into_an_object_store(JS::Realm&
     // 5. For each index which references store:
     for (auto const& [name, index] : store->index_set()) {
         // 1. Let index key be the result of extracting a key from a value using a key path with value, index’s key path, and index’s multiEntry flag.
-        auto index_key = TRY(extract_a_key_from_a_value_using_a_key_path(realm, value, index->key_path(), index->multi_entry()));
+        auto completion_index_key = extract_a_key_from_a_value_using_a_key_path(realm, value, index->key_path(), index->multi_entry());
 
         // 2. If index key is an exception, or invalid, or failure, take no further actions for index, and continue these steps for the next index.
-        if (index_key.is_error())
+        if (completion_index_key.is_error())
             continue;
 
-        auto index_key_value = index_key.value();
+        auto failure_index_key = completion_index_key.release_value();
+        if (failure_index_key.is_error())
+            continue;
+
+        auto index_key = failure_index_key.release_value();
+        if (index_key->is_invalid())
+            continue;
+
         auto index_multi_entry = index->multi_entry();
-        auto index_key_is_array = index_key_value->type() == Key::KeyType::Array;
+        auto index_key_is_array = index_key->type() == Key::KeyType::Array;
         auto index_is_unique = index->unique();
 
         // 3. If index’s multiEntry flag is false, or if index key is not an array key,
@@ -1387,7 +1393,7 @@ WebIDL::ExceptionOr<GC::Ptr<Key>> store_a_record_into_an_object_store(JS::Realm&
         //    and index’s unique flag is true,
         //    then this operation failed with a "ConstraintError" DOMException.
         //    Abort this algorithm without taking any further steps.
-        if ((!index_multi_entry || !index_key_is_array) && index_is_unique && index->has_record_with_key(index_key_value))
+        if ((!index_multi_entry || !index_key_is_array) && index_is_unique && index->has_record_with_key(index_key))
             return WebIDL::ConstraintError::create(realm, "Record already exists in index"_string);
 
         // 4. If index’s multiEntry flag is true and index key is an array key,
@@ -1396,7 +1402,7 @@ WebIDL::ExceptionOr<GC::Ptr<Key>> store_a_record_into_an_object_store(JS::Realm&
         //    then this operation failed with a "ConstraintError" DOMException.
         //    Abort this algorithm without taking any further steps.
         if (index_multi_entry && index_key_is_array && index_is_unique) {
-            for (auto const& subkey : index_key_value->subkeys()) {
+            for (auto const& subkey : index_key->subkeys()) {
                 if (index->has_record_with_key(*subkey))
                     return WebIDL::ConstraintError::create(realm, "Record already exists in index"_string);
             }

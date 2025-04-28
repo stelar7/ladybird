@@ -163,6 +163,9 @@ public:
     GC::Ptr<Attr> get_attribute_node(FlyString const& name) const;
     GC::Ptr<Attr> get_attribute_node_ns(Optional<FlyString> const& namespace_, FlyString const& name) const;
 
+    GC::Ptr<DOM::Element> get_the_attribute_associated_element(FlyString const& content_attribute, GC::Ptr<DOM::Element> explicitly_set_attribute_element) const;
+    Optional<GC::RootVector<GC::Ref<DOM::Element>>> get_the_attribute_associated_elements(FlyString const& content_attribute, Optional<Vector<WeakPtr<DOM::Element>>> const& explicitly_set_attribute_elements) const;
+
     DOMTokenList* class_list();
 
     WebIDL::ExceptionOr<GC::Ref<ShadowRoot>> attach_shadow(ShadowRootInit init);
@@ -323,14 +326,12 @@ public:
     ENUMERATE_ARIA_ATTRIBUTES
 #undef __ENUMERATE_ARIA_ATTRIBUTE
 
-    GC::Ptr<DOM::Element> aria_active_descendant_element() { return m_aria_active_descendant_element; }
-    void set_aria_active_descendant_element(GC::Ptr<DOM::Element> value) { m_aria_active_descendant_element = value; }
-
     virtual bool exclude_from_accessibility_tree() const override;
 
     virtual bool include_in_accessibility_tree() const override;
 
-    virtual Element const* to_element() const override { return this; }
+    virtual Element& to_element() override { return *this; }
+    virtual Element const& to_element() const override { return *this; }
 
     bool is_hidden() const;
     bool has_hidden_ancestor() const;
@@ -482,6 +483,8 @@ protected:
 
     virtual void inserted() override;
     virtual void removed_from(Node* old_parent, Node& old_root) override;
+    virtual void moved_from(GC::Ptr<Node> old_parent) override;
+
     virtual void children_changed(ChildrenChangedMetadata const*) override;
     virtual i32 default_tab_index_value() const;
 
@@ -577,8 +580,6 @@ private:
     size_t m_sibling_invalidation_distance { 0 };
 
     OwnPtr<CSS::CountersSet> m_counters_set;
-
-    GC::Ptr<DOM::Element> m_aria_active_descendant_element;
 
     // https://drafts.csswg.org/css-contain/#proximity-to-the-viewport
     ProximityToTheViewport m_proximity_to_the_viewport { ProximityToTheViewport::NotDetermined };

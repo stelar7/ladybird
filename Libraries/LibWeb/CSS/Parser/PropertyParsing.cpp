@@ -670,6 +670,22 @@ Parser::ParseErrorOr<NonnullRefPtr<CSSStyleValue const>> Parser::parse_css_value
         if (auto parsed_value = parse_transition_value(tokens); parsed_value && !tokens.has_next_token())
             return parsed_value.release_nonnull();
         return ParseError::SyntaxError;
+    case PropertyID::TransitionDelay:
+        if (auto parsed_value = parse_list_of_time_values(property_id, tokens); parsed_value && !tokens.has_next_token())
+            return parsed_value.release_nonnull();
+        return ParseError::SyntaxError;
+    case PropertyID::TransitionDuration:
+        if (auto parsed_value = parse_list_of_time_values(property_id, tokens); parsed_value && !tokens.has_next_token())
+            return parsed_value.release_nonnull();
+        return ParseError::SyntaxError;
+    case PropertyID::TransitionProperty:
+        if (auto parsed_value = parse_transition_property_value(tokens); parsed_value && !tokens.has_next_token())
+            return parsed_value.release_nonnull();
+        return ParseError::SyntaxError;
+    case PropertyID::TransitionTimingFunction:
+        if (auto parsed_value = parse_comma_separated_value_list(tokens, [this](auto& tokens) { return parse_easing_value(tokens); }))
+            return parsed_value.release_nonnull();
+        return ParseError::SyntaxError;
     case PropertyID::Translate:
         if (auto parsed_value = parse_translate_value(tokens); parsed_value && !tokens.has_next_token())
             return parsed_value.release_nonnull();
@@ -3740,7 +3756,18 @@ RefPtr<CSSStyleValue const> Parser::parse_transition_value(TokenStream<Component
                 continue;
             }
 
-            if (auto transition_property = parse_custom_ident_value(tokens, { { "none"sv } })) {
+            if (auto token = tokens.peek_token(); token.is_ident("all"sv)) {
+                auto transition_keyword = parse_keyword_value(tokens);
+                VERIFY(transition_keyword->to_keyword() == Keyword::All);
+                if (transition.property_name) {
+                    dbgln_if(CSS_PARSER_DEBUG, "Transition property has multiple property identifiers");
+                    return {};
+                }
+                transition.property_name = transition_keyword.release_nonnull();
+                continue;
+            }
+
+            if (auto transition_property = parse_custom_ident_value(tokens, { { "all"sv, "none"sv } })) {
                 if (transition.property_name) {
                     dbgln_if(CSS_PARSER_DEBUG, "Transition property has multiple property identifiers");
                     return {};
@@ -3758,7 +3785,7 @@ RefPtr<CSSStyleValue const> Parser::parse_transition_value(TokenStream<Component
         }
 
         if (!transition.property_name)
-            transition.property_name = CustomIdentStyleValue::create("all"_fly_string);
+            transition.property_name = CSSKeywordValue::create(Keyword::All);
 
         if (!transition.easing)
             transition.easing = EasingStyleValue::create(EasingStyleValue::CubicBezier::ease());
@@ -3773,6 +3800,58 @@ RefPtr<CSSStyleValue const> Parser::parse_transition_value(TokenStream<Component
 
     transaction.commit();
     return TransitionStyleValue::create(move(transitions));
+}
+
+RefPtr<CSSStyleValue const> Parser::parse_list_of_time_values(PropertyID property_id, TokenStream<ComponentValue>& tokens)
+{
+    auto transaction = tokens.begin_transaction();
+    auto time_values = parse_a_comma_separated_list_of_component_values(tokens);
+    StyleValueVector time_value_list;
+    for (auto const& value : time_values) {
+        TokenStream time_value_tokens { value };
+        auto time_style_value = parse_time_value(time_value_tokens);
+        if (!time_style_value)
+            return nullptr;
+        if (time_value_tokens.has_next_token())
+            return nullptr;
+        if (!time_style_value->is_calculated() && !property_accepts_time(property_id, time_style_value->as_time().time()))
+            return nullptr;
+        time_value_list.append(*time_style_value);
+    }
+
+    transaction.commit();
+    return StyleValueList::create(move(time_value_list), StyleValueList::Separator::Comma);
+}
+
+RefPtr<CSSStyleValue const> Parser::parse_transition_property_value(TokenStream<ComponentValue>& tokens)
+{
+    // https://drafts.csswg.org/css-transitions/#transition-property-property
+    // none | <single-transition-property>#
+
+    // none
+    if (auto none = parse_all_as_single_keyword_value(tokens, Keyword::None))
+        return none;
+
+    // <single-transition-property>#
+    // <single-transition-property> = all | <custom-ident>
+    auto transaction = tokens.begin_transaction();
+    auto transition_property_values = parse_a_comma_separated_list_of_component_values(tokens);
+
+    StyleValueVector transition_properties;
+    for (auto const& value : transition_property_values) {
+        TokenStream transition_property_tokens { value };
+        if (auto all_keyword_value = parse_all_as_single_keyword_value(transition_property_tokens, Keyword::All)) {
+            transition_properties.append(*all_keyword_value);
+        } else {
+            auto custom_ident = parse_custom_ident_value(transition_property_tokens, { { "all"sv, "none"sv } });
+            if (!custom_ident || transition_property_tokens.has_next_token())
+                return nullptr;
+
+            transition_properties.append(custom_ident.release_nonnull());
+        }
+    }
+    transaction.commit();
+    return StyleValueList::create(move(transition_properties), StyleValueList::Separator::Comma);
 }
 
 RefPtr<CSSStyleValue const> Parser::parse_translate_value(TokenStream<ComponentValue>& tokens)
@@ -3825,8 +3904,17 @@ RefPtr<CSSStyleValue const> Parser::parse_scale_value(TokenStream<ComponentValue
     if (!maybe_y)
         return nullptr;
 
+    if (!tokens.has_next_token()) {
+        transaction.commit();
+        return TransformationStyleValue::create(PropertyID::Scale, TransformFunction::Scale, { maybe_x.release_nonnull(), maybe_y.release_nonnull() });
+    }
+
+    auto maybe_z = parse_number_percentage_value(tokens);
+    if (!maybe_z)
+        return nullptr;
+
     transaction.commit();
-    return TransformationStyleValue::create(PropertyID::Scale, TransformFunction::Scale, { maybe_x.release_nonnull(), maybe_y.release_nonnull() });
+    return TransformationStyleValue::create(PropertyID::Scale, TransformFunction::Scale, { maybe_x.release_nonnull(), maybe_y.release_nonnull(), maybe_z.release_nonnull() });
 }
 
 // https://drafts.csswg.org/css-overflow/#propdef-scrollbar-gutter

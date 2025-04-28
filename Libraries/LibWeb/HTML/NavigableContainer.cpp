@@ -256,11 +256,14 @@ void NavigableContainer::navigate_an_iframe_or_frame(URL::URL url, ReferrerPolic
     Variant<Empty, String, POSTResource> document_resource = Empty {};
     if (srcdoc_string.has_value())
         document_resource = srcdoc_string.value();
-    MUST(m_content_navigable->navigate({ .url = url,
+
+    MUST(m_content_navigable->navigate({
+        .url = move(url),
         .source_document = document(),
         .document_resource = document_resource,
         .history_handling = history_handling,
-        .referrer_policy = referrer_policy }));
+        .referrer_policy = referrer_policy,
+    }));
 }
 
 // https://html.spec.whatwg.org/multipage/document-sequences.html#destroy-a-child-navigable
@@ -282,7 +285,8 @@ void NavigableContainer::destroy_the_child_navigable()
         return;
     navigable->set_has_been_destroyed();
 
-    // FIXME: 4. Inform the navigation API about child navigable destruction given navigable.
+    // 4. Inform the navigation API about child navigable destruction given navigable.
+    navigable->inform_the_navigation_api_about_child_navigable_destruction();
 
     // 5. Destroy a document and its descendants given navigable's active document.
     navigable->active_document()->destroy_a_document_and_its_descendants(GC::create_function(heap(), [this, navigable] {

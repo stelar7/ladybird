@@ -28,6 +28,8 @@ void Regex<Parser>::run_optimization_passes()
 {
     parser_result.bytecode.flatten();
 
+    rewrite_with_useless_jumps_removed();
+
     auto blocks = split_basic_blocks(parser_result.bytecode);
     if (attempt_rewrite_entire_match_as_substring_search(blocks))
         return;
@@ -812,6 +814,123 @@ bool Regex<Parser>::attempt_rewrite_entire_match_as_substring_search(BasicBlockL
     return true;
 }
 
+template<class Parser>
+void Regex<Parser>::rewrite_with_useless_jumps_removed()
+{
+    auto& bytecode = parser_result.bytecode;
+    auto flat = bytecode.flat_data();
+
+    if constexpr (REGEX_DEBUG) {
+        RegexDebug dbg;
+        dbg.print_bytecode(*this);
+    }
+
+    struct Instr {
+        size_t old_ip;
+        size_t size;
+        OpCodeId id;
+        bool is_useless;
+    };
+    Vector<Instr> infos;
+    infos.ensure_capacity(flat.size() / 2);
+
+    MatchState state = MatchState::only_for_enumeration();
+    for (size_t old_ip = 0; old_ip < flat.size();) {
+        state.instruction_position = old_ip;
+        auto& op = bytecode.get_opcode(state);
+        auto sz = op.size();
+
+        bool is_useless = false;
+        if (op.opcode_id() == OpCodeId::Jump) {
+            auto const& j = static_cast<OpCode_Jump const&>(op);
+            if (j.offset() == 0)
+                is_useless = true;
+        } else if (op.opcode_id() == OpCodeId::JumpNonEmpty) {
+            auto const& j = static_cast<OpCode_JumpNonEmpty const&>(op);
+            if (j.offset() == 0)
+                is_useless = true;
+        } else if (op.opcode_id() == OpCodeId::ForkJump || op.opcode_id() == OpCodeId::ForkReplaceJump) {
+            auto const& j = static_cast<OpCode_ForkJump const&>(op);
+            if (j.offset() == 0)
+                is_useless = true;
+        } else if (op.opcode_id() == OpCodeId::ForkStay || op.opcode_id() == OpCodeId::ForkReplaceStay) {
+            auto const& j = static_cast<OpCode_ForkStay const&>(op);
+            if (j.offset() == 0)
+                is_useless = true;
+        }
+
+        infos.append({ old_ip, sz, op.opcode_id(), is_useless });
+        old_ip += sz;
+    }
+
+    HashMap<size_t, size_t> new_ip;
+    new_ip.ensure_capacity(infos.size() + 1);
+    size_t cur = 0;
+    size_t skipped = 0;
+    for (auto& i : infos) {
+        new_ip.set(i.old_ip, cur);
+        if (!i.is_useless)
+            cur += i.size;
+        else
+            skipped++;
+    }
+
+    new_ip.set(bytecode.size(), cur);
+    if constexpr (REGEX_DEBUG) {
+        for (auto& i : infos)
+            dbgln("old_ip: {}, new_ip: {}, size: {}, is_useless: {}", i.old_ip, *new_ip.get(i.old_ip), i.size, i.is_useless);
+        dbgln("Saving {} bytes (of {})", bytecode.size() - cur, bytecode.size());
+        dbgln("...and {} instructions", skipped);
+    }
+
+    ByteCode out;
+    out.ensure_capacity(cur);
+    out.merge_string_tables_from({ &bytecode, 1 });
+
+    for (auto& i : infos) {
+        if (i.is_useless)
+            continue;
+
+        auto slice = Vector<ByteCodeValueType> { flat.slice(i.old_ip, i.size) };
+        auto adjust = [&](size_t idx, bool is_repeat) {
+            // original target in the old stream
+            auto old_off = slice[idx];
+            auto target_old = is_repeat ? i.old_ip - old_off : i.old_ip + i.size + old_off;
+            if (!new_ip.contains(target_old)) {
+                dbgln("Target {} not found in new_ip (in {})", target_old, i.old_ip);
+                dbgln("Pattern: {}", pattern_value);
+                RegexDebug dbg;
+                dbg.print_bytecode(*this);
+            }
+            size_t tgt_new = *new_ip.get(target_old);
+            size_t src_new = *new_ip.get(i.old_ip);
+            auto new_off = is_repeat ? src_new - tgt_new : tgt_new - src_new - i.size;
+            slice[idx] = static_cast<ByteCodeValueType>(new_off);
+        };
+
+        switch (i.id) {
+        case OpCodeId::Jump:
+        case OpCodeId::ForkJump:
+        case OpCodeId::ForkStay:
+        case OpCodeId::ForkReplaceJump:
+        case OpCodeId::ForkReplaceStay:
+        case OpCodeId::JumpNonEmpty:
+            adjust(1, false);
+            break;
+        case OpCodeId::Repeat:
+            adjust(1, true);
+            break;
+        default:
+            break;
+        }
+
+        out.append(move(slice));
+    }
+
+    out.flatten();
+    parser_result.bytecode = move(out);
+}
+
 template<typename Parser>
 void Regex<Parser>::attempt_rewrite_loops_as_atomic_groups(BasicBlockList const& basic_blocks)
 {
@@ -1264,7 +1383,7 @@ void Optimizer::append_alternation(ByteCode& target, Span<ByteCode> alternatives
 
     // This is really only worth it if we don't blow up the size by the 2-extra-instruction-per-node scheme, similarly, if no nodes are shared, we're better off not using a tree.
     auto tree_cost = (total_nodes - common_hits) * 2;
-    auto chain_cost = total_nodes + alternatives.size() * 2;
+    auto chain_cost = total_bytecode_entries_in_tree + alternatives.size() * 2;
     dbgln_if(REGEX_DEBUG, "Total nodes: {}, common hits: {} (tree cost = {}, chain cost = {})", total_nodes, common_hits, tree_cost, chain_cost);
 
     if (common_hits == 0 || tree_cost > chain_cost) {
@@ -1345,16 +1464,6 @@ void Optimizer::append_alternation(ByteCode& target, Span<ByteCode> alternatives
         Vector<Patch> patch_locations;
         patch_locations.ensure_capacity(total_nodes);
 
-        auto add_patch_point = [&](Tree const* node, size_t target_ip) {
-            if (!node->has_metadata())
-                return;
-            auto& node_ip = node->metadata_value().first();
-            patch_locations.append({ node_ip, target_ip });
-        };
-
-        Vector<Tree*> nodes_to_visit;
-        nodes_to_visit.append(&trie);
-
         HashMap<size_t, NonnullOwnPtr<RedBlackTree<u64, u64>>> instruction_positions;
         if (has_any_backwards_jump)
             MUST(instruction_positions.try_ensure_capacity(alternatives.size()));
@@ -1364,6 +1473,16 @@ void Optimizer::append_alternation(ByteCode& target, Span<ByteCode> alternatives
                 return make<RedBlackTree<u64, u64>>();
             });
         };
+
+        auto add_patch_point = [&](Tree const* node, size_t target_ip) {
+            if (!node->has_metadata())
+                return;
+
+            patch_locations.append({ node->metadata_value().first(), target_ip });
+        };
+
+        Vector<Tree*> nodes_to_visit;
+        nodes_to_visit.append(&trie);
 
         // each node:
         //   node.re
@@ -1431,33 +1550,47 @@ void Optimizer::append_alternation(ByteCode& target, Span<ByteCode> alternatives
 
                 if (is_jump) {
                     VERIFY(node->has_metadata());
-                    QualifiedIP ip = node->metadata_value().first();
-                    auto intended_jump_ip = ip.instruction_position + jump_offset + opcode.size();
-                    if (jump_offset < 0) {
-                        VERIFY(has_any_backwards_jump);
-                        // We should've already seen this instruction, so we can just patch it in.
-                        auto& ip_mapping = ip_mapping_for_alternative(ip.alternative_index);
-                        auto target_ip = ip_mapping.find(intended_jump_ip);
-                        if (!target_ip) {
-                            RegexDebug dbg;
-                            size_t x = 0;
-                            for (auto& entry : alternatives) {
-                                warnln("----------- {} ----------", x++);
-                                dbg.print_bytecode(entry);
-                            }
+                    if (node->metadata_value().size() > 1)
+                        target[patch_location] = static_cast<ByteCodeValueType>(0); // Fall through instead.
 
-                            dbgln("Regex Tree / Unknown backwards jump: {}@{} -> {}",
-                                ip.instruction_position,
-                                ip.alternative_index,
-                                intended_jump_ip);
-                            VERIFY_NOT_REACHED();
+                    auto only_one = node->metadata_value().size() == 1;
+                    auto patch_size = opcode.size() - 1;
+                    for (auto [alternative_index, instruction_position] : node->metadata_value()) {
+                        if (!only_one) {
+                            target.append(static_cast<ByteCodeValueType>(OpCodeId::ForkJump));
+                            patch_location = target.size();
+                            should_negate = false;
+                            patch_size = 1;
+                            target.append(static_cast<ByteCodeValueType>(0));
                         }
-                        ssize_t target_value = *target_ip - patch_location - 1;
-                        if (should_negate)
-                            target_value = -target_value + 2; // from -1 to +1.
-                        target[patch_location] = static_cast<ByteCodeValueType>(target_value);
-                    } else {
-                        patch_locations.append({ QualifiedIP { ip.alternative_index, intended_jump_ip }, patch_location });
+
+                        auto intended_jump_ip = instruction_position + jump_offset + opcode.size();
+                        if (jump_offset < 0) {
+                            VERIFY(has_any_backwards_jump);
+                            // We should've already seen this instruction, so we can just patch it in.
+                            auto& ip_mapping = ip_mapping_for_alternative(alternative_index);
+                            auto target_ip = ip_mapping.find(intended_jump_ip);
+                            if (!target_ip) {
+                                RegexDebug dbg;
+                                size_t x = 0;
+                                for (auto& entry : alternatives) {
+                                    warnln("----------- {} ----------", x++);
+                                    dbg.print_bytecode(entry);
+                                }
+
+                                dbgln("Regex Tree / Unknown backwards jump: {}@{} -> {}",
+                                    instruction_position,
+                                    alternative_index,
+                                    intended_jump_ip);
+                                VERIFY_NOT_REACHED();
+                            }
+                            ssize_t target_value = *target_ip - patch_location - patch_size;
+                            if (should_negate)
+                                target_value = -target_value - opcode.size();
+                            target[patch_location] = static_cast<ByteCodeValueType>(target_value);
+                        } else {
+                            patch_locations.append({ QualifiedIP { alternative_index, intended_jump_ip }, patch_location });
+                        }
                     }
                 }
             }
