@@ -160,8 +160,6 @@ i8 Key::compare_two_keys(GC::Ref<Key> a, GC::Ref<Key> b)
         // 6. Return 0.
         return 0;
     }
-    case KeyType::Invalid:
-        VERIFY_NOT_REACHED();
     }
 
     VERIFY_NOT_REACHED();

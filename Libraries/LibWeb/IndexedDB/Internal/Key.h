@@ -38,8 +38,7 @@ public:
         Date,
         String,
         Binary,
-        Array,
-        Invalid,
+        Array
     };
 
     [[nodiscard]] static GC::Ref<Key> create(JS::Realm&, KeyType, KeyValue);
@@ -47,8 +46,6 @@ public:
 
     [[nodiscard]] KeyType type() { return m_type; }
     [[nodiscard]] KeyValue value() { return m_value; }
-    [[nodiscard]] bool is_invalid() { return m_type == Invalid; }
-
     [[nodiscard]] bool is_invalid() { return m_type == Invalid; }
 
     [[nodiscard]] double value_as_double() { return m_value.get<double>(); }

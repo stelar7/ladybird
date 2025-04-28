@@ -45,7 +45,7 @@ public:
 
     // https://w3c.github.io/IndexedDB/#dom-idbobjectstore-autoincrement
     // The autoIncrement getter steps are to return true if this’s object store has a key generator, and false otherwise.
-    bool auto_increment() const { return m_store->uses_a_key_generator(); }
+    bool auto_increment() const;
     JS::Value key_path() const;
     String name() const { return m_name; }
     WebIDL::ExceptionOr<void> set_name(String const& value);
@@ -57,9 +57,6 @@ public:
     [[nodiscard]] GC::Ref<HTML::DOMStringList> index_names();
     WebIDL::ExceptionOr<GC::Ref<IDBIndex>> index(String const&);
     WebIDL::ExceptionOr<void> delete_index(String const&);
-
-    bool auto_increment() const;
-    JS::Value key_path() const;
 
     bool uses_inline_keys() const;
     bool uses_out_of_line_keys() const;
