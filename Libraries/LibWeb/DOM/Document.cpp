@@ -97,6 +97,7 @@
 #include <LibWeb/HTML/HTMLAreaElement.h>
 #include <LibWeb/HTML/HTMLBaseElement.h>
 #include <LibWeb/HTML/HTMLBodyElement.h>
+#include <LibWeb/HTML/HTMLDialogElement.h>
 #include <LibWeb/HTML/HTMLDocument.h>
 #include <LibWeb/HTML/HTMLEmbedElement.h>
 #include <LibWeb/HTML/HTMLFormElement.h>
@@ -592,6 +593,9 @@ void Document::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_top_layer_pending_removals);
     visitor.visit(m_showing_auto_popover_list);
     visitor.visit(m_showing_hint_popover_list);
+    visitor.visit(m_popover_pointerdown_target);
+    visitor.visit(m_open_dialogs_list);
+    visitor.visit(m_dialog_pointerdown_target);
     visitor.visit(m_console_client);
     visitor.visit(m_editing_host_manager);
     visitor.visit(m_local_storage_holder);
@@ -2710,8 +2714,8 @@ void Document::dispatch_events_for_transition(GC::Ref<CSS::CSSTransition> transi
                 type,
                 CSS::TransitionEventInit {
                     { .bubbles = true },
-                    // FIXME: Correctly set property_name and pseudo_element
-                    String {},
+                    // FIXME: Correctly set pseudo_element
+                    MUST(String::from_utf8(transition->transition_property())),
                     elapsed_time,
                     String {},
                 }),
@@ -6115,6 +6119,23 @@ void Document::process_top_layer_removals()
             m_top_layer_pending_removals.remove(element);
         }
     }
+}
+
+// https://html.spec.whatwg.org/multipage/popover.html#topmost-auto-popover
+GC::Ptr<HTML::HTMLElement> Document::topmost_auto_or_hint_popover()
+{
+    // To find the topmost auto or hint popover given a Document document, perform the following steps. They return an HTML element or null.
+
+    // 1. If document's showing hint popover list is not empty, then return document's showing hint popover list's last element.
+    if (!m_showing_hint_popover_list.is_empty())
+        return m_showing_hint_popover_list.last();
+
+    // 2. If document's showing auto popover list is not empty, then return document's showing auto popover list's last element.
+    if (!m_showing_auto_popover_list.is_empty())
+        return m_showing_auto_popover_list.last();
+
+    // 3. Return null.
+    return {};
 }
 
 void Document::set_needs_to_refresh_scroll_state(bool b)

@@ -1693,16 +1693,15 @@ ThrowCompletionOr<void> Program::global_declaration_instantiation(VM& vm, Global
     TRY(for_each_lexically_declared_identifier([&](Identifier const& identifier) -> ThrowCompletionOr<void> {
         auto const& name = identifier.string();
 
-        // a. If env.HasVarDeclaration(name) is true, throw a SyntaxError exception.
-        if (global_environment.has_var_declaration(name))
-            return vm.throw_completion<SyntaxError>(ErrorType::TopLevelVariableAlreadyDeclared, name);
-
-        // b. If env.HasLexicalDeclaration(name) is true, throw a SyntaxError exception.
+        // a. If HasLexicalDeclaration(env, name) is true, throw a SyntaxError exception.
         if (global_environment.has_lexical_declaration(name))
             return vm.throw_completion<SyntaxError>(ErrorType::TopLevelVariableAlreadyDeclared, name);
 
-        // c. Let hasRestrictedGlobal be ? env.HasRestrictedGlobalProperty(name).
+        // b. Let hasRestrictedGlobal be ? HasRestrictedGlobalProperty(env, name).
         auto has_restricted_global = TRY(global_environment.has_restricted_global_property(name));
+
+        // c. NOTE: Global var and function bindings (except those that are introduced by non-strict direct eval) are
+        //    non-configurable and are therefore restricted global properties.
 
         // d. If hasRestrictedGlobal is true, throw a SyntaxError exception.
         if (has_restricted_global)
@@ -1898,10 +1897,10 @@ ModuleRequest::ModuleRequest(FlyString module_specifier_, Vector<ImportAttribute
     : module_specifier(move(module_specifier_))
     , attributes(move(attributes))
 {
-    // Perform step 10.e. from EvaluateImportCall, https://tc39.es/proposal-import-attributes/#sec-evaluate-import-call
-    // or step 2. from WithClauseToAttributes, https://tc39.es/proposal-import-attributes/#sec-with-clause-to-attributes
-    // e. / 2. Sort assertions by the code point order of the [[Key]] of each element.
-    // NOTE: This sorting is observable only in that hosts are prohibited from distinguishing among assertions by the order they occur in.
+    // 13.3.10.2 EvaluateImportCall ( specifierExpression [ , optionsExpression ] ), https://tc39.es/ecma262/#sec-evaluate-import-call
+    // 16.2.2.4 Static Semantics: WithClauseToAttributes, https://tc39.es/ecma262/#sec-withclausetoattributes
+    // 2. Sort attributes according to the lexicographic order of their [[Key]] field, treating the value of each such
+    //    field as a sequence of UTF-16 code unit values.
     quick_sort(this->attributes, [](ImportAttribute const& lhs, ImportAttribute const& rhs) {
         return lhs.key < rhs.key;
     });

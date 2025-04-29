@@ -4,6 +4,7 @@
  * Copyright (c) 2023, MacDue <macdue@dueutil.tech>
  * Copyright (c) 2024, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
  * Copyright (c) 2024, Lucien Fiorini <lucienfiorini@gmail.com>
+ * Copyright (c) 2025, Jelle Raaijmakers <jelle@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -26,7 +27,6 @@
 #include <LibWeb/Infra/CharacterTypes.h>
 #include <LibWeb/Layout/TextNode.h>
 #include <LibWeb/Painting/Paintable.h>
-#include <LibWeb/Platform/FontPlugin.h>
 #include <LibWeb/SVG/SVGImageElement.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
 
@@ -34,16 +34,18 @@ namespace Web::HTML {
 
 GC_DEFINE_ALLOCATOR(CanvasRenderingContext2D);
 
-GC::Ref<CanvasRenderingContext2D> CanvasRenderingContext2D::create(JS::Realm& realm, HTMLCanvasElement& element)
+JS::ThrowCompletionOr<GC::Ref<CanvasRenderingContext2D>> CanvasRenderingContext2D::create(JS::Realm& realm, HTMLCanvasElement& element, JS::Value options)
 {
-    return realm.create<CanvasRenderingContext2D>(realm, element);
+    auto context_attributes = TRY(context_attributes_from_options(realm.vm(), options));
+    return realm.create<CanvasRenderingContext2D>(realm, element, context_attributes);
 }
 
-CanvasRenderingContext2D::CanvasRenderingContext2D(JS::Realm& realm, HTMLCanvasElement& element)
+CanvasRenderingContext2D::CanvasRenderingContext2D(JS::Realm& realm, HTMLCanvasElement& element, CanvasRenderingContext2DSettings context_attributes)
     : PlatformObject(realm)
     , CanvasPath(static_cast<Bindings::PlatformObject&>(*this), *this)
     , m_element(element)
     , m_size(element.bitmap_size_for_canvas())
+    , m_context_attributes(move(context_attributes))
 {
 }
 
@@ -59,6 +61,52 @@ void CanvasRenderingContext2D::visit_edges(Cell::Visitor& visitor)
 {
     Base::visit_edges(visitor);
     visitor.visit(m_element);
+}
+
+// https://html.spec.whatwg.org/multipage/canvas.html#canvasrenderingcontext2dsettings
+JS::ThrowCompletionOr<CanvasRenderingContext2DSettings> CanvasRenderingContext2D::context_attributes_from_options(JS::VM& vm, JS::Value value)
+{
+    if (!value.is_nullish() && !value.is_object())
+        return vm.throw_completion<JS::TypeError>(JS::ErrorType::NotAnObjectOfType, "CanvasRenderingContext2DSettings");
+
+    CanvasRenderingContext2DSettings settings;
+    if (value.is_nullish())
+        return settings;
+
+    auto& value_object = value.as_object();
+
+    JS::Value alpha = TRY(value_object.get("alpha"_fly_string));
+    settings.alpha = alpha.is_undefined() ? true : alpha.to_boolean();
+
+    JS::Value desynchronized = TRY(value_object.get("desynchronized"_fly_string));
+    settings.desynchronized = desynchronized.is_undefined() ? false : desynchronized.to_boolean();
+
+    JS::Value color_space = TRY(value_object.get("colorSpace"_fly_string));
+    if (!color_space.is_undefined()) {
+        auto color_space_string = TRY(color_space.to_string(vm));
+        if (color_space_string == "srgb"sv)
+            settings.color_space = Bindings::PredefinedColorSpace::Srgb;
+        else if (color_space_string == "display-p3"sv)
+            settings.color_space = Bindings::PredefinedColorSpace::DisplayP3;
+        else
+            return vm.throw_completion<JS::TypeError>(JS::ErrorType::InvalidEnumerationValue, color_space_string, "colorSpace");
+    }
+
+    JS::Value color_type = TRY(value_object.get("colorType"_fly_string));
+    if (!color_type.is_undefined()) {
+        auto color_type_string = TRY(color_type.to_string(vm));
+        if (color_type_string == "unorm8"sv)
+            settings.color_type = Bindings::CanvasColorType::Unorm8;
+        else if (color_type_string == "float16"sv)
+            settings.color_type = Bindings::CanvasColorType::Float16;
+        else
+            return vm.throw_completion<JS::TypeError>(JS::ErrorType::InvalidEnumerationValue, color_type_string, "colorType");
+    }
+
+    JS::Value will_read_frequently = TRY(value_object.get("willReadFrequently"_fly_string));
+    settings.will_read_frequently = will_read_frequently.is_undefined() ? false : will_read_frequently.to_boolean();
+
+    return settings;
 }
 
 HTMLCanvasElement& CanvasRenderingContext2D::canvas_element()
@@ -101,7 +149,7 @@ void CanvasRenderingContext2D::clear_rect(float x, float y, float width, float h
 {
     if (auto* painter = this->painter()) {
         auto rect = Gfx::FloatRect(x, y, width, height);
-        painter->clear_rect(rect, Color::Transparent);
+        painter->clear_rect(rect, clear_color());
         did_draw(rect);
     }
 }
@@ -221,8 +269,24 @@ void CanvasRenderingContext2D::allocate_painting_surface_if_needed()
 {
     if (m_surface || m_size.is_empty())
         return;
+
+    // FIXME: implement context attribute .color_space
+    // FIXME: implement context attribute .color_type
+    // FIXME: implement context attribute .desynchronized
+    // FIXME: implement context attribute .will_read_frequently
+
+    auto color_type = m_context_attributes.alpha ? Gfx::BitmapFormat::BGRA8888 : Gfx::BitmapFormat::BGRx8888;
+
     auto skia_backend_context = canvas_element().navigable()->traversable_navigable()->skia_backend_context();
-    m_surface = Gfx::PaintingSurface::create_with_size(skia_backend_context, canvas_element().bitmap_size_for_canvas(), Gfx::BitmapFormat::BGRA8888, Gfx::AlphaType::Premultiplied);
+    m_surface = Gfx::PaintingSurface::create_with_size(skia_backend_context, canvas_element().bitmap_size_for_canvas(), color_type, Gfx::AlphaType::Premultiplied);
+
+    // https://html.spec.whatwg.org/multipage/canvas.html#the-canvas-settings:concept-canvas-alpha
+    // Thus, the bitmap of such a context starts off as opaque black instead of transparent black;
+    // AD-HOC: Skia provides us with a full transparent surface by default; only clear the surface if alpha is disabled.
+    if (!m_context_attributes.alpha) {
+        auto* painter = this->painter();
+        painter->clear_rect(m_surface->rect().to_type<float>(), clear_color());
+    }
 }
 
 Gfx::Path CanvasRenderingContext2D::text_path(StringView text, float x, float y, Optional<double> max_width)
@@ -320,6 +384,12 @@ static Gfx::Path::JoinStyle to_gfx_join(Bindings::CanvasLineJoin const& join_sty
     }
 
     VERIFY_NOT_REACHED();
+}
+
+// https://html.spec.whatwg.org/multipage/canvas.html#the-canvas-settings:concept-canvas-alpha
+Gfx::Color CanvasRenderingContext2D::clear_color() const
+{
+    return m_context_attributes.alpha ? Gfx::Color::Transparent : Gfx::Color::Black;
 }
 
 void CanvasRenderingContext2D::stroke_internal(Gfx::Path const& path)
@@ -506,7 +576,7 @@ void CanvasRenderingContext2D::reset_to_default_state()
 
     // 1. Clear canvas's bitmap to transparent black.
     if (surface) {
-        painter()->clear_rect(surface->rect().to_type<float>(), Color::Transparent);
+        painter()->clear_rect(surface->rect().to_type<float>(), clear_color());
     }
 
     // 2. Empty the list of subpaths in context's current default path.

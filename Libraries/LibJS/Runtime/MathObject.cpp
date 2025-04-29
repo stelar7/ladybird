@@ -30,6 +30,7 @@ void MathObject::initialize(Realm& realm)
 {
     auto& vm = this->vm();
     Base::initialize(realm);
+
     u8 attr = Attribute::Writable | Attribute::Configurable;
     define_native_function(realm, vm.names.abs, abs, 1, attr, Bytecode::Builtin::MathAbs);
     define_native_function(realm, vm.names.random, random, 0, attr, Bytecode::Builtin::MathRandom);
@@ -517,7 +518,7 @@ JS_DEFINE_NATIVE_FUNCTION(MathObject::fround)
     return Value((float)number.as_double());
 }
 
-// 3.1 Math.f16round ( x ), https://tc39.es/proposal-float16array/#sec-math.f16round
+// 21.3.2.18 Math.f16round ( x ), https://tc39.es/ecma262/#sec-math.f16round
 JS_DEFINE_NATIVE_FUNCTION(MathObject::f16round)
 {
     // 1. Let n be ? ToNumber(x).
@@ -537,7 +538,7 @@ JS_DEFINE_NATIVE_FUNCTION(MathObject::f16round)
     return Value(static_cast<f16>(number.as_double()));
 }
 
-// 21.3.2.18 Math.hypot ( ...args ), https://tc39.es/ecma262/#sec-math.hypot
+// 21.3.2.19 Math.hypot ( ...args ), https://tc39.es/ecma262/#sec-math.hypot
 JS_DEFINE_NATIVE_FUNCTION(MathObject::hypot)
 {
     // 1. Let coerced be a new empty List.
@@ -586,7 +587,7 @@ JS_DEFINE_NATIVE_FUNCTION(MathObject::hypot)
     return Value(::sqrt(sum_of_squares));
 }
 
-// 21.3.2.19 Math.imul ( x, y ), https://tc39.es/ecma262/#sec-math.imul
+// 21.3.2.20 Math.imul ( x, y ), https://tc39.es/ecma262/#sec-math.imul
 ThrowCompletionOr<Value> MathObject::imul_impl(VM& vm, Value arg_a, Value arg_b)
 {
     // 1. Let a be ℝ(? ToUint32(x)).
@@ -600,13 +601,13 @@ ThrowCompletionOr<Value> MathObject::imul_impl(VM& vm, Value arg_a, Value arg_b)
     return Value(static_cast<i32>(a * b));
 }
 
-// 21.3.2.19 Math.imul ( x, y ), https://tc39.es/ecma262/#sec-math.imul
+// 21.3.2.20 Math.imul ( x, y ), https://tc39.es/ecma262/#sec-math.imul
 JS_DEFINE_NATIVE_FUNCTION(MathObject::imul)
 {
     return imul_impl(vm, vm.argument(0), vm.argument(1));
 }
 
-// 21.3.2.20 Math.log ( x ), https://tc39.es/ecma262/#sec-math.log
+// 21.3.2.21 Math.log ( x ), https://tc39.es/ecma262/#sec-math.log
 ThrowCompletionOr<Value> MathObject::log_impl(VM& vm, Value x)
 {
     // 1. Let n be ? ToNumber(x).
@@ -632,13 +633,13 @@ ThrowCompletionOr<Value> MathObject::log_impl(VM& vm, Value x)
     return Value(::log(number.as_double()));
 }
 
-// 21.3.2.20 Math.log ( x ), https://tc39.es/ecma262/#sec-math.log
+// 21.3.2.21 Math.log ( x ), https://tc39.es/ecma262/#sec-math.log
 JS_DEFINE_NATIVE_FUNCTION(MathObject::log)
 {
     return log_impl(vm, vm.argument(0));
 }
 
-// 21.3.2.21 Math.log1p ( x ), https://tc39.es/ecma262/#sec-math.log1p
+// 21.3.2.22 Math.log1p ( x ), https://tc39.es/ecma262/#sec-math.log1p
 JS_DEFINE_NATIVE_FUNCTION(MathObject::log1p)
 {
     // 1. Let n be ? ToNumber(x).
@@ -660,7 +661,7 @@ JS_DEFINE_NATIVE_FUNCTION(MathObject::log1p)
     return Value(::log1p(number.as_double()));
 }
 
-// 21.3.2.22 Math.log10 ( x ), https://tc39.es/ecma262/#sec-math.log10
+// 21.3.2.23 Math.log10 ( x ), https://tc39.es/ecma262/#sec-math.log10
 JS_DEFINE_NATIVE_FUNCTION(MathObject::log10)
 {
     // 1. Let n be ? ToNumber(x).
@@ -686,7 +687,7 @@ JS_DEFINE_NATIVE_FUNCTION(MathObject::log10)
     return Value(::log10(number.as_double()));
 }
 
-// 21.3.2.23 Math.log2 ( x ), https://tc39.es/ecma262/#sec-math.log2
+// 21.3.2.24 Math.log2 ( x ), https://tc39.es/ecma262/#sec-math.log2
 JS_DEFINE_NATIVE_FUNCTION(MathObject::log2)
 {
     // 1. Let n be ? ToNumber(x).
@@ -712,7 +713,7 @@ JS_DEFINE_NATIVE_FUNCTION(MathObject::log2)
     return Value(::log2(number.as_double()));
 }
 
-// 21.3.2.24 Math.max ( ...args ), https://tc39.es/ecma262/#sec-math.max
+// 21.3.2.25 Math.max ( ...args ), https://tc39.es/ecma262/#sec-math.max
 JS_DEFINE_NATIVE_FUNCTION(MathObject::max)
 {
     // 1. Let coerced be a new empty List.
@@ -746,7 +747,7 @@ JS_DEFINE_NATIVE_FUNCTION(MathObject::max)
     return highest;
 }
 
-// 21.3.2.25 Math.min ( ...args ), https://tc39.es/ecma262/#sec-math.min
+// 21.3.2.26 Math.min ( ...args ), https://tc39.es/ecma262/#sec-math.min
 JS_DEFINE_NATIVE_FUNCTION(MathObject::min)
 {
     // 1. Let coerced be a new empty List.
@@ -780,7 +781,7 @@ JS_DEFINE_NATIVE_FUNCTION(MathObject::min)
     return lowest;
 }
 
-// 21.3.2.26 Math.pow ( base, exponent ), https://tc39.es/ecma262/#sec-math.pow
+// 21.3.2.27 Math.pow ( base, exponent ), https://tc39.es/ecma262/#sec-math.pow
 ThrowCompletionOr<Value> MathObject::pow_impl(VM& vm, Value base, Value exponent)
 {
     // Set base to ? ToNumber(base).
@@ -793,7 +794,7 @@ ThrowCompletionOr<Value> MathObject::pow_impl(VM& vm, Value base, Value exponent
     return JS::exp(vm, base, exponent);
 }
 
-// 21.3.2.26 Math.pow ( base, exponent ), https://tc39.es/ecma262/#sec-math.pow
+// 21.3.2.27 Math.pow ( base, exponent ), https://tc39.es/ecma262/#sec-math.pow
 JS_DEFINE_NATIVE_FUNCTION(MathObject::pow)
 {
     return pow_impl(vm, vm.argument(0), vm.argument(1));
@@ -849,13 +850,13 @@ Value MathObject::random_impl()
     return Value(rng.get());
 }
 
-// 21.3.2.27 Math.random ( ), https://tc39.es/ecma262/#sec-math.random
+// 21.3.2.28 Math.random ( ), https://tc39.es/ecma262/#sec-math.random
 JS_DEFINE_NATIVE_FUNCTION(MathObject::random)
 {
     return random_impl();
 }
 
-// 21.3.2.28 Math.round ( x ), https://tc39.es/ecma262/#sec-math.round
+// 21.3.2.29 Math.round ( x ), https://tc39.es/ecma262/#sec-math.round
 ThrowCompletionOr<Value> MathObject::round_impl(VM& vm, Value x)
 {
     // 1. Let n be ? ToNumber(x).
@@ -874,13 +875,13 @@ ThrowCompletionOr<Value> MathObject::round_impl(VM& vm, Value x)
     return Value(integer);
 }
 
-// 21.3.2.28 Math.round ( x ), https://tc39.es/ecma262/#sec-math.round
+// 21.3.2.29 Math.round ( x ), https://tc39.es/ecma262/#sec-math.round
 JS_DEFINE_NATIVE_FUNCTION(MathObject::round)
 {
     return round_impl(vm, vm.argument(0));
 }
 
-// 21.3.2.29 Math.sign ( x ), https://tc39.es/ecma262/#sec-math.sign
+// 21.3.2.30 Math.sign ( x ), https://tc39.es/ecma262/#sec-math.sign
 JS_DEFINE_NATIVE_FUNCTION(MathObject::sign)
 {
     // 1. Let n be ? ToNumber(x).
@@ -898,7 +899,7 @@ JS_DEFINE_NATIVE_FUNCTION(MathObject::sign)
     return Value(1);
 }
 
-// 21.3.2.30 Math.sin ( x ), https://tc39.es/ecma262/#sec-math.sin
+// 21.3.2.31 Math.sin ( x ), https://tc39.es/ecma262/#sec-math.sin
 JS_DEFINE_NATIVE_FUNCTION(MathObject::sin)
 {
     // 1. Let n be ? ToNumber(x).
@@ -916,7 +917,7 @@ JS_DEFINE_NATIVE_FUNCTION(MathObject::sin)
     return Value(::sin(number.as_double()));
 }
 
-// 21.3.2.31 Math.sinh ( x ), https://tc39.es/ecma262/#sec-math.sinh
+// 21.3.2.32 Math.sinh ( x ), https://tc39.es/ecma262/#sec-math.sinh
 JS_DEFINE_NATIVE_FUNCTION(MathObject::sinh)
 {
     // 1. Let n be ? ToNumber(x).
@@ -930,7 +931,7 @@ JS_DEFINE_NATIVE_FUNCTION(MathObject::sinh)
     return Value(::sinh(number.as_double()));
 }
 
-// 21.3.2.32 Math.sqrt ( x ), https://tc39.es/ecma262/#sec-math.sqrt
+// 21.3.2.33 Math.sqrt ( x ), https://tc39.es/ecma262/#sec-math.sqrt
 ThrowCompletionOr<Value> MathObject::sqrt_impl(VM& vm, Value x)
 {
     // Let n be ? ToNumber(x).
@@ -948,13 +949,13 @@ ThrowCompletionOr<Value> MathObject::sqrt_impl(VM& vm, Value x)
     return Value(::sqrt(number.as_double()));
 }
 
-// 21.3.2.32 Math.sqrt ( x ), https://tc39.es/ecma262/#sec-math.sqrt
+// 21.3.2.33 Math.sqrt ( x ), https://tc39.es/ecma262/#sec-math.sqrt
 JS_DEFINE_NATIVE_FUNCTION(MathObject::sqrt)
 {
     return sqrt_impl(vm, vm.argument(0));
 }
 
-// 21.3.2.33 Math.tan ( x ), https://tc39.es/ecma262/#sec-math.tan
+// 21.3.2.34 Math.tan ( x ), https://tc39.es/ecma262/#sec-math.tan
 JS_DEFINE_NATIVE_FUNCTION(MathObject::tan)
 {
     // Let n be ? ToNumber(x).
@@ -972,7 +973,7 @@ JS_DEFINE_NATIVE_FUNCTION(MathObject::tan)
     return Value(::tan(number.as_double()));
 }
 
-// 21.3.2.34 Math.tanh ( x ), https://tc39.es/ecma262/#sec-math.tanh
+// 21.3.2.35 Math.tanh ( x ), https://tc39.es/ecma262/#sec-math.tanh
 JS_DEFINE_NATIVE_FUNCTION(MathObject::tanh)
 {
     // 1. Let n be ? ToNumber(x).
@@ -994,7 +995,7 @@ JS_DEFINE_NATIVE_FUNCTION(MathObject::tanh)
     return Value(::tanh(number.as_double()));
 }
 
-// 21.3.2.35 Math.trunc ( x ), https://tc39.es/ecma262/#sec-math.trunc
+// 21.3.2.36 Math.trunc ( x ), https://tc39.es/ecma262/#sec-math.trunc
 JS_DEFINE_NATIVE_FUNCTION(MathObject::trunc)
 {
     // 1. Let n be ? ToNumber(x).
@@ -1024,25 +1025,15 @@ static TwoSumResult two_sum(double x, double y)
     return { hi, lo };
 }
 
-// https://tc39.es/proposal-math-sum/#sec-math.sumprecise
-ThrowCompletionOr<Value> MathObject::sum_precise_impl(VM& vm, Value iterable)
+// 2 Math.sumPrecise ( items ), https://tc39.es/proposal-math-sum/#sec-math.sumprecise
+JS_DEFINE_NATIVE_FUNCTION(MathObject::sumPrecise)
 {
-    constexpr double MAX_DOUBLE = 1.79769313486231570815e+308;         // std::numeric_limits<double>::max()
-    constexpr double PENULTIMATE_DOUBLE = 1.79769313486231550856e+308; // std::nextafter(DBL_MAX, 0)
-    constexpr double MAX_ULP = MAX_DOUBLE - PENULTIMATE_DOUBLE;
-    constexpr double POW_2_1023 = 8.98846567431158e+307; // 2^1023
+    static constexpr double MAX_DOUBLE = 1.79769313486231570815e+308;         // std::numeric_limits<double>::max()
+    static constexpr double PENULTIMATE_DOUBLE = 1.79769313486231550856e+308; // std::nextafter(DBL_MAX, 0)
+    static constexpr double MAX_ULP = MAX_DOUBLE - PENULTIMATE_DOUBLE;
+    static constexpr double POW_2_1023 = 8.98846567431158e+307; // 2^1023
 
-    // 1. Perform ? RequireObjectCoercible(items).
-    TRY(require_object_coercible(vm, iterable));
-
-    // 2. Let iteratorRecord be ? GetIterator(items, sync).
-    auto using_iterator = TRY(iterable.get_method(vm, vm.well_known_symbol_iterator()));
-    if (!using_iterator)
-        return vm.throw_completion<TypeError>(ErrorType::NotIterable, iterable.to_string_without_side_effects());
-
-    auto iterator = TRY(get_iterator_from_method(vm, iterable, *using_iterator));
-
-    enum State {
+    enum class State {
         MinusZero,
         PlusInfinity,
         MinusInfinity,
@@ -1050,7 +1041,15 @@ ThrowCompletionOr<Value> MathObject::sum_precise_impl(VM& vm, Value iterable)
         Finite
     };
 
-    // 3. Let state be minus-zero.
+    auto items = vm.argument(0);
+
+    // 1. Perform ? RequireObjectCoercible(items).
+    TRY(require_object_coercible(vm, items));
+
+    // 2. Let iteratorRecord be ? GetIterator(items, SYNC).
+    auto iterator_record = TRY(get_iterator(vm, items, IteratorHint::Sync));
+
+    // 3. Let state be MINUS-ZERO.
     State state = State::MinusZero;
 
     // 4. Let sum be 0.
@@ -1059,56 +1058,66 @@ ThrowCompletionOr<Value> MathObject::sum_precise_impl(VM& vm, Value iterable)
     u64 count = 0;
     Vector<double> partials;
 
-    // 6. Let next be not-started.
-    // 7. Repeat, while next is not done
+    // 6. Let next be NOT-STARTED.
+    // 7. Repeat, while next is not DONE
     for (;;) {
         // a. Set next to ? IteratorStepValue(iteratorRecord).
-        auto next = TRY(iterator_step_value(vm, iterator));
-
+        auto next = TRY(iterator_step_value(vm, iterator_record));
         if (!next.has_value())
             break;
 
-        // If next is not done, then
-        // i. Set count to count + 1.
-        count++;
-        // ii. If count ≥ 2**53, then
-        // 1. Let error be ThrowCompletion(a newly created RangeError object).
-        // 2. Return ? IteratorClose(iteratorRecord, error).
-        if (count >= (1ULL << 53))
-            return iterator_close(vm, iterator, vm.throw_completion<RangeError>(ErrorType::ArrayMaxSize));
+        auto next_value = next.value();
 
-        // iii. NOTE: The above case is not expected to be reached in practice and is included only so that implementations may rely on inputs being
-        // "reasonably sized" without violating this specification.
+        // b. If next is not DONE, then
+        // i. Set count to count + 1.
+        ++count;
+
+        // ii. If count ≥ 2**53, then
+        if (count >= (1ULL << 53)) {
+            // 1. Let error be ThrowCompletion(a newly created RangeError object).
+            auto error = vm.throw_completion<RangeError>(ErrorType::ArrayMaxSize);
+
+            // 2. Return ? IteratorClose(iteratorRecord, error).
+            return iterator_close(vm, iterator_record, error);
+        }
+
+        // iii. NOTE: The above case is not expected to be reached in practice and is included only so that implementations
+        //      may rely on inputs being "reasonably sized" without violating this specification.
 
         // iv. If next is not a Number, then
-        auto value = next.value();
-        if (!value.is_number())
+        if (!next_value.is_number()) {
             // 1. Let error be ThrowCompletion(a newly created TypeError object).
+            auto error = vm.throw_completion<TypeError>(ErrorType::IsNotA, next_value, "number");
+
             // 2. Return ? IteratorClose(iteratorRecord, error).
-            return iterator_close(vm, iterator, vm.throw_completion<TypeError>(ErrorType::IsNotA, value.to_string_without_side_effects(), "number"));
+            return iterator_close(vm, iterator_record, error);
+        }
 
         // v. Let n be next.
-        auto n = value.as_double();
+        auto n = next_value.as_double();
 
-        // vi. If state is not not-a-number, then
+        // vi. If state is not NOT-A-NUMBER, then
         if (state != State::NotANumber) {
             // 1. If n is NaN, then
-            if (isnan(n)) {
-                // a. Set state to not-a-number.
+            if (next_value.is_nan()) {
+                // a. Set state to NOT-A-NUMBER.
                 state = State::NotANumber;
-            } // 2. Else if n is +∞𝔽, then
-            else if (Value(n).is_positive_infinity()) {
-                // a. If state is minus-infinity, set state to not-a-number.
-                // b. Else, set state to plus-infinity.
-                state = (state == State::MinusInfinity) ? State::NotANumber : State::PlusInfinity;
-            } // 3. Else if n is -∞𝔽, then
-            else if (Value(n).is_negative_infinity()) {
-                // a. If state is plus-infinity, set state to not-a-number.
-                // b. Else, set state to minus-infinity.
-                state = (state == State::PlusInfinity) ? State::NotANumber : State::MinusInfinity;
-            } // 4. Else if n is not -0𝔽 and state is either minus-zero or finite, then
-            else if (!Value(n).is_negative_zero() && (state == State::MinusZero || state == State::Finite)) {
-                // a. Set state to finite.
+            }
+            // 2. Else if n is +∞𝔽, then
+            else if (next_value.is_positive_infinity()) {
+                // a. If state is MINUS-INFINITY, set state to NOT-A-NUMBER.
+                // b. Else, set state to PLUS-INFINITY.
+                state = state == State::MinusInfinity ? State::NotANumber : State::PlusInfinity;
+            }
+            // 3. Else if n is -∞𝔽, then
+            else if (next_value.is_negative_infinity()) {
+                // a. If state is PLUS-INFINITY, set state to NOT-A-NUMBER.
+                // b. Else, set state to MINUS-INFINITY.
+                state = state == State::PlusInfinity ? State::NotANumber : State::MinusInfinity;
+            }
+            // 4. Else if n is not -0𝔽 and state is either MINUS-ZERO or FINITE, then
+            else if (!next_value.is_negative_zero() && (state == State::MinusZero || state == State::Finite)) {
+                // a. Set state to FINITE.
                 state = State::Finite;
 
                 // b. Set sum to sum + ℝ(n).
@@ -1158,19 +1167,19 @@ ThrowCompletionOr<Value> MathObject::sum_precise_impl(VM& vm, Value iterable)
         }
     }
 
-    // 8. If state is not-a-number, return NaN.
+    // 8. If state is NOT-A-NUMBER, return NaN.
     if (state == State::NotANumber)
         return js_nan();
 
-    // 9. If state is plus-infinity, return +∞𝔽.
+    // 9. If state is PLUS-INFINITY, return +∞𝔽.
     if (state == State::PlusInfinity)
         return js_infinity();
 
-    // 10. If state is minus-infinity, return -∞𝔽.
+    // 10. If state is MINUS-INFINITY, return -∞𝔽.
     if (state == State::MinusInfinity)
         return js_negative_infinity();
 
-    // 11. If state is minus-zero, return -0𝔽.
+    // 11. If state is MINUS-ZERO, return -0𝔽.
     if (state == State::MinusZero)
         return Value(-0.0);
 
@@ -1240,13 +1249,7 @@ ThrowCompletionOr<Value> MathObject::sum_precise_impl(VM& vm, Value iterable)
         }
     }
 
-    return Value(hi);
-}
-
-// https://tc39.es/proposal-math-sum/#sec-math.sumprecise
-JS_DEFINE_NATIVE_FUNCTION(MathObject::sumPrecise)
-{
-    return sum_precise_impl(vm, vm.argument(0));
+    return hi;
 }
 
 }

@@ -1421,16 +1421,6 @@ WebIDL::ExceptionOr<GC::Ptr<Key>> store_a_record_into_an_object_store(JS::Realm&
     return key;
 }
 
-// https://w3c.github.io/IndexedDB/#count-the-records-in-a-range
-JS::Value count_the_records_in_a_range(GC::Ref<ObjectStore> source, GC::Ref<IDBKeyRange> range)
-{
-    // 1. Let count be the number of records, if any, in source’s list of records with key in range.
-    auto count = source->count_records_in_range(range);
-
-    // 2. Return count.
-    return JS::Value(count);
-}
-
 // https://w3c.github.io/IndexedDB/#iterate-a-cursor
 GC::Ptr<IDBCursor> iterate_a_cursor(JS::Realm& realm, GC::Ref<IDBCursor> cursor, GC::Ptr<Key> key, GC::Ptr<Key> primary_key, u64 count)
 {
@@ -1583,23 +1573,7 @@ GC::Ptr<IDBCursor> iterate_a_cursor(JS::Realm& realm, GC::Ref<IDBCursor> cursor,
     return cursor;
 }
 
-// https://w3c.github.io/IndexedDB/#retrieve-a-value-from-an-object-store
-WebIDL::ExceptionOr<JS::Value> retrieve_a_value_from_an_object_store(JS::Realm& realm, GC::Ref<ObjectStore> store, GC::Ref<IDBKeyRange> range)
-{
-    // 1. Let record be the first record in store’s list of records whose key is in range, if any.
-    auto record = store->first_in_range(range);
-
-    // 2. If record was not found, return undefined.
-    if (!record.has_value())
-        return JS::js_undefined();
-
-    // 3. Let serialized be record’s value. If an error occurs while reading the value from the underlying storage, return a newly created "NotReadableError" DOMException.
-    auto serialized = record->value;
-
-    // 4. Return ! StructuredDeserialize(serialized, targetRealm).
-    return MUST(HTML::structured_deserialize(realm.vm(), serialized, realm));
-}
-
+// https://w3c.github.io/IndexedDB/#convert-a-value-to-a-key-range
 WebIDL::ExceptionOr<GC::Ref<IDBKeyRange>> convert_a_value_to_a_key_range(JS::Realm& realm, Optional<JS::Value> value, bool null_disallowed)
 {
     // 1. If value is a key range, return value.
@@ -1624,6 +1598,33 @@ WebIDL::ExceptionOr<GC::Ref<IDBKeyRange>> convert_a_value_to_a_key_range(JS::Rea
 
     // 5. Return a key range containing only key.
     return IDBKeyRange::create(realm, key, key, false, false);
+}
+
+// https://w3c.github.io/IndexedDB/#count-the-records-in-a-range
+JS::Value count_the_records_in_a_range(GC::Ref<ObjectStore> source, GC::Ref<IDBKeyRange> range)
+{
+    // 1. Let count be the number of records, if any, in source’s list of records with key in range.
+    auto count = source->count_records_in_range(range);
+
+    // 2. Return count.
+    return JS::Value(count);
+}
+
+// https://w3c.github.io/IndexedDB/#retrieve-a-value-from-an-object-store
+WebIDL::ExceptionOr<JS::Value> retrieve_a_value_from_an_object_store(JS::Realm& realm, GC::Ref<ObjectStore> store, GC::Ref<IDBKeyRange> range)
+{
+    // 1. Let record be the first record in store’s list of records whose key is in range, if any.
+    auto record = store->first_in_range(range);
+
+    // 2. If record was not found, return undefined.
+    if (!record.has_value())
+        return JS::js_undefined();
+
+    // 3. Let serialized be record’s value. If an error occurs while reading the value from the underlying storage, return a newly created "NotReadableError" DOMException.
+    auto serialized = record->value;
+
+    // 4. Return ! StructuredDeserialize(serialized, targetRealm).
+    return MUST(HTML::structured_deserialize(realm.vm(), serialized, realm));
 }
 
 }

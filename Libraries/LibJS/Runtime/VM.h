@@ -53,7 +53,7 @@ public:
     GC::Heap& heap() { return m_heap; }
     GC::Heap const& heap() const { return m_heap; }
 
-    Bytecode::Interpreter& bytecode_interpreter();
+    Bytecode::Interpreter& bytecode_interpreter() { return *m_bytecode_interpreter; }
 
     void dump_backtrace() const;
 
@@ -115,12 +115,21 @@ public:
         if (did_reach_stack_space_limit()) [[unlikely]] {
             return throw_completion<InternalError>(ErrorType::CallStackSizeExceeded);
         }
-        push_execution_context(context);
+        m_execution_context_stack.append(&context);
         return {};
     }
 
-    void push_execution_context(ExecutionContext&);
-    void pop_execution_context();
+    void push_execution_context(ExecutionContext& context)
+    {
+        m_execution_context_stack.append(&context);
+    }
+
+    void pop_execution_context()
+    {
+        m_execution_context_stack.take_last();
+        if (m_execution_context_stack.is_empty() && on_call_stack_emptied)
+            on_call_stack_emptied();
+    }
 
     // https://tc39.es/ecma262/#running-execution-context
     // At any point in time, there is at most one execution context per agent that is actually executing code.
@@ -260,11 +269,7 @@ public:
 
     ScriptOrModule get_active_script_or_module() const;
 
-    // NOTE: The host defined implementation described in the web spec https://html.spec.whatwg.org/multipage/webappapis.html#hostloadimportedmodule
-    //       currently references proposal-import-attributes.
-    //       Our implementation of this proposal is outdated however, as such we try to adapt the proposal and living standard
-    //       to match our implementation for now.
-    // 16.2.1.8 HostLoadImportedModule ( referrer, moduleRequest, hostDefined, payload ), https://tc39.es/proposal-import-attributes/#sec-HostLoadImportedModule
+    // 16.2.1.10 HostLoadImportedModule ( referrer, moduleRequest, hostDefined, payload ), https://tc39.es/ecma262/#sec-HostLoadImportedModule
     Function<void(ImportedModuleReferrer, ModuleRequest const&, GC::Ptr<GraphLoadingState::HostDefined>, ImportedModulePayload)> host_load_imported_module;
 
     Function<HashMap<PropertyKey, Value>(SourceTextModule&)> host_get_import_meta_properties;

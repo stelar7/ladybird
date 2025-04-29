@@ -67,16 +67,6 @@ void ObjectStore::store_a_record(Record const& record)
     });
 }
 
-Optional<Record> ObjectStore::first_in_range(GC::Ref<IDBKeyRange> range)
-{
-    for (auto const& record : m_records) {
-        if (range->is_in_range(record.key))
-            return record;
-    }
-
-    return {};
-}
-
 u64 ObjectStore::count_records_in_range(GC::Ref<IDBKeyRange> range)
 {
     u64 count = 0;
@@ -85,6 +75,13 @@ u64 ObjectStore::count_records_in_range(GC::Ref<IDBKeyRange> range)
             ++count;
     }
     return count;
+}
+
+Optional<Record&> ObjectStore::first_in_range(GC::Ref<IDBKeyRange> range)
+{
+    return m_records.first_matching([&](auto const& record) {
+        return range->is_in_range(record.key);
+    });
 }
 
 }

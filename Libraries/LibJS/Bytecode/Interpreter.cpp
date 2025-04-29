@@ -371,19 +371,17 @@ NEVER_INLINE Interpreter::HandleExceptionResponse Interpreter::handle_exception(
 
 FLATTEN_ON_CLANG void Interpreter::run_bytecode(size_t entry_point)
 {
-    if (vm().did_reach_stack_space_limit()) {
+    if (vm().did_reach_stack_space_limit()) [[unlikely]] {
         reg(Register::exception()) = vm().throw_completion<InternalError>(ErrorType::CallStackSizeExceeded).value();
         return;
     }
 
     auto& running_execution_context = this->running_execution_context();
-    auto& accumulator = this->accumulator();
     auto& executable = current_executable();
     auto const* bytecode = executable.bytecode.data();
 
-    size_t program_counter = entry_point;
-
-    TemporaryChange change(m_program_counter, Optional<size_t&>(program_counter));
+    size_t& program_counter = running_execution_context.program_counter;
+    program_counter = entry_point;
 
     // Declare a lookup table for computed goto with each of the `handle_*` labels
     // to avoid the overhead of a switch statement.
@@ -418,7 +416,7 @@ FLATTEN_ON_CLANG void Interpreter::run_bytecode(size_t entry_point)
 
         handle_End: {
             auto& instruction = *reinterpret_cast<Op::End const*>(&bytecode[program_counter]);
-            accumulator = get(instruction.value());
+            accumulator() = get(instruction.value());
             return;
         }
 
@@ -727,8 +725,6 @@ Interpreter::ResultAndReturnRegister Interpreter::run_executable(Executable& exe
     TemporaryChange restore_realm { m_realm, GC::Ptr { vm().current_realm() } };
     TemporaryChange restore_global_object { m_global_object, GC::Ptr { m_realm->global_object() } };
     TemporaryChange restore_global_declarative_environment { m_global_declarative_environment, GC::Ptr { m_realm->global_environment().declarative_record() } };
-
-    VERIFY(!vm().execution_context_stack().is_empty());
 
     auto& running_execution_context = vm().running_execution_context();
     u32 registers_and_constants_and_locals_count = executable.number_of_registers + executable.constants.size() + executable.local_variable_names.size();
