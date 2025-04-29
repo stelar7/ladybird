@@ -55,13 +55,9 @@ void IDBCursor::visit_edges(Visitor& visitor)
     visitor.visit(m_range);
     visitor.visit(m_request);
 
-    m_source.visit(
-        [&](IDBIndex& source) {
-            visitor.visit(source);
-        },
-        [&](IDBObjectStore& source) {
-            visitor.visit(source);
-        });
+    m_source.visit([&](auto& source) {
+        visitor.visit(source);
+    });
 }
 
 // https://w3c.github.io/IndexedDB/#dom-idbcursor-key

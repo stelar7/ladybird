@@ -24,8 +24,8 @@ IDBDatabase::IDBDatabase(JS::Realm& realm, Database& db)
     , m_name(db.name())
     , m_associated_database(db)
 {
-    db.associate(*this);
     m_uuid = MUST(Crypto::generate_random_uuid());
+    db.associate(*this);
     m_object_store_set = Vector<GC::Ref<ObjectStore>> { db.object_stores() };
 }
 
@@ -182,12 +182,13 @@ WebIDL::ExceptionOr<void> IDBDatabase::delete_object_store(String const& name)
         return WebIDL::NotFoundError::create(realm, "Object store not found while trying to delete"_string);
 
     // 5. Remove store from this's object store set.
-    remove_from_object_store_set(*store);
+    this->remove_from_object_store_set(*store);
 
     // FIXME: 6. If there is an object store handle associated with store and transaction, remove all entries from its index set.
 
     // 7. Destroy store.
     database->remove_object_store(*store);
+
     return {};
 }
 

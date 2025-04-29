@@ -25,15 +25,15 @@ IDBRequest::IDBRequest(JS::Realm& realm, IDBRequestSource source)
     m_uuid = MUST(Crypto::generate_random_uuid());
 }
 
-GC::Ref<IDBRequest> IDBRequest::create(JS::Realm& realm, IDBRequestSource source)
-{
-    return realm.create<IDBRequest>(realm, source);
-}
-
 void IDBRequest::initialize(JS::Realm& realm)
 {
     WEB_SET_PROTOTYPE_FOR_INTERFACE(IDBRequest);
     Base::initialize(realm);
+}
+
+GC::Ref<IDBRequest> IDBRequest::create(JS::Realm& realm, IDBRequestSource source)
+{
+    return realm.create<IDBRequest>(realm, source);
 }
 
 void IDBRequest::visit_edges(Visitor& visitor)

@@ -26,6 +26,9 @@ class IDBCursor : public Bindings::PlatformObject {
     GC_DECLARE_ALLOCATOR(IDBCursor);
 
 public:
+    virtual ~IDBCursor() override;
+    [[nodiscard]] static GC::Ref<IDBCursor> create(JS::Realm&, GC::Ref<IDBTransaction>, GC::Ptr<Key>, Bindings::IDBCursorDirection, bool, GC::Ptr<Key>, JS::Value, CursorSource, GC::Ref<IDBKeyRange>, bool);
+
     [[nodiscard]] CursorSource source() { return m_source; }
     [[nodiscard]] Bindings::IDBCursorDirection direction() { return m_direction; }
     [[nodiscard]] JS::Value key();
@@ -46,9 +49,6 @@ public:
     void set_key(GC::Ptr<Key> key) { m_key = key; }
     void set_value(JS::Value value) { m_value = value; }
     void set_object_store_position(GC::Ptr<Key> object_store_position) { m_object_store_position = object_store_position; }
-
-    virtual ~IDBCursor() override;
-    [[nodiscard]] static GC::Ref<IDBCursor> create(JS::Realm&, GC::Ref<IDBTransaction>, GC::Ptr<Key>, Bindings::IDBCursorDirection, bool, GC::Ptr<Key>, JS::Value, CursorSource, GC::Ref<IDBKeyRange>, bool);
 
 protected:
     explicit IDBCursor(JS::Realm&, GC::Ref<IDBTransaction>, GC::Ptr<Key>, Bindings::IDBCursorDirection, bool, GC::Ptr<Key>, JS::Value, CursorSource, GC::Ref<IDBKeyRange>, bool);

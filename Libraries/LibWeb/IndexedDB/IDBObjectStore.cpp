@@ -54,9 +54,9 @@ void IDBObjectStore::initialize(JS::Realm& realm)
 void IDBObjectStore::visit_edges(Visitor& visitor)
 {
     Base::visit_edges(visitor);
+    visitor.visit(m_store);
     visitor.visit(m_transaction);
     visitor.visit(m_indexes);
-    visitor.visit(m_store);
 }
 
 // https://w3c.github.io/IndexedDB/#object-store-in-line-keys
@@ -365,7 +365,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::add_or_put(GC::Ref<IDBO
     auto transaction = handle->transaction();
 
     // 2. Let store be handle’s object store.
-    auto store = handle->store();
+    auto& store = *handle->store();
 
     // FIXME: 3. If store has been deleted, throw an "InvalidStateError" DOMException.
 
@@ -380,11 +380,11 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::add_or_put(GC::Ref<IDBO
     auto key_was_given = key.has_value() && key != JS::js_undefined();
 
     // 6. If store uses in-line keys and key was given, throw a "DataError" DOMException.
-    if (store->uses_inline_keys() && key_was_given)
+    if (store.uses_inline_keys() && key_was_given)
         return WebIDL::DataError::create(realm, "Store uses in-line keys and key was given"_string);
 
     // 7. If store uses out-of-line keys and has no key generator and key was not given, throw a "DataError" DOMException.
-    if (store->uses_out_of_line_keys() && !store->uses_a_key_generator() && !key_was_given)
+    if (store.uses_out_of_line_keys() && !store.uses_a_key_generator() && !key_was_given)
         return WebIDL::DataError::create(realm, "Store uses out-of-line keys and has no key generator and key was not given"_string);
 
     GC::Ptr<Key> key_value;
@@ -408,9 +408,9 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::add_or_put(GC::Ref<IDBO
     auto clone = TRY(clone_in_realm(target_realm, value, transaction));
 
     // 11. If store uses in-line keys, then:
-    if (store->uses_inline_keys()) {
+    if (store.uses_inline_keys()) {
         // 1. Let kpk be the result of extracting a key from a value using a key path with clone and store’s key path. Rethrow any exceptions.
-        auto maybe_kpk = TRY(extract_a_key_from_a_value_using_a_key_path(realm, clone, store->key_path().value()));
+        auto maybe_kpk = TRY(extract_a_key_from_a_value_using_a_key_path(realm, clone, store.key_path().value()));
 
         // NOTE: Step 2 and 3 is reversed here, since we check for failure before validity.
         // 3. If kpk is not failure, let key be kpk.
@@ -425,11 +425,11 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::add_or_put(GC::Ref<IDBO
         // 4. Otherwise (kpk is failure):
         else {
             // 1. If store does not have a key generator, throw a "DataError" DOMException.
-            if (!store->uses_a_key_generator())
+            if (!store.uses_a_key_generator())
                 return WebIDL::DataError::create(realm, "Store does not have a key generator"_string);
 
             // 2. Otherwise, if check that a key could be injected into a value with clone and store’s key path return false, throw a "DataError" DOMException.
-            if (!check_that_a_key_could_be_injected_into_a_value(realm, clone, store->key_path().value()))
+            if (!check_that_a_key_could_be_injected_into_a_value(realm, clone, store.key_path().value()))
                 return WebIDL::DataError::create(realm, "Key could not be injected into value"_string);
         }
     }

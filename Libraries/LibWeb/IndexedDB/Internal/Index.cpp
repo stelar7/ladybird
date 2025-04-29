@@ -40,6 +40,15 @@ void Index::visit_edges(Visitor& visitor)
     }
 }
 
+void Index::set_name(String name)
+{
+    // NOTE: Update the key in the map so it still matches the name
+    auto old_value = m_object_store->index_set().take(m_name).release_value();
+    m_object_store->index_set().set(name, old_value);
+
+    m_name = move(name);
+}
+
 void Index::store_a_record(IndexRecord const& record)
 {
     m_records.append(record);
@@ -62,15 +71,6 @@ bool Index::has_record_with_key(GC::Ref<Key> key)
     });
 
     return index != m_records.end();
-}
-
-void Index::set_name(String name)
-{
-    // NOTE: Update the key in the map so it still matches the name
-    auto old_value = m_object_store->index_set().take(m_name).release_value();
-    m_object_store->index_set().set(name, old_value);
-
-    m_name = move(name);
 }
 
 }

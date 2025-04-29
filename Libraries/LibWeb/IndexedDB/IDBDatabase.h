@@ -62,7 +62,6 @@ public:
     [[nodiscard]] bool close_pending() const { return m_close_pending; }
     [[nodiscard]] ConnectionState state() const { return m_state; }
     [[nodiscard]] GC::Ref<Database> associated_database() { return m_associated_database; }
-    [[nodiscard]] GC::Ref<HTML::DOMStringList> object_store_names();
     [[nodiscard]] ReadonlySpan<GC::Ref<ObjectStore>> object_store_set() { return m_object_store_set; }
     void add_to_object_store_set(GC::Ref<ObjectStore> object_store) { m_object_store_set.append(object_store); }
     void remove_from_object_store_set(GC::Ref<ObjectStore> object_store)
@@ -73,6 +72,7 @@ public:
     [[nodiscard]] ReadonlySpan<GC::Ref<IDBTransaction>> transactions() { return m_transactions; }
     void add_transaction(GC::Ref<IDBTransaction> transaction) { m_transactions.append(transaction); }
 
+    [[nodiscard]] GC::Ref<HTML::DOMStringList> object_store_names();
     WebIDL::ExceptionOr<GC::Ref<IDBObjectStore>> create_object_store(String const&, IDBObjectStoreParameters const&);
     WebIDL::ExceptionOr<void> delete_object_store(String const&);
 
@@ -113,7 +113,7 @@ private:
     //       So we stash the one we have when opening a connection.
     GC::Ref<Database> m_associated_database;
 
-    // NOTE: We need to keep track of what transactions are created using this connection
+    // NOTE: We need to keep track of what transactions were created by this connection
     Vector<GC::Ref<IDBTransaction>> m_transactions;
 
     // NOTE: Used for debug purposes

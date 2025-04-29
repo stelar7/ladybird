@@ -61,7 +61,6 @@ public:
     [[nodiscard]] bool is_readonly() const { return m_mode == Bindings::IDBTransactionMode::Readonly; }
     [[nodiscard]] bool is_readwrite() const { return m_mode == Bindings::IDBTransactionMode::Readwrite; }
     [[nodiscard]] bool is_finished() const { return m_state == TransactionState::Finished; }
-    [[nodiscard]] bool is_complete() const { return is_finished(); }
 
     GC::Ptr<ObjectStore> object_store_named(String const& name) const;
     void add_to_scope(GC::Ref<ObjectStore> object_store) { m_scope.append(object_store); }

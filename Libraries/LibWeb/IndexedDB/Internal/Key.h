@@ -30,7 +30,6 @@ class Key : public JS::Cell {
     // * a list of other keys if type is array.
     using KeyValue = Variant<double, AK::String, ByteBuffer, Vector<GC::Root<Key>>>;
 
-public:
     // A key has an associated type which is one of: number, date, string, binary, or array.
     enum KeyType {
         Invalid,
@@ -41,11 +40,13 @@ public:
         Array
     };
 
+public:
     [[nodiscard]] static GC::Ref<Key> create(JS::Realm&, KeyType, KeyValue);
     virtual ~Key();
 
     [[nodiscard]] KeyType type() { return m_type; }
     [[nodiscard]] KeyValue value() { return m_value; }
+
     [[nodiscard]] bool is_invalid() { return m_type == Invalid; }
 
     [[nodiscard]] double value_as_double() { return m_value.get<double>(); }
