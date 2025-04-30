@@ -101,4 +101,25 @@ JS::Value IDBIndex::key_path() const
         });
 }
 
+// https://w3c.github.io/IndexedDB/#index-handle-transaction
+GC::Ref<IDBTransaction> IDBIndex::transaction()
+{
+    // The transaction of an index handle is the transaction of its associated object store handle.
+    return m_object_store_handle->transaction();
+}
+
+// https://w3c.github.io/IndexedDB/#dom-idbindex-multientry
+bool IDBIndex::multi_entry() const
+{
+    // The multiEntry getter steps are to return this’s index’s multiEntry flag.
+    return m_index->multi_entry();
+}
+
+// https://w3c.github.io/IndexedDB/#dom-idbindex-unique
+bool IDBIndex::unique() const
+{
+    // The unique getter steps are to return this’s index’s unique flag.
+    return m_index->unique();
+}
+
 }
