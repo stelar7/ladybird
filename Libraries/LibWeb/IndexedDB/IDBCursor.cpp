@@ -12,6 +12,7 @@
 #include <LibWeb/HTML/EventNames.h>
 #include <LibWeb/IndexedDB/IDBCursor.h>
 #include <LibWeb/IndexedDB/IDBIndex.h>
+#include <LibWeb/IndexedDB/IDBObjectStore.h>
 #include <LibWeb/IndexedDB/Internal/Algorithms.h>
 
 namespace Web::IndexedDB {
@@ -134,6 +135,41 @@ WebIDL::ExceptionOr<void> IDBCursor::continue_(JS::Value key)
     dbgln_if(IDB_DEBUG, "Executing request for cursor continue with uuid {}", request->uuid());
 
     return {};
+}
+
+// https://w3c.github.io/IndexedDB/#cursor-effective-object-store
+[[nodiscard]] GC::Ref<IDBObjectStore> IDBCursor::effective_object_store() const
+{
+    return m_source.visit(
+        [&](GC::Ref<IDBObjectStore> store) {
+            // If the source of a cursor is an object store, the effective object store of the cursor is that object store
+            return store;
+        },
+        [&](GC::Ref<IDBIndex> index) {
+            // If the source of a cursor is an index, the effective object store of the cursor is that index’s referenced object store
+            return index->object_store();
+        });
+}
+
+// https://w3c.github.io/IndexedDB/#cursor-effective-key
+[[nodiscard]] GC::Ref<Key> IDBCursor::effective_key() const
+{
+    return m_source.visit(
+        [&](GC::Ref<IDBObjectStore>) -> GC::Ref<Key> {
+            //  If the source of a cursor is an object store, the effective key of the cursor is the cursor’s position
+            return *m_position;
+        },
+        [&](GC::Ref<IDBIndex>) -> GC::Ref<Key> {
+            // If the source of a cursor is an index, the effective key is the cursor’s object store position.
+            return *m_object_store_position;
+        });
+}
+
+// https://w3c.github.io/IndexedDB/#dom-idbcursor-primarykey
+JS::Value IDBCursor::primary_key() const
+{
+    // The primaryKey getter steps are to return the result of converting a key to a value with the cursor’s current effective key.
+    return convert_a_key_to_a_value(realm(), effective_key());
 }
 
 }

@@ -12,7 +12,9 @@
 #include <LibWeb/Bindings/IDBCursorPrototype.h>
 #include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/HTML/StructuredSerializeTypes.h>
+#include <LibWeb/IndexedDB/IDBIndex.h>
 #include <LibWeb/IndexedDB/IDBKeyRange.h>
+#include <LibWeb/IndexedDB/IDBObjectStore.h>
 #include <LibWeb/IndexedDB/Internal/Key.h>
 #include <LibWeb/IndexedDB/Internal/ObjectStore.h>
 
@@ -40,6 +42,9 @@ public:
     [[nodiscard]] GC::Ptr<Key> object_store_position() { return m_object_store_position; }
     [[nodiscard]] bool key_only() const { return m_key_only; }
     [[nodiscard]] bool got_value() const { return m_got_value; }
+    [[nodiscard]] JS::Value primary_key() const;
+    [[nodiscard]] GC::Ref<IDBObjectStore> effective_object_store() const;
+    [[nodiscard]] GC::Ref<Key> effective_key() const;
 
     WebIDL::ExceptionOr<void> continue_(JS::Value);
 
