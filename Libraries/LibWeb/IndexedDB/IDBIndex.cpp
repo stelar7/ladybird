@@ -156,7 +156,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBIndex::open_cursor(JS::Value query, 
         return WebIDL::TransactionInactiveError::create(realm, "Transaction is not active while opening cursor"_string);
 
     // 5. Let range be the result of converting a value to a key range with query. Rethrow any exceptions.
-    auto range = TRY(convert_a_value_to_a_key_range(realm, query, false));
+    auto range = TRY(convert_a_value_to_a_key_range(realm, query));
 
     // 6. Let cursor be a new cursor with its transaction set to transaction, undefined position, direction set to direction, got value flag set to false, undefined key and value, source set to index, range set to range, and key only flag set to false.
     auto cursor = IDBCursor::create(realm, transaction, {}, direction, false, {}, {}, GC::Ref(*this), range, false);
