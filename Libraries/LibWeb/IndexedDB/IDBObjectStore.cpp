@@ -279,6 +279,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBIndex>> IDBObjectStore::create_index(String const
     // 11. Let index be a new index in store.
     //     Set index’s name to name, key path to keyPath, unique flag to unique, and multiEntry flag to multiEntry.
     auto index = Index::create(realm, store, name, key_path, unique, multi_entry);
+    dbgln_if(IDB_DEBUG, "IDBObjectStore::create_index: created index with name {}", name);
 
     // 12. Add index to this's index set.
     this->index_set().set(name, index);
@@ -317,7 +318,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBIndex>> IDBObjectStore::index(String const& name)
     // 5. Let index be the index named name in this’s index set if one exists, or throw a "NotFoundError" DOMException otherwise.
     auto index = m_indexes.get(name);
     if (!index.has_value())
-        return WebIDL::NotFoundError::create(realm(), "Index not found"_string);
+        return WebIDL::NotFoundError::create(realm(), "Index not found in object store"_string);
 
     // 6. Return an index handle associated with index and this.
     return IDBIndex::create(realm(), *index, *this);
@@ -345,7 +346,7 @@ WebIDL::ExceptionOr<void> IDBObjectStore::delete_index(String const& name)
     // 6. Let index be the index named name in store if one exists, or throw a "NotFoundError" DOMException otherwise.
     auto index = m_indexes.get(name);
     if (!index.has_value())
-        return WebIDL::NotFoundError::create(realm(), "Index not found"_string);
+        return WebIDL::NotFoundError::create(realm(), "Index not found while trying to delete"_string);
 
     // 7. Remove index from this’s index set.
     m_indexes.remove(name);
@@ -435,7 +436,7 @@ WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBObjectStore::add_or_put(GC::Ref<IDBO
     }
 
     // 12. Let operation be an algorithm to run store a record into an object store with store, clone, key, and no-overwrite flag.
-    auto operation = GC::Function<WebIDL::ExceptionOr<JS::Value>()>::create(realm.heap(), [&realm, store, clone, key_value, no_overwrite] -> WebIDL::ExceptionOr<JS::Value> {
+    auto operation = GC::Function<WebIDL::ExceptionOr<JS::Value>()>::create(realm.heap(), [&realm, &store, clone, key_value, no_overwrite] -> WebIDL::ExceptionOr<JS::Value> {
         auto optional_key = TRY(store_a_record_into_an_object_store(realm, store, clone, key_value, no_overwrite));
 
         if (!optional_key || optional_key->is_invalid())
