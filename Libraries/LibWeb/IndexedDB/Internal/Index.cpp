@@ -14,14 +14,14 @@ GC_DEFINE_ALLOCATOR(Index);
 
 Index::~Index() = default;
 
-GC::Ref<Index> Index::create(JS::Realm& realm, GC::Ref<ObjectStore> store, String name, KeyPath const& key_path, bool unique, bool multi_entry)
+GC::Ref<Index> Index::create(JS::Realm& realm, GC::Ref<ObjectStore> store, String const& name, KeyPath const& key_path, bool unique, bool multi_entry)
 {
     return realm.create<Index>(store, name, key_path, unique, multi_entry);
 }
 
-Index::Index(GC::Ref<ObjectStore> store, String name, KeyPath const& key_path, bool unique, bool multi_entry)
+Index::Index(GC::Ref<ObjectStore> store, String const& name, KeyPath const& key_path, bool unique, bool multi_entry)
     : m_object_store(store)
-    , m_name(move(name))
+    , m_name(name)
     , m_unique(unique)
     , m_multi_entry(multi_entry)
     , m_key_path(key_path)
@@ -40,13 +40,13 @@ void Index::visit_edges(Visitor& visitor)
     }
 }
 
-void Index::set_name(String name)
+void Index::set_name(String const& name)
 {
     // NOTE: Update the key in the map so it still matches the name
     auto old_value = m_object_store->index_set().take(m_name).release_value();
     m_object_store->index_set().set(name, old_value);
 
-    m_name = move(name);
+    m_name = name;
 }
 
 void Index::store_a_record(IndexRecord const& record)
