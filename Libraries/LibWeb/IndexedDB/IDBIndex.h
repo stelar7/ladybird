@@ -36,6 +36,10 @@ public:
     GC::Ref<IDBTransaction> transaction();
     GC::Ref<Index> index() { return m_index; }
 
+    HTML::SerializationRecord get_referenced_value(IndexRecord const& index_record) const;
+
+    [[nodiscard]] WebIDL::ExceptionOr<GC::Ref<IDBRequest>> open_cursor(JS::Value, Bindings::IDBCursorDirection = Bindings::IDBCursorDirection::Next);
+
 protected:
     explicit IDBIndex(JS::Realm&, GC::Ref<Index>, GC::Ref<IDBObjectStore>);
     virtual void initialize(JS::Realm&) override;

@@ -1431,19 +1431,17 @@ GC::Ptr<IDBCursor> iterate_a_cursor(JS::Realm& realm, GC::Ref<IDBCursor> cursor,
     auto direction = cursor->direction();
 
     // 3. Assert: if primaryKey is given, source is an index and direction is "next" or "prev".
-    auto source_is_an_index = source.has<GC::Ref<IDBIndex>>();
-    auto source_is_an_object_store = source.has<GC::Ref<IDBObjectStore>>();
     auto direction_is_next_or_prev = direction == Bindings::IDBCursorDirection::Next || direction == Bindings::IDBCursorDirection::Prev;
-    VERIFY(!primary_key || (source_is_an_index && direction_is_next_or_prev));
+    if (primary_key)
+        VERIFY(source.has<GC::Ref<IDBIndex>>() && direction_is_next_or_prev);
 
     // 4. Let records be the list of records in source.
-    auto records = source.visit(
-        [](GC::Ref<IDBObjectStore> object_store) -> Vector<Record> {
+    Variant<Vector<Record>, Vector<IndexRecord>> records = source.visit(
+        [](GC::Ref<IDBObjectStore> object_store) -> Variant<Vector<Record>, Vector<IndexRecord>> {
             return object_store->store()->records();
         },
-        [](GC::Ref<IDBIndex>) -> Vector<Record> {
-            VERIFY_NOT_REACHED();
-            // FIXME: return index->records();
+        [](GC::Ref<IDBIndex> index) -> Variant<Vector<Record>, Vector<IndexRecord>> {
+            return index->index()->records();
         });
 
     // 5. Let range be cursor’s range.
@@ -1458,74 +1456,275 @@ GC::Ptr<IDBCursor> iterate_a_cursor(JS::Realm& realm, GC::Ref<IDBCursor> cursor,
     // 8. If count is not given, let count be 1.
     // NOTE: This is handled by the default parameter
 
+    auto next_requirements = [&](Variant<Record, IndexRecord> const& record) -> bool {
+        // * If key is defined,
+        if (key) {
+            // * the record’s key is greater than or equal to key.
+            auto is_greater_than_or_equal = record.visit(
+                [](Empty) { VERIFY_NOT_REACHED(); },
+                [key](auto const& inner_record) {
+                    return Key::greater_than(inner_record.key, *key) || Key::equals(inner_record.key, *key);
+                });
+
+            if (!is_greater_than_or_equal)
+                return false;
+        }
+
+        // * If primaryKey is defined,
+        if (primary_key) {
+            auto const& inner_record = record.get<IndexRecord>();
+
+            // * the record’s key is equal to key and the record’s value is greater than or equal to primaryKey,
+            if (!(Key::equals(inner_record.key, *key) && (Key::greater_than(inner_record.value, *primary_key) || Key::equals(inner_record.value, *primary_key))))
+                return false;
+
+            // * or the record’s key is greater than key.
+            if (!(Key::greater_than(inner_record.key, *key)))
+                return false;
+        }
+
+        // * If position is defined, and source is an object store,
+        if (position && source.has<GC::Ref<IDBObjectStore>>()) {
+            auto const& inner_record = record.get<Record>();
+
+            // * the record’s key is greater than position.
+            if (!Key::greater_than(inner_record.key, *position))
+                return false;
+        }
+
+        // * If position is defined, and source is an index,
+        if (position && source.has<GC::Ref<IDBIndex>>()) {
+            auto const& inner_record = record.get<IndexRecord>();
+
+            // * the record’s key is equal to position and the record’s value is greater than object store position
+            if (!(Key::equals(inner_record.key, *position) && (Key::greater_than(inner_record.value, *object_store_position))))
+                return false;
+
+            // * or the record’s key is greater than position.
+            if (!Key::greater_than(inner_record.key, *position))
+                return false;
+        }
+
+        // * The record’s key is in range.
+        auto is_in_range = record.visit(
+            [](Empty) { VERIFY_NOT_REACHED(); },
+            [range](auto const& inner_record) {
+                return range->is_in_range(inner_record.key);
+            });
+
+        return is_in_range;
+    };
+
+    auto next_unique_requirements = [&](Variant<Record, IndexRecord> const& record) -> bool {
+        // * If key is defined,
+        if (key) {
+            // * the record’s key is greater than or equal to key.
+            auto is_greater_than_or_equal = record.visit(
+                [](Empty) { VERIFY_NOT_REACHED(); },
+                [key](auto const& inner_record) {
+                    return Key::greater_than(inner_record.key, *key) || Key::equals(inner_record.key, *key);
+                });
+
+            if (!is_greater_than_or_equal)
+                return false;
+        }
+
+        // * If position is defined,
+        if (position) {
+            // * the record’s key is greater than position.
+            auto is_greater_than_position = record.visit(
+                [](Empty) { VERIFY_NOT_REACHED(); },
+                [position](auto const& inner_record) {
+                    return Key::greater_than(inner_record.key, *position) || Key::equals(inner_record.key, *position);
+                });
+
+            if (!is_greater_than_position)
+                return false;
+        }
+
+        // * The record’s key is in range.
+        auto is_in_range = record.visit(
+            [](Empty) { VERIFY_NOT_REACHED(); },
+            [range](auto const& inner_record) {
+                return range->is_in_range(inner_record.key);
+            });
+
+        return is_in_range;
+    };
+
+    auto prev_requirements = [&](Variant<Record, IndexRecord> const& record) -> bool {
+        // * If key is defined,
+        if (key) {
+            // * the record’s key is less than or equal to key.
+            auto is_less_than_or_equal = record.visit(
+                [](Empty) { VERIFY_NOT_REACHED(); },
+                [key](auto const& inner_record) {
+                    return Key::less_than(inner_record.key, *key) || Key::equals(inner_record.key, *key);
+                });
+
+            if (!is_less_than_or_equal)
+                return false;
+        }
+
+        // * If primaryKey is defined,
+        if (primary_key) {
+            auto const& inner_record = record.get<IndexRecord>();
+
+            // * the record’s key is equal to key and the record’s value is less than or equal to primaryKey,
+            if (!(Key::equals(inner_record.key, *key) && (Key::less_than(inner_record.value, *primary_key) || Key::equals(inner_record.value, *primary_key))))
+                return false;
+
+            // * or the record’s key is less than key.
+            if (!(Key::less_than(inner_record.key, *key)))
+                return false;
+        }
+
+        // * If position is defined, and source is an object store,
+        if (position && source.has<GC::Ref<IDBObjectStore>>()) {
+            auto const& inner_record = record.get<Record>();
+
+            // * the record’s key is less than position.
+            if (!Key::less_than(inner_record.key, *position))
+                return false;
+        }
+
+        // * If position is defined, and source is an index,
+        if (position && source.has<GC::Ref<IDBIndex>>()) {
+            auto const& inner_record = record.get<IndexRecord>();
+
+            // * the record’s key is equal to position and the record’s value is less than object store position
+            if (!(Key::equals(inner_record.key, *position) && Key::less_than(inner_record.value, *object_store_position)))
+                return false;
+
+            // * or the record’s key is less than position.
+            if (!Key::less_than(inner_record.key, *position))
+                return false;
+        }
+
+        // * The record’s key is in range.
+        auto is_in_range = record.visit(
+            [](Empty) { VERIFY_NOT_REACHED(); },
+            [range](auto const& inner_record) {
+                return range->is_in_range(inner_record.key);
+            });
+
+        return is_in_range;
+    };
+
+    auto prev_unique_requirements = [&](Variant<Record, IndexRecord> const& record) -> bool {
+        // * If key is defined,
+        if (key) {
+            // * the record’s key is less than or equal to key.
+            auto is_less_than_or_equal = record.visit(
+                [](Empty) { VERIFY_NOT_REACHED(); },
+                [key](auto const& inner_record) {
+                    return Key::less_than(inner_record.key, *key) || Key::equals(inner_record.key, *key);
+                });
+
+            if (!is_less_than_or_equal)
+                return false;
+        }
+
+        //* If position is defined,
+        if (position) {
+            // * the record’s key is less than position.
+            auto is_less_than_position = record.visit(
+                [](Empty) { VERIFY_NOT_REACHED(); },
+                [position](auto const& inner_record) {
+                    return Key::less_than(inner_record.key, *position) || Key::equals(inner_record.key, *position);
+                });
+
+            if (!is_less_than_position)
+                return false;
+        }
+
+        // * The record’s key is in range.
+        auto is_in_range = record.visit(
+            [](Empty) { VERIFY_NOT_REACHED(); },
+            [range](auto const& inner_record) {
+                return range->is_in_range(inner_record.key);
+            });
+
+        return is_in_range;
+    };
+
     // 9. While count is greater than 0:
-    Optional<Record> found_record;
+    Variant<Empty, Record, IndexRecord> found_record;
     while (count > 0) {
         // 1. Switch on direction:
         switch (direction) {
         case Bindings::IDBCursorDirection::Next: {
             // Let found record be the first record in records which satisfy all of the following requirements:
-            for (auto const& record : records) {
-                auto key_is_defined = key != nullptr;
-                auto record_key_is_equal_to_key = key_is_defined ? Key::equals(record.key, *key) : false;
-                auto record_key_is_greater_than_key = key_is_defined ? Key::greater_than(record.key, *key) : false;
-                auto record_key_is_greater_or_equal_to_key = key_is_defined ? Key::greater_than(record.key, *key) || Key::equals(record.key, *key) : false;
-                auto is_primary_key_defined = primary_key != nullptr;
-                // FIXME: auto record_value_is_greater_or_equal_to_primary_key = is_primary_key_defined ? Key::greater_than(record.value, *primary_key) || Key::equals(record.value, *primary_key) : false;
-                auto record_value_is_greater_or_equal_to_primary_key = false;
-                auto position_is_defined = position != nullptr;
-                auto record_key_is_greater_than_position = position_is_defined ? Key::greater_than(record.key, *position) : false;
-                auto record_key_is_equal_to_position = position_is_defined ? Key::greater_than(record.key, *position) : false;
-                // FIXME: auto record_value_is_greater_than_object_store_position = object_store_position != nullptr && Key::greater_than(record.value, *object_store_position);
-                auto record_value_is_greater_than_object_store_position = false;
+            found_record = records.visit([&](auto content) -> Variant<Empty, Record, IndexRecord> {
+                auto value = content.first_matching(next_requirements);
+                if (value.has_value())
+                    return *value;
 
-                // * If key is defined, the record’s key is greater than or equal to key.
-                if (key_is_defined) {
-                    if (!record_key_is_greater_or_equal_to_key)
-                        continue;
-                }
+                return Empty {};
+            });
+            break;
+        }
+        case Bindings::IDBCursorDirection::Nextunique: {
+            // Let found record be the first record in records which satisfy all of the following requirements:
+            found_record = records.visit([&](auto content) -> Variant<Empty, Record, IndexRecord> {
+                auto value = content.first_matching(next_unique_requirements);
+                if (value.has_value())
+                    return *value;
 
-                // * If primaryKey is defined, the record’s key is equal to key and the record’s value is greater than or equal to primaryKey, or the record’s key is greater than key.
-                if (is_primary_key_defined) {
-                    if (!((record_key_is_equal_to_key && record_value_is_greater_or_equal_to_primary_key) || record_key_is_greater_than_key))
-                        continue;
-                }
+                return Empty {};
+            });
+            break;
+        }
+        case Bindings::IDBCursorDirection::Prev: {
+            // Let found record be the last record in records which satisfy all of the following requirements:
+            found_record = records.visit([&](auto content) -> Variant<Empty, Record, IndexRecord> {
+                auto value = content.last_matching(prev_requirements);
+                if (value.has_value())
+                    return *value;
 
-                // * If position is defined, and source is an object store, the record’s key is greater than position.
-                if (position_is_defined && source_is_an_object_store) {
-                    if (!record_key_is_greater_than_position)
-                        continue;
-                }
+                return Empty {};
+            });
+            break;
+        }
 
-                // * If position is defined, and source is an index, the record’s key is equal to position and the record’s value is greater than object store position or the record’s key is greater than position.
-                if (position_is_defined && source_is_an_index) {
-                    if (!((record_key_is_equal_to_position && record_value_is_greater_than_object_store_position) || record_key_is_greater_than_position))
-                        continue;
-                }
+        case Bindings::IDBCursorDirection::Prevunique: {
+            // Let temp record be the last record in records which satisfy all of the following requirements:
+            auto temp_record = records.visit([&](auto content) -> Variant<Empty, Record, IndexRecord> {
+                auto value = content.last_matching(prev_unique_requirements);
+                if (value.has_value())
+                    return *value;
 
-                // * The record’s key is in range.
-                if (!range->is_in_range(record.key))
-                    continue;
+                return Empty {};
+            });
 
-                found_record = record;
-                break;
+            // If temp record is defined, let found record be the first record in records whose key is equal to temp record’s key.
+            if (!temp_record.has<Empty>()) {
+                auto temp_record_key = temp_record.visit(
+                    [](Empty) -> GC::Ref<Key> { VERIFY_NOT_REACHED(); },
+                    [](auto const& record) { return record.key; });
+
+                found_record = records.visit([&](auto content) -> Variant<Empty, Record, IndexRecord> {
+                    auto value = content.first_matching([&](auto const& content_record) {
+                        return Key::equals(content_record.key, temp_record_key);
+                    });
+                    if (value.has_value())
+                        return *value;
+
+                    return Empty {};
+                });
             }
 
             break;
         }
-        // FIXME:
-        case Bindings::IDBCursorDirection::Nextunique:
-        case Bindings::IDBCursorDirection::Prev:
-        case Bindings::IDBCursorDirection::Prevunique:
         }
 
         // 2. If found record is not defined, then:
-        if (!found_record.has_value()) {
+        if (found_record.has<Empty>()) {
             // 1. Set cursor’s key to undefined.
             cursor->set_key(nullptr);
 
             // 2. If source is an index, set cursor’s object store position to undefined.
-            if (source_is_an_index)
+            if (source.has<GC::Ref<IDBIndex>>())
                 cursor->set_object_store_position(nullptr);
 
             // 3. If cursor’s key only flag is false, set cursor’s value to undefined.
@@ -1537,11 +1736,13 @@ GC::Ptr<IDBCursor> iterate_a_cursor(JS::Realm& realm, GC::Ref<IDBCursor> cursor,
         }
 
         // 3. Let position be found record’s key.
-        position = found_record->key;
+        position = found_record.visit(
+            [](Empty) -> GC::Ref<Key> { VERIFY_NOT_REACHED(); },
+            [](auto val) { return val.key; });
 
-        // FIXME: 4. If source is an index, let object store position be found record’s value.
-        // if (source_is_an_index)
-        //     object_store_position = found_record->value;
+        // 4. If source is an index, let object store position be found record’s value.
+        if (source.has<GC::Ref<IDBIndex>>())
+            object_store_position = found_record.get<IndexRecord>().value;
 
         // 5. Decrease count by 1.
         count--;
@@ -1551,16 +1752,26 @@ GC::Ptr<IDBCursor> iterate_a_cursor(JS::Realm& realm, GC::Ref<IDBCursor> cursor,
     cursor->set_position(position);
 
     // 11. If source is an index, set cursor’s object store position to object store position.
-    if (source_is_an_index)
+    if (source.has<GC::Ref<IDBIndex>>())
         cursor->set_object_store_position(object_store_position);
 
     // 12. Set cursor’s key to found record’s key.
-    cursor->set_key(found_record->key);
+    cursor->set_key(found_record.visit(
+        [](Empty) -> GC::Ref<Key> { VERIFY_NOT_REACHED(); },
+        [](auto val) { return val.key; }));
 
     // 13. If cursor’s key only flag is false, then:
     if (!cursor->key_only()) {
+
+        // AD-HOC: https://github.com/w3c/IndexedDB/issues/452
         // 1. Let serialized be found record’s referenced value.
-        auto serialized = found_record->value;
+        auto serialized = source.visit(
+            [&](GC::Ref<IDBObjectStore>) {
+                return found_record.get<Record>().value;
+            },
+            [&](GC::Ref<IDBIndex> index) {
+                return index->get_referenced_value(found_record.get<IndexRecord>());
+            });
 
         // 2. Set cursor’s value to ! StructuredDeserialize(serialized, targetRealm)
         cursor->set_value(MUST(HTML::structured_deserialize(realm.vm(), serialized, realm)));

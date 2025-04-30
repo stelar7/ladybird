@@ -73,10 +73,6 @@ public:
     virtual ~IDBObjectStore() override;
     [[nodiscard]] static GC::Ref<IDBObjectStore> create(JS::Realm&, String, bool, Optional<KeyPath> const&, GC::Ref<IDBTransaction>);
 
-    [[nodiscard]] bool has_record_with_key(GC::Ref<Key> key);
-    void remove_records_in_range(GC::Ref<IDBKeyRange>);
-    void store_a_record(Record const&);
-
 protected:
     explicit IDBObjectStore(JS::Realm&, GC::Ref<ObjectStore>, GC::Ref<IDBTransaction>);
     virtual void initialize(JS::Realm&) override;
