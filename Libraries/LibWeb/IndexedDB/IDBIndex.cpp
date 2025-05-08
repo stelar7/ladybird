@@ -123,21 +123,6 @@ bool IDBIndex::unique() const
     return m_index->unique();
 }
 
-// https://w3c.github.io/IndexedDB/#index-referenced-value
-HTML::SerializationRecord IDBIndex::get_referenced_value(IndexRecord const& index_record) const
-{
-    // Records in an index are said to have a referenced value.
-    // This is the value of the record in the index’s referenced object store which has a key equal to the index’s record’s value.
-    return m_object_store_handle
-        ->store()
-        ->records()
-        .first_matching([&](auto const& store_record) {
-            return Key::equals(store_record.key, index_record.value);
-        })
-        .value()
-        .value;
-}
-
 // https://w3c.github.io/IndexedDB/#dom-idbindex-opencursor
 WebIDL::ExceptionOr<GC::Ref<IDBRequest>> IDBIndex::open_cursor(JS::Value query, Bindings::IDBCursorDirection direction)
 {

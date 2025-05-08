@@ -42,11 +42,11 @@ public:
     [[nodiscard]] GC::Ptr<Key> object_store_position() { return m_object_store_position; }
     [[nodiscard]] bool key_only() const { return m_key_only; }
     [[nodiscard]] bool got_value() const { return m_got_value; }
+    [[nodiscard]] GC::Ref<IDBTransaction> transaction();
+    [[nodiscard]] CursorSource internal_source();
     [[nodiscard]] JS::Value primary_key() const;
     [[nodiscard]] GC::Ref<IDBObjectStore> effective_object_store() const;
     [[nodiscard]] GC::Ref<Key> effective_key() const;
-
-    WebIDL::ExceptionOr<void> continue_(JS::Value);
 
     void set_request(GC::Ptr<IDBRequest> request) { m_request = request; }
     void set_position(GC::Ptr<Key> position) { m_position = position; }
@@ -55,8 +55,7 @@ public:
     void set_value(JS::Value value) { m_value = value; }
     void set_object_store_position(GC::Ptr<Key> object_store_position) { m_object_store_position = object_store_position; }
 
-    [[nodiscard]] GC::Ref<IDBTransaction> transaction();
-    [[nodiscard]] CursorSource internal_source();
+    WebIDL::ExceptionOr<void> continue_(JS::Value);
 
 protected:
     explicit IDBCursor(JS::Realm&, CursorSourceHandle, GC::Ptr<Key>, Bindings::IDBCursorDirection, bool, GC::Ptr<Key>, JS::Value, GC::Ref<IDBKeyRange>, bool);
