@@ -37,7 +37,7 @@ public:
     [[nodiscard]] bool unique() const { return m_unique; }
     [[nodiscard]] bool multi_entry() const { return m_multi_entry; }
     [[nodiscard]] GC::Ref<ObjectStore> object_store() const { return m_object_store; }
-    [[nodiscard]] AK::Vector<IndexRecord> records() const { return m_records; }
+    [[nodiscard]] AK::ReadonlySpan<IndexRecord> records() const { return m_records; }
     [[nodiscard]] KeyPath const& key_path() const { return m_key_path; }
 
     void store_a_record(IndexRecord const&);
