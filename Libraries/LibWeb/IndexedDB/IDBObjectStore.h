@@ -42,6 +42,7 @@ class IDBObjectStore : public Bindings::PlatformObject {
     GC_DECLARE_ALLOCATOR(IDBObjectStore);
 
 public:
+    virtual ~IDBObjectStore();
     [[nodiscard]] static GC::Ref<IDBObjectStore> create(JS::Realm&, GC::Ref<ObjectStore>, GC::Ref<IDBTransaction>);
 
     bool auto_increment() const;
