@@ -38,6 +38,7 @@
 #include <LibWeb/CSS/CSSStyleRule.h>
 #include <LibWeb/CSS/CSSTransition.h>
 #include <LibWeb/CSS/ComputedProperties.h>
+#include <LibWeb/CSS/Fetch.h>
 #include <LibWeb/CSS/Interpolation.h>
 #include <LibWeb/CSS/InvalidationSet.h>
 #include <LibWeb/CSS/Parser/Parser.h>
@@ -74,6 +75,8 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/ShadowRoot.h>
+#include <LibWeb/Fetch/Infrastructure/FetchController.h>
+#include <LibWeb/Fetch/Response.h>
 #include <LibWeb/HTML/HTMLBRElement.h>
 #include <LibWeb/HTML/HTMLHtmlElement.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
@@ -184,54 +187,27 @@ StyleComputer::StyleComputer(DOM::Document& document)
 
 StyleComputer::~StyleComputer() = default;
 
-FontLoader::FontLoader(StyleComputer& style_computer, FlyString family_name, Vector<Gfx::UnicodeRange> unicode_ranges, Vector<::URL::URL> urls, Function<void(FontLoader const&)> on_load, Function<void()> on_fail)
+FontLoader::FontLoader(StyleComputer& style_computer, GC::Ptr<CSSStyleSheet> parent_style_sheet, FlyString family_name, Vector<Gfx::UnicodeRange> unicode_ranges, Vector<URL> urls, Function<void(RefPtr<Gfx::Typeface const>)> on_load)
     : m_style_computer(style_computer)
+    , m_parent_style_sheet(parent_style_sheet)
     , m_family_name(move(family_name))
     , m_unicode_ranges(move(unicode_ranges))
     , m_urls(move(urls))
     , m_on_load(move(on_load))
-    , m_on_fail(move(on_fail))
 {
 }
 
 FontLoader::~FontLoader() = default;
 
-void FontLoader::resource_did_load()
+bool FontLoader::is_loading() const
 {
-    resource_did_load_or_fail();
-    if (m_on_load)
-        m_on_load(*this);
-}
-
-void FontLoader::resource_did_fail()
-{
-    resource_did_load_or_fail();
-    if (m_on_fail) {
-        m_on_fail();
-    }
-}
-
-void FontLoader::resource_did_load_or_fail()
-{
-    // NOTE: Even if the resource "failed" to load, we still want to try to parse it as a font.
-    //       This is necessary for https://wpt.live/ to work correctly, as it just drops the connection
-    //       after sending a resource, which looks like an error, but is actually recoverable.
-    // FIXME: It would be nice to solve this in the network layer instead.
-    //        It would also be nice to move font loading to using fetch primitives.
-    auto result = try_load_font();
-    if (result.is_error()) {
-        dbgln("Failed to parse font: {}", result.error());
-        start_loading_next_url();
-        return;
-    }
-    m_vector_font = result.release_value();
-    m_style_computer.did_load_font(m_family_name);
+    return m_fetch_controller && !m_vector_font;
 }
 
 RefPtr<Gfx::Font const> FontLoader::font_with_point_size(float point_size)
 {
     if (!m_vector_font) {
-        if (!resource())
+        if (!m_fetch_controller)
             start_loading_next_url();
         return nullptr;
     }
@@ -240,46 +216,88 @@ RefPtr<Gfx::Font const> FontLoader::font_with_point_size(float point_size)
 
 void FontLoader::start_loading_next_url()
 {
-    if (resource() && resource()->is_pending())
+    // FIXME: Load local() fonts somehow.
+    if (m_fetch_controller && m_fetch_controller->state() == Fetch::Infrastructure::FetchController::State::Ongoing)
         return;
     if (m_urls.is_empty())
         return;
-    auto& style_computer_realm = m_style_computer.document().realm();
-    auto& page = Bindings::principal_host_defined_page(HTML::principal_realm(style_computer_realm));
 
-    LoadRequest request;
-    request.set_url(m_urls.take_first());
-    request.set_page(page);
+    // https://drafts.csswg.org/css-fonts-4/#fetch-a-font
+    // To fetch a font given a selected <url> url for @font-face rule, fetch url, with stylesheet being rule’s parent
+    // CSS style sheet, destination "font", CORS mode "cors", and processResponse being the following steps given
+    // response res and null, failure or a byte stream stream:
+    auto style_sheet_or_document = m_parent_style_sheet ? StyleSheetOrDocument { *m_parent_style_sheet } : StyleSheetOrDocument { m_style_computer.document() };
+    auto maybe_fetch_controller = fetch_a_style_resource(m_urls.take_first(), style_sheet_or_document, Fetch::Infrastructure::Request::Destination::Font, CorsMode::Cors,
+        [weak_loader = make_weak_ptr()](auto response, auto stream) {
+            // NB: If the FontLoader died before this fetch completed, nobody wants the data.
+            if (weak_loader.is_null())
+                return;
+            auto& loader = *weak_loader;
 
-    // HACK: We're crudely computing the referer value and shoving it into the
-    //       request until fetch infrastructure is used here.
-    auto referrer_url = ReferrerPolicy::strip_url_for_use_as_referrer(m_style_computer.document().url());
-    if (referrer_url.has_value() && !request.headers().contains("Referer"))
-        request.set_header("Referer", referrer_url->serialize().to_byte_string());
+            // 1. If stream is null, return.
+            // 2. Load a font from stream according to its type.
 
-    set_resource(ResourceLoader::the().load_resource(Resource::Type::Generic, request));
+            // NB: We need to fetch the next source if this one fails to fetch OR decode. So, first try to decode it.
+            RefPtr<Gfx::Typeface const> typeface;
+            if (auto* bytes = stream.template get_pointer<ByteBuffer>()) {
+                if (auto maybe_typeface = loader.try_load_font(response, *bytes); !maybe_typeface.is_error())
+                    typeface = maybe_typeface.release_value();
+            }
+
+            if (!typeface) {
+                // NB: If we have other sources available, try the next one.
+                if (loader.m_urls.is_empty()) {
+                    loader.font_did_load_or_fail(nullptr);
+                } else {
+                    loader.m_fetch_controller = nullptr;
+                    loader.start_loading_next_url();
+                }
+            } else {
+                loader.font_did_load_or_fail(move(typeface));
+            }
+        });
+
+    if (maybe_fetch_controller.is_error()) {
+        font_did_load_or_fail(nullptr);
+    } else {
+        m_fetch_controller = maybe_fetch_controller.release_value();
+    }
 }
 
-ErrorOr<NonnullRefPtr<Gfx::Typeface const>> FontLoader::try_load_font()
+void FontLoader::font_did_load_or_fail(RefPtr<Gfx::Typeface const> typeface)
+{
+    if (typeface) {
+        m_vector_font = typeface.release_nonnull();
+        m_style_computer.did_load_font(m_family_name);
+        if (m_on_load)
+            m_on_load(m_vector_font);
+    } else {
+        if (m_on_load)
+            m_on_load(nullptr);
+    }
+    m_fetch_controller = nullptr;
+}
+
+ErrorOr<NonnullRefPtr<Gfx::Typeface const>> FontLoader::try_load_font(Fetch::Infrastructure::Response const& response, ByteBuffer const& bytes)
 {
     // FIXME: This could maybe use the format() provided in @font-face as well, since often the mime type is just application/octet-stream and we have to try every format
-    auto mime_type = MimeSniff::MimeType::parse(resource()->mime_type());
+    auto mime_type = response.header_list()->extract_mime_type();
     if (!mime_type.has_value() || !mime_type->is_font()) {
-        mime_type = MimeSniff::Resource::sniff(resource()->encoded_data(), Web::MimeSniff::SniffingConfiguration { .sniffing_context = Web::MimeSniff::SniffingContext::Font });
+        mime_type = MimeSniff::Resource::sniff(bytes, MimeSniff::SniffingConfiguration { .sniffing_context = MimeSniff::SniffingContext::Font });
     }
     if (mime_type.has_value()) {
         if (mime_type->essence() == "font/ttf"sv || mime_type->essence() == "application/x-font-ttf"sv || mime_type->essence() == "font/otf"sv) {
-            if (auto result = Gfx::Typeface::try_load_from_externally_owned_memory(resource()->encoded_data()); !result.is_error()) {
+            if (auto result = Gfx::Typeface::try_load_from_temporary_memory(bytes); !result.is_error()) {
                 return result;
             }
         }
         if (mime_type->essence() == "font/woff"sv || mime_type->essence() == "application/font-woff"sv) {
-            if (auto result = WOFF::try_load_from_externally_owned_memory(resource()->encoded_data()); !result.is_error()) {
+            if (auto result = WOFF::try_load_from_bytes(bytes); !result.is_error()) {
                 return result;
             }
         }
         if (mime_type->essence() == "font/woff2"sv || mime_type->essence() == "application/font-woff2"sv) {
-            if (auto result = WOFF2::try_load_from_externally_owned_memory(resource()->encoded_data()); !result.is_error()) {
+            if (auto result = WOFF2::try_load_from_bytes(bytes); !result.is_error()) {
                 return result;
             }
         }
@@ -913,22 +931,25 @@ void StyleComputer::for_each_property_expanding_shorthands(PropertyID property_i
             set_longhand_property(CSS::PropertyID::TransitionDuration, TimeStyleValue::create(CSS::Time::make_seconds(0)));
             set_longhand_property(CSS::PropertyID::TransitionDelay, TimeStyleValue::create(CSS::Time::make_seconds(0)));
             set_longhand_property(CSS::PropertyID::TransitionTimingFunction, EasingStyleValue::create(EasingStyleValue::CubicBezier::ease()));
+            set_longhand_property(CSS::PropertyID::TransitionBehavior, CSSKeywordValue::create(Keyword::Normal));
             return;
         }
         auto const& transitions = value.as_transition().transitions();
-        Array<Vector<ValueComparingNonnullRefPtr<CSSStyleValue const>>, 4> transition_values;
+        Array<Vector<ValueComparingNonnullRefPtr<CSSStyleValue const>>, 5> transition_values;
         for (auto const& transition : transitions) {
             transition_values[0].append(*transition.property_name);
             transition_values[1].append(transition.duration.as_style_value());
             transition_values[2].append(transition.delay.as_style_value());
             if (transition.easing)
                 transition_values[3].append(*transition.easing);
+            transition_values[4].append(CSSKeywordValue::create(to_keyword(transition.transition_behavior)));
         }
 
         set_longhand_property(CSS::PropertyID::TransitionProperty, StyleValueList::create(move(transition_values[0]), StyleValueList::Separator::Comma));
         set_longhand_property(CSS::PropertyID::TransitionDuration, StyleValueList::create(move(transition_values[1]), StyleValueList::Separator::Comma));
         set_longhand_property(CSS::PropertyID::TransitionDelay, StyleValueList::create(move(transition_values[2]), StyleValueList::Separator::Comma));
         set_longhand_property(CSS::PropertyID::TransitionTimingFunction, StyleValueList::create(move(transition_values[3]), StyleValueList::Separator::Comma));
+        set_longhand_property(CSS::PropertyID::TransitionBehavior, StyleValueList::create(move(transition_values[4]), StyleValueList::Separator::Comma));
         return;
     }
 
@@ -1371,8 +1392,11 @@ static void compute_transitioned_properties(ComputedProperties const& style, DOM
     auto timing_functions = normalize_transition_length_list(
         PropertyID::TransitionTimingFunction,
         [] { return EasingStyleValue::create(EasingStyleValue::CubicBezier::ease()); });
+    auto transition_behaviors = normalize_transition_length_list(
+        PropertyID::TransitionBehavior,
+        [] { return CSSKeywordValue::create(Keyword::None); });
 
-    element.add_transitioned_properties(move(properties), move(delays), move(durations), move(timing_functions));
+    element.add_transitioned_properties(move(properties), move(delays), move(durations), move(timing_functions), move(transition_behaviors));
 }
 
 // https://drafts.csswg.org/css-transitions/#starting
@@ -1414,13 +1438,13 @@ void StyleComputer::start_needed_transitions(ComputedProperties const& previous_
         if (
             // - the element does not have a running transition for the property,
             (!has_running_transition) &&
+            // - there is a matching transition-property value, and
+            (matching_transition_properties.has_value()) &&
             // - the before-change style is different from the after-change style for that property, and the values for the property are transitionable,
-            (!before_change_value.equals(after_change_value) && property_values_are_transitionable(property_id, before_change_value, after_change_value)) &&
+            (!before_change_value.equals(after_change_value) && property_values_are_transitionable(property_id, before_change_value, after_change_value, matching_transition_properties->transition_behavior)) &&
             // - the element does not have a completed transition for the property
             //   or the end value of the completed transition is different from the after-change style for the property,
             (!has_completed_transition || !existing_transition->transition_end_value()->equals(after_change_value)) &&
-            // - there is a matching transition-property value, and
-            (matching_transition_properties.has_value()) &&
             // - the combined duration is greater than 0s,
             (combined_duration(matching_transition_properties.value()) > 0)) {
 
@@ -1480,7 +1504,7 @@ void StyleComputer::start_needed_transitions(ComputedProperties const& previous_
             //    or if these two values are not transitionable,
             //    then implementations must cancel the running transition.
             auto current_value = existing_transition->value_at_time(style_change_event_time);
-            if (current_value->equals(after_change_value) || !property_values_are_transitionable(property_id, current_value, after_change_value)) {
+            if (current_value->equals(after_change_value) || !property_values_are_transitionable(property_id, current_value, after_change_value, matching_transition_properties->transition_behavior)) {
                 dbgln_if(CSS_TRANSITIONS_DEBUG, "Transition step 4.1");
                 existing_transition->cancel();
             }
@@ -1489,7 +1513,7 @@ void StyleComputer::start_needed_transitions(ComputedProperties const& previous_
             //    or if the current value of the property in the running transition is not transitionable with the value of the property in the after-change style,
             //    then implementations must cancel the running transition.
             else if ((combined_duration(matching_transition_properties.value()) <= 0)
-                || !property_values_are_transitionable(property_id, current_value, after_change_value)) {
+                || !property_values_are_transitionable(property_id, current_value, after_change_value, matching_transition_properties->transition_behavior)) {
                 dbgln_if(CSS_TRANSITIONS_DEBUG, "Transition step 4.2");
                 existing_transition->cancel();
             }
@@ -3011,11 +3035,11 @@ void StyleComputer::did_load_font(FlyString const&)
     document().invalidate_style(DOM::StyleInvalidationReason::CSSFontLoaded);
 }
 
-Optional<FontLoader&> StyleComputer::load_font_face(ParsedFontFace const& font_face, Function<void(FontLoader const&)> on_load, Function<void()> on_fail)
+Optional<FontLoader&> StyleComputer::load_font_face(ParsedFontFace const& font_face, Function<void(RefPtr<Gfx::Typeface const>)> on_load)
 {
     if (font_face.sources().is_empty()) {
-        if (on_fail)
-            on_fail();
+        if (on_load)
+            on_load({});
         return {};
     }
 
@@ -3025,29 +3049,29 @@ Optional<FontLoader&> StyleComputer::load_font_face(ParsedFontFace const& font_f
         .slope = font_face.slope().value_or(0),
     };
 
-    Vector<::URL::URL> urls;
+    // FIXME: Pass the sources directly, so the font loader can make use of the format information, or load local fonts.
+    Vector<URL> urls;
     for (auto const& source : font_face.sources()) {
-        // FIXME: These should be loaded relative to the stylesheet URL instead of the document URL.
-        if (source.local_or_url.has<::URL::URL>())
-            urls.append(*m_document->encoding_parse_url(source.local_or_url.get<::URL::URL>().to_string()));
+        if (source.local_or_url.has<URL>())
+            urls.append(source.local_or_url.get<URL>());
         // FIXME: Handle local()
     }
 
     if (urls.is_empty()) {
-        if (on_fail)
-            on_fail();
+        if (on_load)
+            on_load({});
         return {};
     }
 
-    auto loader = make<FontLoader>(const_cast<StyleComputer&>(*this), font_face.font_family(), font_face.unicode_ranges(), move(urls), move(on_load), move(on_fail));
+    auto loader = make<FontLoader>(*this, font_face.parent_style_sheet(), font_face.font_family(), font_face.unicode_ranges(), move(urls), move(on_load));
     auto& loader_ref = *loader;
-    auto maybe_font_loaders_list = const_cast<StyleComputer&>(*this).m_loaded_fonts.get(key);
+    auto maybe_font_loaders_list = m_loaded_fonts.get(key);
     if (maybe_font_loaders_list.has_value()) {
         maybe_font_loaders_list->append(move(loader));
     } else {
         FontLoaderList loaders;
         loaders.append(move(loader));
-        const_cast<StyleComputer&>(*this).m_loaded_fonts.set(OwnFontFaceKey(key), move(loaders));
+        m_loaded_fonts.set(OwnFontFaceKey(key), move(loaders));
     }
     // Actual object owned by font loader list inside m_loaded_fonts, this isn't use-after-move/free
     return loader_ref;

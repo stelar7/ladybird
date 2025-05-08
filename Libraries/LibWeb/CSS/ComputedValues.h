@@ -32,6 +32,7 @@
 #include <LibWeb/CSS/StyleValues/CursorStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ShadowStyleValue.h>
 #include <LibWeb/CSS/Transformation.h>
+#include <LibWeb/CSS/URL.h>
 
 namespace Web::CSS {
 
@@ -225,40 +226,40 @@ public:
         : m_value(color)
     {
     }
-    SVGPaint(::URL::URL const& url)
+    SVGPaint(URL const& url)
         : m_value(url)
     {
     }
 
     bool is_color() const { return m_value.has<Color>(); }
-    bool is_url() const { return m_value.has<::URL::URL>(); }
+    bool is_url() const { return m_value.has<URL>(); }
     Color as_color() const { return m_value.get<Color>(); }
-    ::URL::URL const& as_url() const { return m_value.get<::URL::URL>(); }
+    URL const& as_url() const { return m_value.get<URL>(); }
 
 private:
-    Variant<::URL::URL, Color> m_value;
+    Variant<URL, Color> m_value;
 };
 
 // https://drafts.fxtf.org/css-masking-1/#typedef-mask-reference
 class MaskReference {
 public:
     // TODO: Support other mask types.
-    MaskReference(::URL::URL const& url)
+    MaskReference(URL const& url)
         : m_url(url)
     {
     }
 
-    ::URL::URL const& url() const { return m_url; }
+    URL const& url() const { return m_url; }
 
 private:
-    ::URL::URL m_url;
+    URL m_url;
 };
 
 // https://drafts.fxtf.org/css-masking/#the-clip-path
 // TODO: Support clip sources.
 class ClipPathReference {
 public:
-    ClipPathReference(::URL::URL const& url)
+    ClipPathReference(URL const& url)
         : m_clip_source(url)
     {
     }
@@ -270,16 +271,16 @@ public:
 
     bool is_basic_shape() const { return m_clip_source.has<BasicShape>(); }
 
-    bool is_url() const { return m_clip_source.has<::URL::URL>(); }
+    bool is_url() const { return m_clip_source.has<URL>(); }
 
-    ::URL::URL const& url() const { return m_clip_source.get<::URL::URL>(); }
+    URL const& url() const { return m_clip_source.get<URL>(); }
 
     BasicShapeStyleValue const& basic_shape() const { return *m_clip_source.get<BasicShape>(); }
 
 private:
     using BasicShape = NonnullRefPtr<BasicShapeStyleValue const>;
 
-    Variant<::URL::URL, BasicShape> m_clip_source;
+    Variant<URL, BasicShape> m_clip_source;
 };
 
 struct BackgroundLayerData {
@@ -306,6 +307,29 @@ public:
     CSSPixels width { 0 };
 
     bool operator==(BorderData const&) const = default;
+};
+
+struct TouchActionData {
+    bool allow_left : 1 { true };
+    bool allow_right : 1 { true };
+    bool allow_up : 1 { true };
+    bool allow_down : 1 { true };
+    bool allow_pinch_zoom : 1 { true };
+
+    // Other touch interactions which aren't pan or pinch to zoom. E.g.: Double tap to zoom.
+    bool allow_other : 1 { true };
+
+    static TouchActionData none()
+    {
+        return TouchActionData {
+            .allow_left = false,
+            .allow_right = false,
+            .allow_up = false,
+            .allow_down = false,
+            .allow_pinch_zoom = false,
+            .allow_other = false,
+        };
+    }
 };
 
 struct TransformOrigin {
@@ -455,6 +479,7 @@ public:
     CSS::Containment const& contain() const { return m_noninherited.contain; }
     CSS::MixBlendMode mix_blend_mode() const { return m_noninherited.mix_blend_mode; }
     Optional<FlyString> view_transition_name() const { return m_noninherited.view_transition_name; }
+    TouchActionData touch_action() const { return m_noninherited.touch_action; }
 
     CSS::LengthBox const& inset() const { return m_noninherited.inset; }
     const CSS::LengthBox& margin() const { return m_noninherited.margin; }
@@ -712,6 +737,7 @@ protected:
         CSS::Containment contain { InitialValues::contain() };
         CSS::MixBlendMode mix_blend_mode { InitialValues::mix_blend_mode() };
         Optional<FlyString> view_transition_name;
+        TouchActionData touch_action;
 
         Optional<CSS::Transformation> rotate;
         Optional<CSS::Transformation> translate;
@@ -890,6 +916,7 @@ public:
     void set_contain(CSS::Containment value) { m_noninherited.contain = move(value); }
     void set_mix_blend_mode(CSS::MixBlendMode value) { m_noninherited.mix_blend_mode = value; }
     void set_view_transition_name(Optional<FlyString> value) { m_noninherited.view_transition_name = value; }
+    void set_touch_action(TouchActionData value) { m_noninherited.touch_action = value; }
 
     void set_fill(SVGPaint value) { m_inherited.fill = move(value); }
     void set_stroke(SVGPaint value) { m_inherited.stroke = move(value); }

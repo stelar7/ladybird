@@ -529,6 +529,9 @@ GC::Ptr<Layout::Node> Element::create_layout_node(GC::Ref<CSS::ComputedPropertie
 
 GC::Ptr<Layout::NodeWithStyle> Element::create_layout_node_for_display_type(DOM::Document& document, CSS::Display const& display, GC::Ref<CSS::ComputedProperties> style, Element* element)
 {
+    if (display.is_none())
+        return {};
+
     if (display.is_table_inside() || display.is_table_row_group() || display.is_table_header_group() || display.is_table_footer_group() || display.is_table_row())
         return document.heap().allocate<Layout::Box>(document, element, move(style));
 
@@ -617,7 +620,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_style()
     m_affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator = false;
     m_affected_by_direct_sibling_combinator = false;
     m_affected_by_indirect_sibling_combinator = false;
-    m_affected_by_first_or_last_child_pseudo_class = false;
+    m_affected_by_sibling_position_or_count_pseudo_class = false;
     m_affected_by_nth_child_pseudo_class = false;
     m_sibling_invalidation_distance = 0;
 

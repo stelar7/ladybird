@@ -8,6 +8,7 @@
 #pragma once
 
 #include <LibGfx/PaintStyle.h>
+#include <LibWeb/CSS/URL.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/SVG/AttributeParser.h>
 #include <LibWeb/SVG/SVGAnimatedTransformList.h>
@@ -79,14 +80,16 @@ protected:
     Gfx::AffineTransform m_transform = {};
 
     template<typename T>
-    GC::Ptr<T> try_resolve_url_to(URL::URL const& url) const
+    GC::Ptr<T> try_resolve_url_to(CSS::URL const& url) const
     {
-        if (!url.fragment().has_value())
+        // FIXME: Complete and use the entire URL, not just the fragment.
+        Optional<FlyString> fragment;
+        if (auto fragment_offset = url.url().find_byte_offset('#'); fragment_offset.has_value()) {
+            fragment = MUST(url.url().substring_from_byte_offset_with_shared_superstring(fragment_offset.value() + 1));
+        }
+        if (!fragment.has_value())
             return {};
-        auto node = document().get_element_by_id(*url.fragment());
-        if (!node)
-            return {};
-        if (is<T>(*node))
+        if (auto node = document().get_element_by_id(*fragment); node && is<T>(*node))
             return static_cast<T&>(*node);
         return {};
     }

@@ -15,6 +15,7 @@
 #include <LibWeb/CSS/StyleValues/CSSColorValue.h>
 #include <LibWeb/CSS/StyleValues/CSSKeywordValue.h>
 #include <LibWeb/CSS/StyleValues/CalculatedStyleValue.h>
+#include <LibWeb/CSS/StyleValues/FontStyleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FrequencyStyleValue.h>
 #include <LibWeb/CSS/StyleValues/IntegerStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
@@ -94,6 +95,42 @@ static RefPtr<CSSStyleValue const> interpolate_scale(DOM::Element& element, Calc
         move(new_values));
 }
 
+static RefPtr<CSSStyleValue const> interpolate_translate(DOM::Element& element, CalculationContext calculation_context, CSSStyleValue const& a_from, CSSStyleValue const& a_to, float delta)
+{
+    if (a_from.to_keyword() == Keyword::None && a_to.to_keyword() == Keyword::None)
+        return a_from;
+
+    static auto zero_px = LengthStyleValue::create(Length::make_px(0));
+    static auto zero = TransformationStyleValue::create(PropertyID::Translate, TransformFunction::Translate, { zero_px, zero_px });
+
+    auto const& from = a_from.to_keyword() == Keyword::None ? *zero : a_from;
+    auto const& to = a_to.to_keyword() == Keyword::None ? *zero : a_to;
+
+    auto const& from_transform = from.as_transformation();
+    auto const& to_transform = to.as_transformation();
+
+    auto interpolated_x = interpolate_value(element, calculation_context, from_transform.values()[0], to_transform.values()[0], delta);
+    auto interpolated_y = interpolate_value(element, calculation_context, from_transform.values()[1], to_transform.values()[1], delta);
+
+    RefPtr<CSSStyleValue const> interpolated_z;
+
+    if (from_transform.values().size() == 3 || to_transform.values().size() == 3) {
+        auto from_z = from_transform.values().size() == 3 ? from_transform.values()[2] : zero_px;
+        auto to_z = to_transform.values().size() == 3 ? to_transform.values()[2] : zero_px;
+        interpolated_z = interpolate_value(element, calculation_context, from_z, to_z, delta);
+    }
+
+    StyleValueVector new_values = { interpolated_x, interpolated_y };
+    if (interpolated_z && interpolated_z->is_length() && !interpolated_z->as_length().equals(zero_px)) {
+        new_values.append(*interpolated_z);
+    }
+
+    return TransformationStyleValue::create(
+        PropertyID::Translate,
+        new_values.size() == 3 ? TransformFunction::Translate3d : TransformFunction::Translate,
+        move(new_values));
+}
+
 ValueComparingRefPtr<CSSStyleValue const> interpolate_property(DOM::Element& element, PropertyID property_id, CSSStyleValue const& a_from, CSSStyleValue const& a_to, float delta)
 {
     auto from = with_keyword_values_resolved(element, property_id, a_from);
@@ -125,8 +162,18 @@ ValueComparingRefPtr<CSSStyleValue const> interpolate_property(DOM::Element& ele
         if (property_id == PropertyID::BoxShadow)
             return interpolate_box_shadow(element, calculation_context, from, to, delta);
 
+        if (property_id == PropertyID::FontStyle) {
+            auto static oblique_0deg_value = FontStyleStyleValue::create(FontStyle::Oblique, AngleStyleValue::create(Angle::make_degrees(0)));
+            auto from_value = from->as_font_style().font_style() == FontStyle::Normal ? oblique_0deg_value : from;
+            auto to_value = to->as_font_style().font_style() == FontStyle::Normal ? oblique_0deg_value : to;
+            return interpolate_value(element, calculation_context, from_value, to_value, delta);
+        }
+
         if (property_id == PropertyID::Scale)
             return interpolate_scale(element, calculation_context, from, to, delta);
+
+        if (property_id == PropertyID::Translate)
+            return interpolate_translate(element, calculation_context, from, to, delta);
 
         // FIXME: Handle all custom animatable properties
         [[fallthrough]];
@@ -138,13 +185,13 @@ ValueComparingRefPtr<CSSStyleValue const> interpolate_property(DOM::Element& ele
 }
 
 // https://drafts.csswg.org/css-transitions/#transitionable
-bool property_values_are_transitionable(PropertyID property_id, CSSStyleValue const& old_value, CSSStyleValue const& new_value)
+bool property_values_are_transitionable(PropertyID property_id, CSSStyleValue const& old_value, CSSStyleValue const& new_value, TransitionBehavior transition_behavior)
 {
     // When comparing the before-change style and after-change style for a given property,
     // the property values are transitionable if they have an animation type that is neither not animatable nor discrete.
 
     auto animation_type = animation_type_from_longhand_property(property_id);
-    if (animation_type == AnimationType::None || animation_type == AnimationType::Discrete)
+    if (animation_type == AnimationType::None || (transition_behavior != TransitionBehavior::AllowDiscrete && animation_type == AnimationType::Discrete))
         return false;
 
     // FIXME: Even when a property is transitionable, the two values may not be. The spec uses the example of inset/non-inset shadows.
@@ -649,6 +696,17 @@ static RefPtr<CSSStyleValue const> interpolate_value_impl(DOM::Element& element,
             return EdgeStyleValue::create(edge, *interpolated_value);
 
         return delta >= 0.5f ? to : from;
+    }
+    case CSSStyleValue::Type::FontStyle: {
+        auto const& from_font_style = from.as_font_style();
+        auto const& to_font_style = to.as_font_style();
+        auto interpolated_font_style = interpolate_value(element, calculation_context, CSSKeywordValue::create(to_keyword(from_font_style.font_style())), CSSKeywordValue::create(to_keyword(to_font_style.font_style())), delta);
+        if (from_font_style.angle() && to_font_style.angle()) {
+            auto interpolated_angle = interpolate_value(element, calculation_context, *from_font_style.angle(), *to_font_style.angle(), delta);
+            return FontStyleStyleValue::create(*keyword_to_font_style(interpolated_font_style->to_keyword()), interpolated_angle);
+        }
+
+        return FontStyleStyleValue::create(*keyword_to_font_style(interpolated_font_style->to_keyword()));
     }
     case CSSStyleValue::Type::Integer: {
         // https://drafts.csswg.org/css-values/#combine-integers

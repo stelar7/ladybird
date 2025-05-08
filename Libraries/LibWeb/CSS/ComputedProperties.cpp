@@ -285,7 +285,7 @@ CSSPixels ComputedProperties::compute_line_height(CSSPixelRect const& viewport_r
     auto const& line_height = property(PropertyID::LineHeight);
 
     if (line_height.is_keyword() && line_height.to_keyword() == Keyword::Normal)
-        return font_metrics.line_height;
+        return CSSPixels { round_to<i32>(font_metrics.font_size * normal_line_height_scale) };
 
     if (line_height.is_length()) {
         auto line_height_length = line_height.as_length().length();
@@ -1578,6 +1578,54 @@ Isolation ComputedProperties::isolation() const
 {
     auto const& value = property(PropertyID::Isolation);
     return keyword_to_isolation(value.to_keyword()).release_value();
+}
+
+TouchActionData ComputedProperties::touch_action() const
+{
+    auto const& touch_action = property(PropertyID::TouchAction);
+    if (touch_action.is_keyword()) {
+        switch (touch_action.to_keyword()) {
+        case Keyword::Auto:
+            return TouchActionData {};
+        case Keyword::None:
+            return TouchActionData::none();
+        case Keyword::Manipulation:
+            return TouchActionData { .allow_other = false };
+        default:
+            VERIFY_NOT_REACHED();
+        }
+    }
+    if (touch_action.is_value_list()) {
+        TouchActionData touch_action_data = TouchActionData::none();
+        for (auto const& value : touch_action.as_value_list().values()) {
+            switch (value->as_keyword().keyword()) {
+            case Keyword::PanX:
+                touch_action_data.allow_right = true;
+                touch_action_data.allow_left = true;
+                break;
+            case Keyword::PanLeft:
+                touch_action_data.allow_left = true;
+                break;
+            case Keyword::PanRight:
+                touch_action_data.allow_right = true;
+                break;
+            case Keyword::PanY:
+                touch_action_data.allow_up = true;
+                touch_action_data.allow_down = true;
+                break;
+            case Keyword::PanUp:
+                touch_action_data.allow_up = true;
+                break;
+            case Keyword::PanDown:
+                touch_action_data.allow_down = true;
+                break;
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        }
+        return touch_action_data;
+    }
+    return TouchActionData {};
 }
 
 Containment ComputedProperties::contain() const

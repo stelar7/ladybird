@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2018-2023, Andreas Kling <andreas@ladybird.org>
- * Copyright (c) 2021-2023, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2021-2025, Sam Atkins <sam@ladybird.org>
  * Copyright (c) 2025, Jelle Raaijmakers <jelle@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -932,6 +932,8 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
         else
             computed_values.set_aspect_ratio({ false, aspect_ratio.as_ratio().ratio() });
     }
+
+    computed_values.set_touch_action(computed_style.touch_action());
 
     auto const& math_shift_value = computed_style.property(CSS::PropertyID::MathShift);
     if (auto math_shift = keyword_to_math_shift(math_shift_value.to_keyword()); math_shift.has_value())

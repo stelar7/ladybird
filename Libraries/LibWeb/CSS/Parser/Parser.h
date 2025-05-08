@@ -71,13 +71,10 @@ enum class ParsingMode {
 struct ParsingParams {
     explicit ParsingParams(ParsingMode = ParsingMode::Normal);
     explicit ParsingParams(JS::Realm&, ParsingMode = ParsingMode::Normal);
-    explicit ParsingParams(JS::Realm&, ::URL::URL, ParsingMode = ParsingMode::Normal);
-    explicit ParsingParams(DOM::Document const&, ::URL::URL, ParsingMode = ParsingMode::Normal);
     explicit ParsingParams(DOM::Document const&, ParsingMode = ParsingMode::Normal);
 
     GC::Ptr<JS::Realm> realm;
     GC::Ptr<DOM::Document const> document;
-    ::URL::URL url;
     ParsingMode mode { ParsingMode::Normal };
 
     Vector<RuleContext> rule_context;
@@ -282,7 +279,7 @@ private:
     Optional<ExplicitGridTrack> parse_track_sizing_function(ComponentValue const&);
 
     Optional<URL> parse_url_function(TokenStream<ComponentValue>&);
-    RefPtr<CSSStyleValue const> parse_url_value(TokenStream<ComponentValue>&);
+    RefPtr<URLStyleValue const> parse_url_value(TokenStream<ComponentValue>&);
 
     Optional<ShapeRadius> parse_shape_radius(TokenStream<ComponentValue>&);
     RefPtr<CSSStyleValue const> parse_basic_shape_value(TokenStream<ComponentValue>&);
@@ -348,6 +345,7 @@ private:
     };
     RefPtr<PositionStyleValue const> parse_position_value(TokenStream<ComponentValue>&, PositionParsingMode = PositionParsingMode::Normal);
     RefPtr<CSSStyleValue const> parse_filter_value_list_value(TokenStream<ComponentValue>&);
+    RefPtr<CSSStyleValue const> parse_contain_value(TokenStream<ComponentValue>&);
     RefPtr<StringStyleValue const> parse_opentype_tag_value(TokenStream<ComponentValue>&);
     RefPtr<FontSourceStyleValue const> parse_font_source_value(TokenStream<ComponentValue>&);
 
@@ -394,6 +392,7 @@ private:
     RefPtr<CSSStyleValue const> parse_font_family_value(TokenStream<ComponentValue>&);
     RefPtr<CSSStyleValue const> parse_font_language_override_value(TokenStream<ComponentValue>&);
     RefPtr<CSSStyleValue const> parse_font_feature_settings_value(TokenStream<ComponentValue>&);
+    RefPtr<CSSStyleValue const> parse_font_style_value(TokenStream<ComponentValue>&);
     RefPtr<CSSStyleValue const> parse_font_variation_settings_value(TokenStream<ComponentValue>&);
     RefPtr<CSSStyleValue const> parse_font_variant(TokenStream<ComponentValue>&);
     RefPtr<CSSStyleValue const> parse_font_variant_alternates_value(TokenStream<ComponentValue>&);
@@ -435,6 +434,7 @@ private:
     RefPtr<CSSStyleValue const> parse_grid_template_areas_value(TokenStream<ComponentValue>&);
     RefPtr<CSSStyleValue const> parse_grid_area_shorthand_value(TokenStream<ComponentValue>&);
     RefPtr<CSSStyleValue const> parse_grid_shorthand_value(TokenStream<ComponentValue>&);
+    RefPtr<CSSStyleValue const> parse_touch_action_value(TokenStream<ComponentValue>&);
 
     RefPtr<CSSStyleValue const> parse_list_of_time_values(PropertyID, TokenStream<ComponentValue>&);
 
@@ -479,11 +479,9 @@ private:
     JS::Realm& realm() const;
     bool in_quirks_mode() const;
     bool is_parsing_svg_presentation_attribute() const;
-    Optional<::URL::URL> complete_url(StringView) const;
 
     GC::Ptr<DOM::Document const> m_document;
     GC::Ptr<JS::Realm> m_realm;
-    Optional<::URL::URL> m_url;
     ParsingMode m_parsing_mode { ParsingMode::Normal };
 
     Vector<Token> m_tokens;

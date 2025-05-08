@@ -41,12 +41,12 @@ static NonnullRefPtr<Core::Promise<NonnullRefPtr<Gfx::Typeface const>>> load_vec
             promise->resolve(ttf.release_value());
             return;
         }
-        auto woff = WOFF::try_load_from_externally_owned_memory(data);
+        auto woff = WOFF::try_load_from_bytes(data);
         if (!woff.is_error()) {
             promise->resolve(woff.release_value());
             return;
         }
-        auto woff2 = WOFF2::try_load_from_externally_owned_memory(data);
+        auto woff2 = WOFF2::try_load_from_bytes(data);
         if (!woff2.is_error()) {
             promise->resolve(woff2.release_value());
             return;
@@ -63,7 +63,6 @@ GC_DEFINE_ALLOCATOR(FontFace);
 GC::Ref<FontFace> FontFace::construct_impl(JS::Realm& realm, String family, FontFaceSource source, FontFaceDescriptors const& descriptors)
 {
     auto& vm = realm.vm();
-    auto base_url = HTML::relevant_settings_object(realm.global_object()).api_base_url();
 
     // 1. Let font face be a fresh FontFace object. Set font face’s status attribute to "unloaded",
     //    Set its internal [[FontStatusPromise]] slot to a fresh pending Promise object.
@@ -76,7 +75,7 @@ GC::Ref<FontFace> FontFace::construct_impl(JS::Realm& realm, String family, Font
     //    set font face’s corresponding attributes to the empty string, and set font face’s status attribute to "error".
     //    Otherwise, set font face’s corresponding attributes to the serialization of the parsed values.
 
-    Parser::ParsingParams parsing_params { realm, base_url };
+    Parser::ParsingParams parsing_params { realm };
     auto try_parse_descriptor = [&parsing_params, &font_face, &realm](DescriptorID descriptor_id, String const& string) -> String {
         auto result = parse_css_descriptor(parsing_params, AtRuleID::FontFace, descriptor_id, string);
         if (!result) {
@@ -450,32 +449,28 @@ GC::Ref<WebIDL::Promise> FontFace::load()
         // 4. Using the value of font face’s [[Urls]] slot, attempt to load a font as defined in [CSS-FONTS-3],
         //     as if it was the value of a @font-face rule’s src descriptor.
 
-        // 5. When the load operation completes, successfully or not, queue a task to run the following steps synchronously:
-        auto on_error = [font] {
-            HTML::queue_global_task(HTML::Task::Source::FontLoading, HTML::relevant_global_object(*font), GC::create_function(font->heap(), [font = GC::Ref(*font)] {
+        // 5. When the load operation completes, successfully or not, queue a task to run the follsowing steps synchronously:
+        auto on_load = [font](RefPtr<Gfx::Typeface const> maybe_typeface) {
+            HTML::queue_global_task(HTML::Task::Source::FontLoading, HTML::relevant_global_object(*font), GC::create_function(font->heap(), [font = GC::Ref(*font), maybe_typeface] {
                 HTML::TemporaryExecutionContext context(font->realm(), HTML::TemporaryExecutionContext::CallbacksEnabled::Yes);
+                // 1. If the attempt to load fails, reject font face’s [[FontStatusPromise]] with a DOMException whose name
+                //    is "NetworkError" and set font face’s status attribute to "error".
+                if (!maybe_typeface) {
+                    font->m_status = Bindings::FontFaceLoadStatus::Error;
+                    WebIDL::reject_promise(font->realm(), font->m_font_status_promise, WebIDL::NetworkError::create(font->realm(), "Failed to load font"_string));
 
-                //     1. If the attempt to load fails, reject font face’s [[FontStatusPromise]] with a DOMException whose name
-                //        is "NetworkError" and set font face’s status attribute to "error".
-                font->m_status = Bindings::FontFaceLoadStatus::Error;
-                WebIDL::reject_promise(font->realm(), font->m_font_status_promise, WebIDL::NetworkError::create(font->realm(), "Failed to load font"_string));
-
-                // FIXME: For each FontFaceSet font face is in:
-            }));
-        };
-
-        auto on_load = [font](FontLoader const& loader) {
-            // FIXME: We are assuming that the font loader will live as long as the document! This is an unsafe capture
-            HTML::queue_global_task(HTML::Task::Source::FontLoading, HTML::relevant_global_object(*font), GC::create_function(font->heap(), [font = GC::Ref(*font), &loader] {
-                HTML::TemporaryExecutionContext context(font->realm(), HTML::TemporaryExecutionContext::CallbacksEnabled::Yes);
+                    // FIXME: For each FontFaceSet font face is in:
+                }
 
                 // 2. Otherwise, font face now represents the loaded font; fulfill font face’s [[FontStatusPromise]] with font face
                 //    and set font face’s status attribute to "loaded".
-                font->m_parsed_font = loader.vector_font();
-                font->m_status = Bindings::FontFaceLoadStatus::Loaded;
-                WebIDL::resolve_promise(font->realm(), font->m_font_status_promise, font);
+                else {
+                    font->m_parsed_font = maybe_typeface;
+                    font->m_status = Bindings::FontFaceLoadStatus::Loaded;
+                    WebIDL::resolve_promise(font->realm(), font->m_font_status_promise, font);
 
-                // FIXME: For each FontFaceSet font face is in:
+                    // FIXME: For each FontFaceSet font face is in:
+                }
             }));
         };
 
@@ -487,6 +482,7 @@ GC::Ref<WebIDL::Promise> FontFace::load()
 
             // FIXME: The ParsedFontFace is kind of expensive to create. We should be using a shared sub-object for the data
             ParsedFontFace parsed_font_face {
+                nullptr,
                 font->m_family,
                 font->m_weight.to_number<int>(),
                 0,                      // FIXME: slope
@@ -502,7 +498,7 @@ GC::Ref<WebIDL::Promise> FontFace::load()
                 {},                // FIXME: feature_settings
                 {},                // FIXME: variation_settings
             };
-            if (auto loader = style_computer.load_font_face(parsed_font_face, move(on_load), move(on_error)); loader.has_value())
+            if (auto loader = style_computer.load_font_face(parsed_font_face, move(on_load)); loader.has_value())
                 loader->start_loading_next_url();
         } else {
             // FIXME: Don't know how to load fonts in workers! They don't have a StyleComputer

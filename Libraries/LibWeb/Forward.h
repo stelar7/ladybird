@@ -92,6 +92,9 @@ enum class XMLHttpRequestResponseType : u8;
 namespace Web::Clipboard {
 class Clipboard;
 class ClipboardItem;
+
+struct SystemClipboardItem;
+struct SystemClipboardRepresentation;
 }
 
 namespace Web::Compression {
@@ -201,6 +204,7 @@ class FlexStyleValue;
 class FontFace;
 class FontFaceSet;
 class FontSourceStyleValue;
+class FontStyleStyleValue;
 class Frequency;
 class FrequencyOrCalculated;
 class FrequencyPercentage;
@@ -559,6 +563,8 @@ class RadioNodeList;
 class SelectedFile;
 class SessionHistoryEntry;
 class SharedResourceRequest;
+class SharedWorker;
+class SharedWorkerGlobalScope;
 class Storage;
 class SubmitEvent;
 class TextMetrics;

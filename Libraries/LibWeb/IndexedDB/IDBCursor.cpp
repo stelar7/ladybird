@@ -21,23 +21,22 @@ GC_DEFINE_ALLOCATOR(IDBCursor);
 
 IDBCursor::~IDBCursor() = default;
 
-IDBCursor::IDBCursor(JS::Realm& realm, GC::Ref<IDBTransaction> transaction, GC::Ptr<Key> position, Bindings::IDBCursorDirection direction, bool got_value, GC::Ptr<Key> key, JS::Value value, CursorSource source, GC::Ref<IDBKeyRange> range, bool key_only)
+IDBCursor::IDBCursor(JS::Realm& realm, CursorSourceHandle source_handle, GC::Ptr<Key> position, Bindings::IDBCursorDirection direction, bool got_value, GC::Ptr<Key> key, JS::Value value, GC::Ref<IDBKeyRange> range, bool key_only)
     : PlatformObject(realm)
-    , m_transaction(transaction)
     , m_position(position)
     , m_direction(direction)
     , m_got_value(got_value)
     , m_key(key)
     , m_value(value)
-    , m_source(source)
+    , m_source_handle(source_handle)
     , m_range(range)
     , m_key_only(key_only)
 {
 }
 
-GC::Ref<IDBCursor> IDBCursor::create(JS::Realm& realm, GC::Ref<IDBTransaction> transaction, GC::Ptr<Key> position, Bindings::IDBCursorDirection direction, bool got_value, GC::Ptr<Key> key, JS::Value value, CursorSource source, GC::Ref<IDBKeyRange> range, bool key_only)
+GC::Ref<IDBCursor> IDBCursor::create(JS::Realm& realm, CursorSourceHandle source_handle, GC::Ptr<Key> position, Bindings::IDBCursorDirection direction, bool got_value, GC::Ptr<Key> key, JS::Value value, GC::Ref<IDBKeyRange> range, bool key_only)
 {
-    return realm.create<IDBCursor>(realm, transaction, position, direction, got_value, key, value, source, range, key_only);
+    return realm.create<IDBCursor>(realm, source_handle, position, direction, got_value, key, value, range, key_only);
 }
 
 void IDBCursor::initialize(JS::Realm& realm)
@@ -49,16 +48,33 @@ void IDBCursor::initialize(JS::Realm& realm)
 void IDBCursor::visit_edges(Visitor& visitor)
 {
     Base::visit_edges(visitor);
-    visitor.visit(m_transaction);
     visitor.visit(m_position);
     visitor.visit(m_object_store_position);
     visitor.visit(m_key);
     visitor.visit(m_range);
     visitor.visit(m_request);
 
-    m_source.visit([&](auto& source) {
+    m_source_handle.visit([&](auto& source) {
         visitor.visit(source);
     });
+}
+
+// https://w3c.github.io/IndexedDB/#cursor-transaction
+GC::Ref<IDBTransaction> IDBCursor::transaction()
+{
+    // A cursor has a transaction, which is the transaction from the cursor’s source handle.
+    return m_source_handle.visit(
+        [](GC::Ref<IDBObjectStore> object_store) { return object_store->transaction(); },
+        [](GC::Ref<IDBIndex> index) { return index->transaction(); });
+}
+
+// https://w3c.github.io/IndexedDB/#cursor-source
+CursorSource IDBCursor::internal_source()
+{
+    // A cursor has a source, which is an index or an object store from the cursor’s source handle.
+    return m_source_handle.visit(
+        [](GC::Ref<IDBObjectStore> object_store) -> CursorSource { return object_store->store(); },
+        [](GC::Ref<IDBIndex> index) -> CursorSource { return index->index(); });
 }
 
 // https://w3c.github.io/IndexedDB/#dom-idbcursor-key
@@ -87,7 +103,7 @@ WebIDL::ExceptionOr<void> IDBCursor::continue_(JS::Value key)
 
     // 4. If this's got value flag is false, indicating that the cursor is being iterated or has iterated past its end, throw an "InvalidStateError" DOMException.
     if (!m_got_value)
-        return WebIDL::InvalidStateError::create(realm, "Cursor is not active while continuing"_string);
+        return WebIDL::InvalidStateError::create(realm, "Cursor is active or EOL while continuing"_string);
 
     // 5. If key is given, then:
     GC::Ptr<Key> key_value;
@@ -97,7 +113,7 @@ WebIDL::ExceptionOr<void> IDBCursor::continue_(JS::Value key)
 
         // 2. If r is invalid, throw a "DataError" DOMException.
         if (r->is_invalid())
-            return WebIDL::DataError::create(realm, "Key is invalid"_string);
+            return WebIDL::DataError::create(realm, r->value_as_string());
 
         // 3. Let key be r.
         key_value = r;
@@ -130,8 +146,8 @@ WebIDL::ExceptionOr<void> IDBCursor::continue_(JS::Value key)
         return WebIDL::ExceptionOr<JS::Value>(iterate_a_cursor(realm, *this, key_value));
     });
 
-    // 11. Run asynchronously execute a request with this's source, operation, and request.
-    asynchronously_execute_a_request(realm, GC::Ref(*this), operation, request);
+    // 11. Run asynchronously execute a request with this’s source handle, operation, and request.
+    asynchronously_execute_a_request(realm, source_handle(), operation, request);
     dbgln_if(IDB_DEBUG, "Executing request for cursor continue with uuid {}", request->uuid());
 
     return {};
@@ -140,7 +156,7 @@ WebIDL::ExceptionOr<void> IDBCursor::continue_(JS::Value key)
 // https://w3c.github.io/IndexedDB/#cursor-effective-object-store
 [[nodiscard]] GC::Ref<IDBObjectStore> IDBCursor::effective_object_store() const
 {
-    return m_source.visit(
+    return m_source_handle.visit(
         [&](GC::Ref<IDBObjectStore> store) {
             // If the source of a cursor is an object store, the effective object store of the cursor is that object store
             return store;
