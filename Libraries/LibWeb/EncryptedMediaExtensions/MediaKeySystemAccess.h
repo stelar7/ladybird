@@ -21,20 +21,20 @@ class MediaKeySystemAccess : public Bindings::PlatformObject {
 
 public:
     virtual ~MediaKeySystemAccess() override;
-    [[nodiscard]] static GC::Ref<MediaKeySystemAccess> create(JS::Realm&, WebIDL::DOMString, Bindings::MediaKeySystemConfiguration, RefPtr<KeySystem>);
+    [[nodiscard]] static GC::Ref<MediaKeySystemAccess> create(JS::Realm&, Utf16String, Bindings::MediaKeySystemConfiguration, NonnullOwnPtr<KeySystem>);
 
-    [[nodiscard]] WebIDL::DOMString key_system() const { return m_key_system; }
+    [[nodiscard]] Utf16String key_system() const { return m_key_system; }
     [[nodiscard]] Bindings::MediaKeySystemConfiguration get_configuration() const { return m_configuration; }
 
 protected:
-    explicit MediaKeySystemAccess(JS::Realm&, WebIDL::DOMString, Bindings::MediaKeySystemConfiguration, RefPtr<KeySystem>);
+    explicit MediaKeySystemAccess(JS::Realm&, Utf16String, Bindings::MediaKeySystemConfiguration, NonnullOwnPtr<KeySystem>);
     virtual void initialize(JS::Realm&) override;
 
 private:
-    WebIDL::DOMString m_key_system;
+    Utf16String m_key_system;
 
     Bindings::MediaKeySystemConfiguration m_configuration;
-    RefPtr<KeySystem> m_cdm_implementation;
+    NonnullOwnPtr<KeySystem> m_cdm_implementation;
 };
 
 }

@@ -15,20 +15,20 @@ namespace Web::Bindings {
 
 // https://w3c.github.io/encrypted-media/#dom-mediakeysystemmediacapability
 struct MediaKeySystemMediaCapability {
-    WebIDL::DOMString content_type;
-    Optional<WebIDL::DOMString> encryption_scheme;
-    WebIDL::DOMString robustness;
+    Utf16String content_type;
+    Optional<Utf16String> encryption_scheme;
+    Utf16String robustness;
 };
 
 // https://w3c.github.io/encrypted-media/#dom-mediakeysystemconfiguration
 struct MediaKeySystemConfiguration {
-    WebIDL::DOMString label;
-    Vector<WebIDL::DOMString> init_data_types;
+    Utf16String label;
+    Vector<Utf16String> init_data_types;
     Vector<MediaKeySystemMediaCapability> audio_capabilities;
     Vector<MediaKeySystemMediaCapability> video_capabilities;
-    Bindings::MediaKeysRequirement distinctive_identifier = Bindings::MediaKeysRequirement::Optional;
-    Bindings::MediaKeysRequirement persistent_state = Bindings::MediaKeysRequirement::Optional;
-    Optional<Vector<WebIDL::DOMString>> session_types;
+    Bindings::MediaKeysRequirement distinctive_identifier { Bindings::MediaKeysRequirement::Optional };
+    Bindings::MediaKeysRequirement persistent_state { Bindings::MediaKeysRequirement::Optional };
+    Optional<Vector<Utf16String>> session_types;
 };
 
 }

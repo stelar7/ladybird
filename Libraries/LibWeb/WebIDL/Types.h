@@ -51,8 +51,4 @@ using UnsignedLongLong = Infra::Unsigned64BitInteger;
 // double-precision 64-bit IEEE 754 floating point numbers. [IEEE-754]
 using Double = f64;
 
-// https://webidl.spec.whatwg.org/#idl-DOMString
-// The DOMString type corresponds to strings.
-using DOMString = Infra::String;
-
 }

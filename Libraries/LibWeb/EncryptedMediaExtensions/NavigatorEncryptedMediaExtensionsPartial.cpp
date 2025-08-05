@@ -14,7 +14,8 @@
 
 namespace Web::EncryptedMediaExtensions {
 
-WebIDL::ExceptionOr<GC::Ref<WebIDL::Promise>> NavigatorEncryptedMediaExtensionsPartial::request_media_key_system_access(WebIDL::DOMString key_system, Vector<Bindings::MediaKeySystemConfiguration> supported_configurations)
+// https://w3c.github.io/encrypted-media/#dom-navigator-requestmediakeysystemaccess
+WebIDL::ExceptionOr<GC::Ref<WebIDL::Promise>> NavigatorEncryptedMediaExtensionsPartial::request_media_key_system_access(Utf16String const& key_system, Span<Bindings::MediaKeySystemConfiguration> supported_configurations)
 {
     auto& navigator = as<HTML::Navigator>(*this);
     auto& realm = navigator.realm();
@@ -58,7 +59,7 @@ WebIDL::ExceptionOr<GC::Ref<WebIDL::Promise>> NavigatorEncryptedMediaExtensionsP
             // 1. Let candidate configuration be the value.
 
             // 2. Let supported configuration be the result of executing the Get Supported Configuration algorithm on implementation, candidate configuration, and origin.
-            auto supported_configuration = get_supported_configuration(implementation, candidate_configuration, origin);
+            auto supported_configuration = get_supported_configuration(*implementation, candidate_configuration, origin);
 
             // 3. If supported configuration is not NotSupported, run the following steps:
             if (supported_configuration.has_value()) {
@@ -66,7 +67,7 @@ WebIDL::ExceptionOr<GC::Ref<WebIDL::Promise>> NavigatorEncryptedMediaExtensionsP
                 // 1. Set the keySystem attribute to keySystem.
                 // 2. Let the configuration value be supported configuration.
                 // 3. Let the cdm implementation value be implementation.
-                auto access = MediaKeySystemAccess::create(realm, key_system, *supported_configuration->configuration, implementation);
+                auto access = MediaKeySystemAccess::create(realm, key_system, *supported_configuration->configuration, move(implementation));
 
                 // 2. Resolve promise with access and abort the parallel steps of this algorithm.
                 return WebIDL::resolve_promise(realm, promise, access);
